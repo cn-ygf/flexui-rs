@@ -1,0 +1,27 @@
+# flexui-rs 工作区（一期只验证 macOS）
+[workspace]
+resolver = "2"
+members = [
+    "crates/flexui-geometry",
+    "crates/flexui-gfx",
+    "crates/flexui-core",
+    "crates/flexui-xml",
+    "crates/flexui-macos",
+    "crates/flexui-windows",
+    "crates/flexui",
+    "crates/flexui-ffi",
+]
+
+# 统一依赖版本，子 crate 用 workspace = true 引用
+[workspace.dependencies]
+flexui-geometry = { path = "crates/flexui-geometry" }
+flexui-gfx = { path = "crates/flexui-gfx" }
+flexui-core = { path = "crates/flexui-core" }
+flexui-xml = { path = "crates/flexui-xml" }
+flexui-macos = { path = "crates/flexui-macos" }
+flexui-windows = { path = "crates/flexui-windows" }
+
+# objc2 生态：仅是 macOS 系统 API 的 Rust 绑定，非第三方渲染/窗口框架
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"

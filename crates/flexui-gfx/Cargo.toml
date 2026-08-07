@@ -1,0 +1,7 @@
+[package]
+name = "flexui-gfx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flexui-geometry = { workspace = true }

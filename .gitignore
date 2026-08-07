@@ -1,0 +1,72 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+logs/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+
+# Build outputs
+build/
+dist/
+out/
+obj/
+target/
+.xmake/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Android
+.gradle/
+local.properties
+captures/
+*.apk
+*.aab
+
+# Apple
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+# Per-user Xcode state anywhere (incl. SwiftPM .swiftpm/xcode/xcuserdata)
+xcuserdata/
+*.xcuserdatad/
+
+# Windows
+*.ilk
+*.pdb
+*.idb
+#*.exp
+#*.lib
+#*.dll
+#*.exe
+*.msi
+*.msix
+
+build-static/
+.cache/
+target/

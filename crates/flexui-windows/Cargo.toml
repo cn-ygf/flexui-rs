@@ -1,0 +1,22 @@
+[package]
+name = "flexui-windows"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flexui-geometry = { workspace = true }
+flexui-gfx = { workspace = true }
+flexui-core = { workspace = true }
+
+# windows-sys 是 Windows 系统 API 的 Rust 绑定（raw-dylib，无需导入库），
+# 仅在为 Windows 目标编译时引入；非 Windows 平台本 crate 编译为空。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_GdiPlus",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_System_LibraryLoader",
+] }
+

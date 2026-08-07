@@ -1,1 +1,1 @@
-# flexui-rs 一个rust跨平台UI框架
+# flexui-rs Cross-platform Rust UI framework

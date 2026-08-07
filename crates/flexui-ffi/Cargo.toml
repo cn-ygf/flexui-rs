@@ -1,0 +1,18 @@
+[package]
+name = "flexui-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# rlib 供本 crate 的示例/测试链接；cdylib/staticlib 供 C/其它语言使用。
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+flexui-core = { workspace = true }
+flexui-xml = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+flexui-macos = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+flexui-windows = { workspace = true }

@@ -1,0 +1,25 @@
+//! flexui-core：平台无关的 UI 核心（L3/L4）。
+//!
+//! 提供事件模型、控件状态机与分状态样式、控件树、Flex 布局、统一绘制管线、
+//! 事件分发。不含任何平台代码，可脱离窗口做单元测试。
+
+pub mod dispatch;
+pub mod event;
+pub mod layout;
+pub mod paint;
+pub mod style;
+pub mod widget;
+pub mod widgets;
+
+// 常用类型再导出，方便上层与后端使用。
+pub use dispatch::{hit_test, Dispatcher};
+pub use event::{Event, EventFlow, MouseButton};
+pub use layout::{layout_node, Axis};
+pub use paint::paint_tree;
+pub use style::{BaseState, StyleSet, StyleSpec, VisualState};
+pub use widget::{find_by_name, visit_all_mut, Base, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+pub use widgets::{Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, TabBox, VBox};
+
+// 几何/绘图类型透传，便于上层一次性引入。
+pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
+pub use flexui_gfx::{Canvas, Font, ImageSource, TextAlign};
