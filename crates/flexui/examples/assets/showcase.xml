@@ -49,7 +49,7 @@
     <VBox normal-bgcolor="#3C3054" corner-radius="10" padding="14" spacing="10">
       <Label text="第二页 · VBox + Image + Edit" normal-fgcolor="#FFFFFF"/>
       <HBox spacing="12" height="52">
-        <Image src="$ASSETS/logo.bmp" width="48" height="48"/>
+        <Image src="logo.bmp" width="48" height="48"/>
         <Edit name="edit1" text="在这里输入…" flex="1" height="32"
               normal-bgcolor="#20242C" normal-fgcolor="#FFFFFF"
               border-width="1" normal-bordercolor="#4A5064" corner-radius="6"/>

@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, Insets,
-    Justify, Label, Node, Panel, Radio, Sizing, StyleSet, StyleSpec, TabBox, TextAlign, VBox,
-    VisualState, WidgetId,
+    Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image,
+    ImageSource, Insets, Justify, Label, Node, Panel, Radio, Sizing, StyleSet, StyleSpec, TabBox,
+    TextAlign, VBox, VisualState, WidgetId,
 };
+use flexui_resource::ResourceManager;
 
 use crate::parser::{self, Element};
 
@@ -67,16 +68,47 @@ impl From<parser::ParseError> for LoadError {
     }
 }
 
-/// 解析并构建控件树。
+/// 解析并构建控件树（图片按文件路径处理）。
 pub fn load_str(xml: &str, ctx: &Context) -> Result<LoadResult, LoadError> {
     let el = parser::parse(xml)?;
     let mut bindings = Vec::new();
-    let root = build(&el, ctx, &mut bindings)?
+    let root = build(&el, ctx, None, &mut bindings)?
         .ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
     Ok(LoadResult { root, bindings })
 }
 
-fn build(el: &Element, ctx: &Context, bindings: &mut Vec<(u32, WidgetId)>) -> Result<Option<Node>, LoadError> {
+/// 经资源系统加载 skin：XML 文本与图片（src/bgimage/fgimage）都走 ResourceManager（RM5）。
+pub fn load_res(
+    res: &ResourceManager,
+    path: &str,
+    ctx: &Context,
+) -> Result<LoadResult, LoadError> {
+    let xml = res
+        .read_string(path)
+        .map_err(|e| LoadError(format!("读取 skin 失败: {e}")))?;
+    let el = parser::parse(&xml)?;
+    let mut bindings = Vec::new();
+    let root = build(&el, ctx, Some(res), &mut bindings)?
+        .ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
+    Ok(LoadResult { root, bindings })
+}
+
+/// 解析图片来源：有资源管理器则读成字节（支持 zip/内嵌），否则按文件路径。
+fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
+    if let Some(rm) = res {
+        if let Ok(bytes) = rm.read(path) {
+            return ImageSource::bytes(bytes);
+        }
+    }
+    ImageSource::path(path)
+}
+
+fn build(
+    el: &Element,
+    ctx: &Context,
+    res: Option<&ResourceManager>,
+    bindings: &mut Vec<(u32, WidgetId)>,
+) -> Result<Option<Node>, LoadError> {
     // v-if：为假则整棵子树不生成（加载期静态求值）。
     if let Some(cond) = el.attr("v-if") {
         if !expr::eval(cond, ctx) {
@@ -85,10 +117,10 @@ fn build(el: &Element, ctx: &Context, bindings: &mut Vec<(u32, WidgetId)>) -> Re
     }
 
     let tag = el.tag.to_lowercase();
-    let mut node = make_node(&tag, el)?;
+    let mut node = make_node(&tag, el, res)?;
 
     // 应用属性（含分状态样式）。
-    apply_attrs(node.base_mut(), &tag, &el.attrs);
+    apply_attrs(node.base_mut(), &tag, &el.attrs, res);
 
     // TabBox 的 tabbar 绑定。
     if tag == "tabbox" {
@@ -99,7 +131,7 @@ fn build(el: &Element, ctx: &Context, bindings: &mut Vec<(u32, WidgetId)>) -> Re
 
     // 递归子节点。
     for child in &el.children {
-        if let Some(c) = build(child, ctx, bindings)? {
+        if let Some(c) = build(child, ctx, res, bindings)? {
             node.base_mut().children.push(c);
         }
     }
@@ -108,7 +140,7 @@ fn build(el: &Element, ctx: &Context, bindings: &mut Vec<(u32, WidgetId)>) -> Re
 }
 
 /// 按标签名构造控件。
-fn make_node(tag: &str, el: &Element) -> Result<Node, LoadError> {
+fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<Node, LoadError> {
     let node: Node = match tag {
         "vbox" => Box::new(VBox::new()),
         "hbox" => Box::new(HBox::new()),
@@ -119,14 +151,14 @@ fn make_node(tag: &str, el: &Element) -> Result<Node, LoadError> {
         "radio" => Box::new(Radio::new("")),
         "tabbox" => Box::new(TabBox::new()),
         "edit" => Box::new(Edit::new()),
-        "image" => Box::new(Image::path(el.attr("src").unwrap_or(""))),
+        "image" => Box::new(Image::new(resolve_image(res, el.attr("src").unwrap_or("")))),
         other => return Err(LoadError(format!("未知标签 <{other}>"))),
     };
     Ok(node)
 }
 
 /// 把属性应用到 Base（通用属性 + 分状态样式）。
-fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)]) {
+fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Option<&ResourceManager>) {
     // 分状态样式槽临时表。
     let mut slots: HashMap<(BaseState, bool), StyleSpec> = HashMap::new();
 
@@ -180,7 +212,7 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)]) {
                 }
             }
             // 其余按分状态样式属性解析。
-            _ => apply_style_attr(&mut slots, &key, v),
+            _ => apply_style_attr(&mut slots, &key, v, res),
         }
     }
 
@@ -195,7 +227,12 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)]) {
 }
 
 /// 解析形如 `[state-][focus-]prop` 的样式属性并写入对应槽。
-fn apply_style_attr(slots: &mut HashMap<(BaseState, bool), StyleSpec>, key: &str, val: &str) {
+fn apply_style_attr(
+    slots: &mut HashMap<(BaseState, bool), StyleSpec>,
+    key: &str,
+    val: &str,
+    res: Option<&ResourceManager>,
+) {
     let parts: Vec<&str> = key.split('-').collect();
     let mut idx = 0;
     let mut state = BaseState::Normal;
@@ -221,8 +258,8 @@ fn apply_style_attr(slots: &mut HashMap<(BaseState, bool), StyleSpec>, key: &str
         "bordercolor" => spec.border_color = parse_color(val),
         "borderwidth" => spec.border_width = val.parse().ok(),
         "cornerradius" => spec.corner_radius = val.parse().ok().map(Corners::all),
-        "bgimage" => spec.bg_image = Some(flexui_core::ImageSource::path(val)),
-        "fgimage" => spec.fg_image = Some(flexui_core::ImageSource::path(val)),
+        "bgimage" => spec.bg_image = Some(resolve_image(res, val)),
+        "fgimage" => spec.fg_image = Some(resolve_image(res, val)),
         "textalign" => spec.text_align = parse_align(val),
         _ => {} // 未知属性忽略
     }

@@ -5,16 +5,21 @@
 
 use flexui_geometry::{Color, Corners, Point, Rect, Size};
 
-/// 图片来源：一期支持文件路径；后续可扩展内存字节/资源 id。
+/// 图片来源：磁盘文件路径 或 内存字节（经资源系统解析得到，支持 zip/内嵌）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImageSource {
     /// 磁盘文件路径。
     Path(String),
+    /// 内存字节（已从资源解析出，后端从字节解码）。
+    Bytes(std::sync::Arc<Vec<u8>>),
 }
 
 impl ImageSource {
     pub fn path(p: impl Into<String>) -> Self {
         ImageSource::Path(p.into())
+    }
+    pub fn bytes(b: impl Into<Vec<u8>>) -> Self {
+        ImageSource::Bytes(std::sync::Arc::new(b.into()))
     }
 }
 

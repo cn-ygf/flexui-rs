@@ -14,7 +14,7 @@ use objc2_app_kit::{
     NSBezierPath, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
     NSGraphicsContext, NSImage, NSStringDrawing,
 };
-use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSData, NSDictionary, NSPoint, NSRect, NSSize, NSString};
 
 /// macOS 画布：无内部状态，绘制落到 drawRect 当前上下文。
 pub struct CgCanvas;
@@ -143,10 +143,17 @@ impl Canvas for CgCanvas {
     }
 
     fn draw_image(&mut self, source: &ImageSource, rect: Rect) {
-        let ImageSource::Path(p) = source;
-        let ns_path = NSString::from_str(p);
-        // 加载失败（文件不存在）时静默跳过，避免影响其它绘制。
-        if let Some(img) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
+        // 加载失败时静默跳过，避免影响其它绘制。
+        let img = match source {
+            ImageSource::Path(p) => {
+                NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(p))
+            }
+            ImageSource::Bytes(b) => {
+                let data = NSData::with_bytes(b);
+                NSImage::initWithData(NSImage::alloc(), &data)
+            }
+        };
+        if let Some(img) = img {
             img.drawInRect(to_nsrect(rect));
         }
     }

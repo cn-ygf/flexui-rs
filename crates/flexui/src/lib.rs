@@ -7,7 +7,12 @@
 pub use flexui_core::*;
 
 // XML 布局加载。
-pub use flexui_xml::{load_str as load_xml_str, Context, LoadError, LoadResult};
+pub use flexui_xml::{load_res, load_str as load_xml_str, Context, LoadError, LoadResult};
+
+// 资源系统（RM1-5）。
+pub use flexui_resource::{
+    DirProvider, ResError, ResourceManager, ResourceProvider, ZipProvider,
+};
 
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
 #[cfg(target_os = "macos")]
@@ -15,10 +20,12 @@ use flexui_macos::run as backend_run;
 #[cfg(target_os = "windows")]
 use flexui_windows::run as backend_run;
 
-/// 皮肤来源：XML 描述或代码构建的控件树。
+/// 皮肤来源：XML 字符串、资源逻辑路径、或代码构建的控件树。
 pub enum Skin {
-    /// XML 字符串（驱动加载并 build，含 tabbar 绑定）。
+    /// XML 字符串（图片按文件路径解析）。
     Xml(String),
+    /// 资源逻辑路径（XML 与图片都经 `WindowImpl::resources()` 的 ResourceManager 解析，支持 zip/内嵌）。
+    Res(String),
     /// 直接给定控件树（代码构建）。
     Tree(Node),
 }
@@ -26,6 +33,9 @@ pub enum Skin {
 impl Skin {
     pub fn xml(s: impl Into<String>) -> Self {
         Skin::Xml(s.into())
+    }
+    pub fn res(path: impl Into<String>) -> Self {
+        Skin::Res(path.into())
     }
     pub fn tree(node: Node) -> Self {
         Skin::Tree(node)
@@ -38,8 +48,13 @@ impl Skin {
 pub trait WindowImpl: 'static {
     /// 窗口配置（标题/尺寸/resizable/标题栏）。
     fn config(&self) -> WindowConfig;
-    /// 界面来源（XML 或控件树）。
+    /// 界面来源（XML / 资源路径 / 控件树）。
     fn skin(&self) -> Skin;
+
+    /// 资源管理器（用于 Skin::Res 及图片解析）。默认空；可挂 Dir/Zip/内嵌 provider。
+    fn resources(&self) -> ResourceManager {
+        ResourceManager::new()
+    }
 
     /// 窗口与控件创建完成（≈ InitWindow）：绑事件、预设文本等。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
@@ -98,13 +113,21 @@ impl<W: WindowImpl> Window<W> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn run(self) {
         let config = self.imp.config();
+        let ctx = Context::new();
         let (root, bindings) = match self.imp.skin() {
-            Skin::Xml(xml) => {
-                let ctx = Context::new();
-                match load_xml_str(&xml, &ctx) {
+            Skin::Xml(xml) => match load_xml_str(&xml, &ctx) {
+                Ok(r) => (r.root, r.bindings),
+                Err(e) => {
+                    eprintln!("[flexui] 皮肤 XML 加载失败: {e}");
+                    return;
+                }
+            },
+            Skin::Res(path) => {
+                let res = self.imp.resources();
+                match load_res(&res, &path, &ctx) {
                     Ok(r) => (r.root, r.bindings),
                     Err(e) => {
-                        eprintln!("[flexui] 皮肤 XML 加载失败: {e}");
+                        eprintln!("[flexui] 皮肤资源加载失败: {e}");
                         return;
                     }
                 }

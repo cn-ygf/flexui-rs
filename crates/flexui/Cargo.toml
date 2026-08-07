@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 flexui-core = { workspace = true }
 flexui-xml = { workspace = true }
+flexui-resource = { workspace = true }
 
 # 按平台选择后端（编译期二选一）。
 [target.'cfg(target_os = "macos")'.dependencies]

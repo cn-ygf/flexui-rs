@@ -3,6 +3,7 @@
 resolver = "2"
 members = [
     "crates/flexui-geometry",
+    "crates/flexui-resource",
     "crates/flexui-gfx",
     "crates/flexui-core",
     "crates/flexui-xml",
@@ -16,6 +17,7 @@ members = [
 [workspace.dependencies]
 flexui-geometry = { path = "crates/flexui-geometry" }
 flexui-gfx = { path = "crates/flexui-gfx" }
+flexui-resource = { path = "crates/flexui-resource" }
 flexui-core = { path = "crates/flexui-core" }
 flexui-xml = { path = "crates/flexui-xml" }
 flexui-macos = { path = "crates/flexui-macos" }

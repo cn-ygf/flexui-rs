@@ -4,5 +4,5 @@
 mod build;
 mod parser;
 
-pub use build::{load_str, Context, LoadError, LoadResult};
+pub use build::{load_res, load_str, Context, LoadError, LoadResult};
 pub use parser::{parse, Element, ParseError};

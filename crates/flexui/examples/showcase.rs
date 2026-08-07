@@ -4,9 +4,7 @@
 //! 用法：定义 `MainWindow` 实现 `WindowImpl`（≈ 继承 WindowImplBase），重写 config/skin
 //! 与 on_click（≈ Notify）；`Window::new(MainWindow{..}).center().run()`（≈ Window）。
 
-use flexui::{Skin, Window, WindowConfig, WindowCtx, WindowImpl};
-
-const UI: &str = include_str!("assets/showcase.xml");
+use flexui::{DirProvider, ResourceManager, Skin, Window, WindowConfig, WindowCtx, WindowImpl};
 
 /// 主窗口：持有自己的状态（点击计数、主按钮启用态），重写窗口钩子。
 struct MainWindow {
@@ -20,9 +18,16 @@ impl WindowImpl for MainWindow {
     }
 
     fn skin(&self) -> Skin {
-        // $ASSETS 占位替换为资源目录（资源系统落地前的临时做法）。
+        // 经资源系统加载：XML 与图片(logo.bmp)都走下面的 ResourceManager（逻辑路径）。
+        Skin::res("showcase.xml")
+    }
+
+    fn resources(&self) -> ResourceManager {
+        // 挂目录 provider（RM1）；也可换成带密码 zip / 内嵌 zip（RM2/3）。
         let assets = format!("{}/examples/assets", env!("CARGO_MANIFEST_DIR"));
-        Skin::xml(UI.replace("$ASSETS", &assets))
+        let mut rm = ResourceManager::new();
+        rm.mount(DirProvider::new(assets));
+        rm
     }
 
     fn on_init(&mut self, ctx: &mut WindowCtx) {

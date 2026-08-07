@@ -50,6 +50,9 @@ fn ri(v: f32) -> i32 {
     v.round() as i32
 }
 
+/// 内嵌图片落临时文件的唯一名计数。
+static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// UTF-8 → 以 NUL 结尾的 UTF-16。
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -84,6 +87,24 @@ impl GdiCanvas {
         gp::GdipAddPathArc(path, x, y + h - bl * 2.0, bl * 2.0, bl * 2.0, 90.0, 90.0);
         gp::GdipClosePathFigure(path);
         path
+    }
+
+    /// 从文件路径加载并绘制图片到 rect。
+    unsafe fn draw_image_file(&self, path: &str, rect: Rect) {
+        let wpath = wide(path);
+        let mut img: *mut gp::GpImage = std::ptr::null_mut();
+        // 加载失败（文件不存在/格式不支持）时静默跳过。
+        if gp::GdipLoadImageFromFile(wpath.as_ptr(), &mut img) == 0 && !img.is_null() {
+            gp::GdipDrawImageRectI(
+                self.g,
+                img,
+                ri(rect.left()),
+                ri(rect.top()),
+                ri(rect.size.width),
+                ri(rect.size.height),
+            );
+            gp::GdipDisposeImage(img);
+        }
     }
 
     /// 用给定字族名/系统字体创建字体；返回 (font, family)，调用方负责释放。
@@ -236,21 +257,24 @@ impl Canvas for GdiCanvas {
     }
 
     fn draw_image(&mut self, source: &ImageSource, rect: Rect) {
-        let ImageSource::Path(p) = source;
-        unsafe {
-            let wpath = wide(p);
-            let mut img: *mut gp::GpImage = std::ptr::null_mut();
-            // 加载失败（文件不存在/格式不支持）时静默跳过，不影响其它绘制。
-            if gp::GdipLoadImageFromFile(wpath.as_ptr(), &mut img) == 0 && !img.is_null() {
-                gp::GdipDrawImageRectI(
-                    self.g,
-                    img,
-                    ri(rect.left()),
-                    ri(rect.top()),
-                    ri(rect.size.width),
-                    ri(rect.size.height),
-                );
-                gp::GdipDisposeImage(img);
+        match source {
+            ImageSource::Path(p) => unsafe { self.draw_image_file(p, rect) },
+            ImageSource::Bytes(b) => {
+                // GDI+ 从内存需 IStream，成本高；这里落临时文件再加载（简单可靠）。
+                // 注：每次绘制解码，后续可加 LRU 解码缓存优化。
+                use std::io::Write;
+                let n = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut tmp = std::env::temp_dir();
+                tmp.push(format!("flexui_img_{}_{}.dat", std::process::id(), n));
+                if std::fs::File::create(&tmp)
+                    .and_then(|mut f| f.write_all(b))
+                    .is_ok()
+                {
+                    if let Some(s) = tmp.to_str() {
+                        unsafe { self.draw_image_file(s, rect) };
+                    }
+                    let _ = std::fs::remove_file(&tmp);
+                }
             }
         }
     }
