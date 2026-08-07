@@ -7,9 +7,10 @@
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSView, NSWindow};
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
+use objc2_app_kit::{NSEvent, NSView, NSWindow, NSWindowDelegate};
+use objc2_foundation::{MainThreadMarker, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use flexui_core::{
     layout_node, paint_tree, Dispatcher, Event, MouseButton, Node, Rect, Size, WindowCtx,
@@ -108,6 +109,16 @@ define_class!(
             true
         }
     }
+
+    // FlexView 同时充当窗口委托，处理关闭请求（on_close）。
+    unsafe impl NSObjectProtocol for FlexView {}
+
+    unsafe impl NSWindowDelegate for FlexView {
+        #[unsafe(method(windowShouldClose:))]
+        fn window_should_close(&self, _sender: &AnyObject) -> bool {
+            self.fire_close()
+        }
+    }
 );
 
 impl FlexView {
@@ -123,6 +134,20 @@ impl FlexView {
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
         unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+
+    /// 关闭请求 → 窗口委托 on_close，返回是否允许关闭。
+    pub fn fire_close(&self) -> bool {
+        let window = self.window();
+        let mut st = self.ivars().state.borrow_mut();
+        let AppState { root, delegate, .. } = &mut *st;
+        if let Some(win) = window {
+            let mut handle = MacWindowHandle { window: win };
+            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            delegate.on_close(&mut ctx)
+        } else {
+            true
+        }
     }
 
     /// 窗口创建后触发 on_init（≈ duilib InitWindow）。

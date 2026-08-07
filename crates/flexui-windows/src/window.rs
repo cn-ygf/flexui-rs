@@ -6,11 +6,13 @@
 use std::ptr::{null, null_mut};
 
 use flexui_core::{
-    layout_node, paint_tree, Color, Dispatcher, Event, MouseButton, Node, Rect, WindowConfig,
-    WindowCtx, WindowDelegate, WindowHandle,
+    hit_test, layout_node, paint_tree, Color, Dispatcher, Event, MouseButton, Node, Point, Rect,
+    TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, HDC, PAINTSTRUCT};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::{
+    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, HDC, PAINTSTRUCT,
+};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
@@ -21,11 +23,16 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use crate::canvas::GdiCanvas;
 use crate::gdiplus::OffscreenBitmap;
 
+/// 顶部可拖动条高度（逻辑像素）。
+const DRAG_STRIP: f32 = 40.0;
+
 /// 窗口内部状态：控件树 + 分发器 + 窗口委托（通过窗口 USERDATA 关联到 HWND）。
 struct AppState {
     root: Node,
     disp: Dispatcher,
     delegate: Box<dyn WindowDelegate>,
+    /// 无边框（自绘标题栏）模式：启用自定义拖动/命中。
+    frameless: bool,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -81,8 +88,14 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         };
         RegisterClassW(&wc);
 
-        // 窗口样式；不可改变大小时去掉可缩放边与最大化按钮。
-        let mut style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+        // 窗口样式。无边框模式用 WS_POPUP 去系统标题栏；保留 WS_THICKFRAME/最大化
+        // 以维持可缩放与系统 Aero Snap（拖到屏幕边缘贴靠）。
+        let frameless = config.titlebar != TitlebarMode::System;
+        let mut style = if frameless {
+            WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+        } else {
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE
+        };
         if !config.resizable {
             style &= !(WS_THICKFRAME | WS_MAXIMIZEBOX);
         }
@@ -108,7 +121,12 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         }
 
         // 关联 AppState 到窗口。
-        let state = Box::into_raw(Box::new(AppState { root, disp, delegate }));
+        let state = Box::into_raw(Box::new(AppState {
+            root,
+            disp,
+            delegate,
+            frameless,
+        }));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
 
         ShowWindow(hwnd, SW_SHOW);
@@ -228,6 +246,45 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 背景擦除由我们的双缓冲全覆盖，拦截以消除闪烁。
         WM_ERASEBKGND => 1,
+        // 关闭请求 → 窗口委托 on_close；返回 false 阻止关闭。
+        WM_CLOSE => {
+            let allow = if state.is_null() {
+                true
+            } else {
+                let st = &mut *state;
+                let mut handle = WinWindowHandle { hwnd };
+                let root = &mut st.root;
+                let delegate = &mut st.delegate;
+                let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+                delegate.on_close(&mut ctx)
+            };
+            if allow {
+                DestroyWindow(hwnd);
+            }
+            0
+        }
+        // 无边框：顶部空白条可拖动（有实体控件处放行给控件），实现自绘标题栏拖动 + Aero Snap。
+        WM_NCHITTEST if !state.is_null() && (*state).frameless => {
+            let default = DefWindowProcW(hwnd, msg, wparam, lparam);
+            if default != HTCLIENT as isize {
+                return default; // 边缘缩放命中交给系统（保留 Snap/缩放）
+            }
+            // 客户区内：换算成逻辑坐标，判断是否在顶部拖动条且非实体控件之上。
+            let mut pt = POINT {
+                x: (lparam & 0xFFFF) as u16 as i16 as i32,
+                y: ((lparam >> 16) & 0xFFFF) as u16 as i16 as i32,
+            };
+            ScreenToClient(hwnd, &mut pt);
+            let dpi = GetDpiForWindow(hwnd);
+            let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+            let lp = Point::new(pt.x as f32 / scale, pt.y as f32 / scale);
+            let st = &*state;
+            if lp.y < DRAG_STRIP && hit_test(st.root.as_ref(), lp).is_none() {
+                HTCAPTION as isize
+            } else {
+                HTCLIENT as isize
+            }
+        }
         // 跨不同 DPI 显示器移动：按系统建议的新矩形调整窗口，再重绘。
         WM_DPICHANGED => {
             let prc = lparam as *const RECT;
