@@ -5,7 +5,10 @@
 
 use std::ptr::{null, null_mut};
 
-use flexui_core::{layout_node, paint_tree, Color, Dispatcher, Event, MouseButton, Node, Rect};
+use flexui_core::{
+    layout_node, paint_tree, Color, Dispatcher, Event, MouseButton, Node, Rect, WindowConfig,
+    WindowCtx, WindowDelegate, WindowHandle,
+};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, HDC, PAINTSTRUCT};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
@@ -18,27 +21,34 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use crate::canvas::GdiCanvas;
 use crate::gdiplus::OffscreenBitmap;
 
-/// 窗口配置。
-pub struct WindowConfig {
-    pub title: String,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Default for WindowConfig {
-    fn default() -> Self {
-        Self {
-            title: "flexui-rs".to_string(),
-            width: 640.0,
-            height: 440.0,
-        }
-    }
-}
-
-/// 窗口内部状态：控件树 + 分发器（通过窗口 USERDATA 关联到 HWND）。
+/// 窗口内部状态：控件树 + 分发器 + 窗口委托（通过窗口 USERDATA 关联到 HWND）。
 struct AppState {
     root: Node,
     disp: Dispatcher,
+    delegate: Box<dyn WindowDelegate>,
+}
+
+/// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
+struct WinWindowHandle {
+    hwnd: HWND,
+}
+
+impl WindowHandle for WinWindowHandle {
+    fn set_title(&mut self, title: &str) {
+        unsafe { SetWindowTextW(self.hwnd, wide(title).as_ptr()) };
+    }
+    fn close(&mut self) {
+        unsafe { PostMessageW(self.hwnd, WM_CLOSE, 0, 0) };
+    }
+    fn minimize(&mut self) {
+        unsafe { ShowWindow(self.hwnd, SW_MINIMIZE) };
+    }
+    fn maximize(&mut self) {
+        unsafe { ShowWindow(self.hwnd, SW_MAXIMIZE) };
+    }
+    fn restore(&mut self) {
+        unsafe { ShowWindow(self.hwnd, SW_RESTORE) };
+    }
 }
 
 /// UTF-8 → NUL 结尾 UTF-16。
@@ -47,7 +57,9 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 /// 启动应用：建窗 + 进入消息循环（阻塞直到窗口关闭）。
-pub fn run(config: WindowConfig, root: Node, disp: Dispatcher) {
+///
+/// 由 facade 的 `Window` 驱动调用；`delegate` 承载 on_init/on_activate 等窗口钩子。
+pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn WindowDelegate>) {
     unsafe {
         // 开启 Per-Monitor V2 DPI 感知（清单已声明；此调用作为兜底，二者一致）。
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -69,12 +81,18 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher) {
         };
         RegisterClassW(&wc);
 
+        // 窗口样式；不可改变大小时去掉可缩放边与最大化按钮。
+        let mut style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+        if !config.resizable {
+            style &= !(WS_THICKFRAME | WS_MAXIMIZEBOX);
+        }
+
         let title = wide(&config.title);
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             config.width as i32,
@@ -90,10 +108,19 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher) {
         }
 
         // 关联 AppState 到窗口。
-        let state = Box::into_raw(Box::new(AppState { root, disp }));
+        let state = Box::into_raw(Box::new(AppState { root, disp, delegate }));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
 
         ShowWindow(hwnd, SW_SHOW);
+
+        // 窗口就绪后触发 on_init（≈ InitWindow）。
+        {
+            let st = &mut *state;
+            let mut handle = WinWindowHandle { hwnd };
+            let mut ctx = WindowCtx::new(st.root.as_mut(), &mut handle);
+            st.delegate.on_init(&mut ctx);
+            InvalidateRect(hwnd, null(), 0);
+        }
 
         // 消息循环。
         let mut msg: MSG = std::mem::zeroed();
@@ -116,14 +143,26 @@ fn mouse_pos(lparam: LPARAM) -> flexui_core::Point {
     flexui_core::Point::new(x, y)
 }
 
-/// 分发事件并按需触发重绘。
+/// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需重绘。
 unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     if state.is_null() {
         return;
     }
     let st = &mut *state;
     st.disp.handle(st.root.as_mut(), &ev);
-    if st.disp.take_redraw() {
+    let need = st.disp.take_redraw();
+    let acts = st.disp.take_activations();
+
+    if !acts.is_empty() {
+        let mut handle = WinWindowHandle { hwnd };
+        let root = &mut st.root;
+        let delegate = &mut st.delegate;
+        let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+        for name in &acts {
+            delegate.on_activate(name, &mut ctx);
+        }
+    }
+    if need || !acts.is_empty() {
         InvalidateRect(hwnd, null(), 0);
     }
 }

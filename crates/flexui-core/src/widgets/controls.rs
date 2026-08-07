@@ -9,7 +9,7 @@ use crate::event::{Event, EventFlow};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetRole};
+use crate::widget::{Base, Clickable, TextControl, Widget, WidgetRole};
 
 // ————————————————————————————————————————————————— Label
 /// 文本标签（不可交互）。
@@ -279,6 +279,16 @@ impl Widget for Edit {
 }
 
 common_builders!(Edit);
+
+// —— 能力 trait 归类（继承视图）——
+impl TextControl for Label {}
+impl TextControl for Button {}
+impl Clickable for Button {}
+impl TextControl for Edit {}
+impl TextControl for CheckBox {}
+impl Clickable for CheckBox {}
+impl TextControl for Radio {}
+impl Clickable for Radio {}
 
 /// 公共：绘制左侧指示器（方框/圆点）+ 右侧文字。`circular=true` 画单选圆点。
 fn paint_indicator_and_text(base: &Base, cv: &mut dyn Canvas, style: &StyleSpec, circular: bool) {

@@ -10,8 +10,8 @@ use flexui_core::{
     BaseState, Button, Color, Dispatcher, HBox, Label, Node, Panel, Radio, StyleSet, StyleSpec,
     TabBox, VBox, Widget,
 };
-use flexui_core::{Corners, HitPolicy, TextAlign};
-use flexui_macos::{run, WindowConfig};
+use flexui_core::{Corners, HitPolicy, NoopDelegate, TextAlign, WindowConfig};
+use flexui_macos::run;
 
 /// 生成一套按钮的分状态样式：normal/hot/pushed/disabled 各不同底色。
 fn button_style() -> StyleSet {
@@ -123,13 +123,11 @@ fn page(text: &str, bg: Color) -> Panel {
 
 fn main() {
     let (root, disp) = build_ui();
+    // 低层后端示例：直接调用 run，传空窗口委托（上层 OO 用法见 flexui/examples/showcase）。
     run(
-        WindowConfig {
-            title: "flexui-rs 演示 (macOS)".to_string(),
-            width: 640.0,
-            height: 460.0,
-        },
+        WindowConfig::new("flexui-rs 演示 (macOS)", 640.0, 460.0),
         root,
         disp,
+        Box::new(NoopDelegate),
     );
 }

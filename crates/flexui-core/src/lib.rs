@@ -10,6 +10,7 @@ pub mod paint;
 pub mod style;
 pub mod widget;
 pub mod widgets;
+pub mod window;
 
 // 常用类型再导出，方便上层与后端使用。
 pub use dispatch::{hit_test, Dispatcher, EventCtx};
@@ -18,8 +19,11 @@ pub use layout::{layout_node, Axis};
 pub use paint::paint_tree;
 pub use style::{BaseState, StyleSet, StyleSpec, VisualState};
 pub use widget::{
-    find_by_name, find_mut_by_name, visit_all_mut, Base, HitPolicy, Node, Widget, WidgetId,
-    WidgetRole,
+    find_by_name, find_mut_by_name, visit_all_mut, Base, Clickable, Container, HitPolicy, Node,
+    TextControl, Widget, WidgetId, WidgetRole,
+};
+pub use window::{
+    NoopDelegate, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
 pub use widgets::{Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, TabBox, VBox};
 

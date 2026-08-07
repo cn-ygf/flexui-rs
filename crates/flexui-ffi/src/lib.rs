@@ -116,13 +116,10 @@ pub extern "C" fn flex_run_xml(
             disp.bind_tab(group, tabbox);
         }
         backend::run(
-            backend::WindowConfig {
-                title: title.to_string(),
-                width: width as f32,
-                height: height as f32,
-            },
+            flexui_core::WindowConfig::new(title, width as f32, height as f32),
             root,
             disp,
+            Box::new(flexui_core::NoopDelegate),
         );
         0
     }));

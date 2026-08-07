@@ -19,7 +19,7 @@ pub struct EventCtx<'a> {
 }
 
 impl<'a> EventCtx<'a> {
-    fn new(root: &'a mut dyn Widget) -> Self {
+    pub(crate) fn new(root: &'a mut dyn Widget) -> Self {
         Self { root }
     }
 
@@ -66,6 +66,8 @@ pub struct Dispatcher {
     focus: Option<WidgetId>,
     needs_redraw: bool,
     bindings: Vec<TabBinding>,
+    /// 本轮被激活（点击）的具名控件，供窗口层统一 on_activate 通知（≈ duilib Notify）。
+    activated: Vec<String>,
 }
 
 impl Dispatcher {
@@ -76,7 +78,13 @@ impl Dispatcher {
             focus: None,
             needs_redraw: false,
             bindings: Vec::new(),
+            activated: Vec::new(),
         }
+    }
+
+    /// 取走本轮被激活的具名控件（窗口驱动据此调 on_activate）。
+    pub fn take_activations(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.activated)
     }
 
     /// 注册一个「Radio 组 → TabBox」绑定。
@@ -187,6 +195,7 @@ impl Dispatcher {
         // 1. 选择态变化 + 采集信息（此时不触发回调）。
         let mut info: Option<(WidgetRole, Option<u32>, Option<usize>)> = None;
         let mut enabled = false;
+        let mut activated_name: Option<String> = None;
         visit_mut(root, id, &mut |w| {
             let b = w.base_mut();
             if !b.enabled {
@@ -199,9 +208,14 @@ impl Dispatcher {
                 _ => {}
             }
             info = Some((b.role, b.group, b.tab_index));
+            activated_name = b.name.clone();
         });
         if !enabled {
             return;
+        }
+        // 记录具名激活控件，供窗口层 on_activate 统一通知。
+        if let Some(name) = activated_name {
+            self.activated.push(name);
         }
 
         // 2. Radio：同组互斥 + tabbar 联动。

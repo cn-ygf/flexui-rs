@@ -13,7 +13,7 @@ mod window;
 
 pub use canvas::GdiCanvas;
 pub use gdiplus::{Gdiplus, OffscreenBitmap};
-pub use window::{run, WindowConfig};
+pub use window::run;
 
 use flexui_core::{layout_node, paint_tree, Rect, Widget};
 

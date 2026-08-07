@@ -174,6 +174,45 @@ pub trait Widget {
     }
 }
 
+// —— 能力 trait：以 trait 约束表达「类型层级/继承视图」（组合优于继承的 Rust 表达）——
+//
+// 对照 duilib 的模板继承链 Label→Button→CheckBox→Radio，这里用能力 trait 表示：
+//   Widget（基类，人人都实现）
+//     ├─ TextControl  有文本：Label / Button / Edit / CheckBox / Radio
+//     ├─ Clickable    可点击：Button / CheckBox / Radio
+//     └─ Container     容器：Panel(Box) / VBox / HBox / TabBox
+
+/// 有文本内容的控件。
+pub trait TextControl: Widget {
+    fn text(&self) -> &str {
+        &self.base().text
+    }
+    fn set_text(&mut self, text: impl Into<String>)
+    where
+        Self: Sized,
+    {
+        self.base_mut().text = text.into();
+    }
+}
+
+/// 可点击控件。
+pub trait Clickable: Widget {}
+
+/// 可容纳子控件的容器。
+pub trait Container: Widget {
+    /// 追加一个已装箱子控件。
+    fn add(&mut self, child: Node)
+    where
+        Self: Sized,
+    {
+        self.base_mut().children.push(child);
+    }
+    /// 子控件数量。
+    fn child_count(&self) -> usize {
+        self.base().children.len()
+    }
+}
+
 /// 前序遍历整棵控件树并对每个节点执行 f（供上层/FFI 批量配置控件用）。
 pub fn visit_all_mut(node: &mut dyn Widget, f: &mut dyn FnMut(&mut dyn Widget)) {
     f(node);

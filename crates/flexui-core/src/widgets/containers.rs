@@ -5,7 +5,7 @@ use flexui_gfx::Canvas;
 
 use crate::common_builders;
 use crate::layout::{self, Axis};
-use crate::widget::{Base, Node, Widget, WidgetRole};
+use crate::widget::{Base, Container, Node, Widget, WidgetRole};
 
 /// 通用容器：子控件叠放、各自填充内容区。既可当单子容器（放 1 个子），
 /// 也可当 Box 多子容器（多个叠放）。
@@ -199,3 +199,9 @@ impl Widget for TabBox {
 }
 
 common_builders!(TabBox);
+
+// —— 容器能力 trait（继承视图）——
+impl Container for Panel {}
+impl Container for VBox {}
+impl Container for HBox {}
+impl Container for TabBox {}
