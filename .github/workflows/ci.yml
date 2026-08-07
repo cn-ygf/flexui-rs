@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # macOS：原生构建 + 测试 + clippy（flexui-windows 在此编译为空 crate）。
+  macos:
+    name: macOS (native)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 clippy
+        run: rustup component add clippy
+      - name: 单元测试
+        run: cargo test --workspace
+      - name: Clippy（零告警）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Windows：原生构建 + 测试 + clippy + GDI+ 冒烟（真机 GDI+，抗锯齿生效）。
+  # 排除 flexui-macos（依赖 objc2，仅 Apple 平台可编译）。
+  windows:
+    name: Windows (native)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 clippy
+        run: rustup component add clippy
+      - name: 构建 + 测试
+        run: cargo test --workspace --exclude flexui-macos
+      - name: Clippy（零告警）
+        run: cargo clippy --workspace --exclude flexui-macos --all-targets -- -D warnings
+      - name: GDI+ 离屏渲染冒烟（像素回读）
+        run: cargo run -q -p flexui-windows --example offscreen
+      - name: 图片加载/绘制冒烟
+        run: cargo run -q -p flexui-windows --example image_check
+      - name: FFI 冒烟
+        run: cargo run -q -p flexui-ffi --example ffi_smoke
+
+  # 交叉编译校验：在 Linux 上用 zig 交叉编译 Windows 目标（与本地 scripts/win-test.sh 对齐）。
+  cross-windows:
+    name: Cross-compile Windows (zig)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 zig 与目标
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          pip install ziglang           # 提供 zig，cargo-zigbuild 自动识别
+          cargo install --locked cargo-zigbuild
+      - name: 交叉编译（库 + 示例）
+        run: |
+          cargo zigbuild --target x86_64-pc-windows-gnu -p flexui-windows --examples
+          cargo zigbuild --target x86_64-pc-windows-gnu -p flexui-ffi --example ffi_smoke
+          cargo zigbuild --target x86_64-pc-windows-gnu -p flexui --example xml_demo

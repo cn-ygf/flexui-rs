@@ -17,12 +17,15 @@ cd "$ROOT"
 
 echo "== 交叉编译（zigbuild）=="
 cargo zigbuild --target "$TARGET" -p flexui-windows --example offscreen
+cargo zigbuild --target "$TARGET" -p flexui-windows --example image_check
 cargo zigbuild --target "$TARGET" -p flexui-ffi --example ffi_smoke
 cargo zigbuild --target "$TARGET" -p flexui --example xml_demo
 
 BIN="target/$TARGET/debug/examples"
 echo "== wine 无头验证：离屏 GDI+ 像素回读 =="
 wine "$BIN/offscreen.exe"
+echo "== wine 无头验证：图片加载/绘制 =="
+wine "$BIN/image_check.exe"
 echo "== wine 无头验证：FFI 入口 =="
 wine "$BIN/ffi_smoke.exe"
 

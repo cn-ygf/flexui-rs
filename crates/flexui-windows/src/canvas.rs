@@ -3,7 +3,7 @@
 //! 与 macOS 的 CgCanvas 对位。坐标为逻辑像素、左上原点，与统一坐标系一致。
 
 use flexui_geometry::{Color, Corners, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font};
+use flexui_gfx::{Canvas, Font, ImageSource};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 
 use crate::gdiplus::{
@@ -227,6 +227,26 @@ impl Canvas for GdiCanvas {
             gp::GdipDeleteFont(f);
             gp::GdipDeleteFontFamily(family);
             Size::new(bbox.Width, bbox.Height)
+        }
+    }
+
+    fn draw_image(&mut self, source: &ImageSource, rect: Rect) {
+        let ImageSource::Path(p) = source;
+        unsafe {
+            let wpath = wide(p);
+            let mut img: *mut gp::GpImage = std::ptr::null_mut();
+            // 加载失败（文件不存在/格式不支持）时静默跳过，不影响其它绘制。
+            if gp::GdipLoadImageFromFile(wpath.as_ptr(), &mut img) == 0 && !img.is_null() {
+                gp::GdipDrawImageRectI(
+                    self.g,
+                    img,
+                    ri(rect.left()),
+                    ri(rect.top()),
+                    ri(rect.size.width),
+                    ri(rect.size.height),
+                );
+                gp::GdipDisposeImage(img);
+            }
         }
     }
 
