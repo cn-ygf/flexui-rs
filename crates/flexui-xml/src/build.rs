@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, Insets, Label,
-    Node, Panel, Radio, StyleSet, StyleSpec, TabBox, TextAlign, VBox, VisualState, WidgetId,
+    Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, Insets,
+    Justify, Label, Node, Panel, Radio, Sizing, StyleSet, StyleSpec, TabBox, TextAlign, VBox,
+    VisualState, WidgetId,
 };
 
 use crate::parser::{self, Element};
@@ -136,15 +137,30 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)]) {
             "v-if" | "src" | "bindgroup" => {}
             "name" => base.name = Some(v.clone()),
             "text" => base.text = v.clone(),
-            "width" => base.width = v.parse().ok(),
-            "height" => base.height = v.parse().ok(),
+            "width" => base.width = parse_sizing(v),
+            "height" => base.height = parse_sizing(v),
             "padding" => {
                 if let Ok(p) = v.parse::<f32>() {
                     base.padding = Insets::all(p);
                 }
             }
+            "margin" => {
+                if let Ok(p) = v.parse::<f32>() {
+                    base.margin = Insets::all(p);
+                }
+            }
             "spacing" => base.spacing = v.parse().unwrap_or(0.0),
             "flex" => base.flex_grow = v.parse().unwrap_or(0.0),
+            "x" => {
+                let (_, y) = base.pos.unwrap_or((0.0, 0.0));
+                base.pos = Some((v.parse().unwrap_or(0.0), y));
+            }
+            "y" => {
+                let (x, _) = base.pos.unwrap_or((0.0, 0.0));
+                base.pos = Some((x, v.parse().unwrap_or(0.0)));
+            }
+            "justify" => base.justify = parse_justify(v),
+            "align" => base.align = parse_align_items(v),
             "enabled" => base.enabled = parse_bool(v),
             "mouse" => {
                 base.hit = if v.eq_ignore_ascii_case("transparent") {
@@ -207,7 +223,7 @@ fn apply_style_attr(slots: &mut HashMap<(BaseState, bool), StyleSpec>, key: &str
         "cornerradius" => spec.corner_radius = val.parse().ok().map(Corners::all),
         "bgimage" => spec.bg_image = Some(flexui_core::ImageSource::path(val)),
         "fgimage" => spec.fg_image = Some(flexui_core::ImageSource::path(val)),
-        "textalign" | "align" => spec.text_align = parse_align(val),
+        "textalign" => spec.text_align = parse_align(val),
         _ => {} // 未知属性忽略
     }
 }
@@ -219,6 +235,36 @@ fn parse_state(s: &str) -> Option<BaseState> {
         "pushed" => Some(BaseState::Pushed),
         "disabled" => Some(BaseState::Disabled),
         _ => None,
+    }
+}
+
+/// 解析尺寸模式：auto/content→Content，fill/stretch→Fill，数字→Fixed。
+fn parse_sizing(v: &str) -> Sizing {
+    match v.trim().to_lowercase().as_str() {
+        "auto" | "content" => Sizing::Content,
+        "fill" | "stretch" => Sizing::Fill,
+        _ => v.parse::<f32>().map(Sizing::Fixed).unwrap_or(Sizing::Content),
+    }
+}
+
+/// 解析主轴对齐。
+fn parse_justify(v: &str) -> Justify {
+    match v.to_lowercase().as_str() {
+        "center" => Justify::Center,
+        "end" => Justify::End,
+        "space-between" | "between" => Justify::SpaceBetween,
+        "space-around" | "around" => Justify::SpaceAround,
+        _ => Justify::Start,
+    }
+}
+
+/// 解析交叉轴对齐。
+fn parse_align_items(v: &str) -> Align {
+    match v.to_lowercase().as_str() {
+        "center" => Align::Center,
+        "end" => Align::End,
+        "start" => Align::Start,
+        _ => Align::Stretch,
     }
 }
 

@@ -39,6 +39,31 @@ fn to_nsrect(r: Rect) -> NSRect {
     )
 }
 
+/// 构造四角独立圆角的矩形路径（用 arcTo 逐角连接）。
+fn round_rect_path(rect: Rect, radius: Corners) -> Retained<NSBezierPath> {
+    let l = rect.left() as f64;
+    let t = rect.top() as f64;
+    let r = rect.right() as f64;
+    let b = rect.bottom() as f64;
+    let hw = (rect.size.width / 2.0) as f64;
+    let hh = (rect.size.height / 2.0) as f64;
+    let clamp = |v: f32| (v as f64).max(0.0).min(hw).min(hh);
+    let tl = clamp(radius.tl);
+    let tr = clamp(radius.tr);
+    let br = clamp(radius.br);
+    let bl = clamp(radius.bl);
+
+    let path = NSBezierPath::bezierPath();
+    path.moveToPoint(NSPoint::new(l + tl, t));
+    // 顶边 → 右上角 → 右边 → 右下角 → 底边 → 左下角 → 左边 → 左上角
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(NSPoint::new(r, t), NSPoint::new(r, b), tr);
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(NSPoint::new(r, b), NSPoint::new(l, b), br);
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(NSPoint::new(l, b), NSPoint::new(l, t), bl);
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(NSPoint::new(l, t), NSPoint::new(r, t), tl);
+    path.closePath();
+    path
+}
+
 /// 把 Color 转成 NSColor（sRGB）。
 fn to_nscolor(c: Color) -> Retained<NSColor> {
     NSColor::colorWithSRGBRed_green_blue_alpha(c.r as f64, c.g as f64, c.b as f64, c.a as f64)
@@ -86,16 +111,13 @@ impl Canvas for CgCanvas {
     }
 
     fn fill_round_rect(&mut self, rect: Rect, radius: Corners, color: Color) {
-        // NSBezierPath 仅支持统一圆角，一期取左上角半径近似（四角独立留待后续自建路径）。
-        let r = radius.tl as f64;
-        let path = NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(to_nsrect(rect), r, r);
+        let path = round_rect_path(rect, radius);
         to_nscolor(color).set();
         path.fill();
     }
 
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
-        let r = radius.tl as f64;
-        let path = NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(to_nsrect(rect), r, r);
+        let path = round_rect_path(rect, radius);
         path.setLineWidth(line_width as f64);
         to_nscolor(color).set();
         path.stroke();

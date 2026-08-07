@@ -56,28 +56,33 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 impl GdiCanvas {
-    /// 生成圆角矩形路径（半径 <=0 时退化为直角矩形）。
+    /// 生成四角独立圆角的矩形路径（各角半径 <=0 时该角为直角）。
     /// 使用浮点路径接口，精度更好，且能触发 GDI+ 的抗锯齿路径。
-    unsafe fn build_round_path(&self, r: Rect, radius: f32) -> *mut gp::GpPath {
+    unsafe fn build_round_path(&self, r: Rect, radius: Corners) -> *mut gp::GpPath {
         let mut path: *mut gp::GpPath = std::ptr::null_mut();
         gp::GdipCreatePath(FILLMODE_ALTERNATE, &mut path);
         let x = r.left();
         let y = r.top();
         let w = r.size.width;
         let h = r.size.height;
-        // 半径不超过半宽/半高。
-        let rad = radius.min(w / 2.0).min(h / 2.0);
-        if rad <= 0.0 {
+        let hw = w / 2.0;
+        let hh = h / 2.0;
+        let clamp = |v: f32| v.max(0.0).min(hw).min(hh);
+        let tl = clamp(radius.tl);
+        let tr = clamp(radius.tr);
+        let br = clamp(radius.br);
+        let bl = clamp(radius.bl);
+
+        if tl <= 0.0 && tr <= 0.0 && br <= 0.0 && bl <= 0.0 {
             gp::GdipAddPathRectangle(path, x, y, w, h);
-        } else {
-            let d = rad * 2.0;
-            // 四个 90° 圆弧 + 自动连线，顺时针。
-            gp::GdipAddPathArc(path, x, y, d, d, 180.0, 90.0);
-            gp::GdipAddPathArc(path, x + w - d, y, d, d, 270.0, 90.0);
-            gp::GdipAddPathArc(path, x + w - d, y + h - d, d, d, 0.0, 90.0);
-            gp::GdipAddPathArc(path, x, y + h - d, d, d, 90.0, 90.0);
-            gp::GdipClosePathFigure(path);
+            return path;
         }
+        // 每角一段 90° 弧（半径 0 时 AddPathArc 的 0 尺寸椭圆退化为该角点，即直角）+ 自动连线。
+        gp::GdipAddPathArc(path, x, y, tl * 2.0, tl * 2.0, 180.0, 90.0);
+        gp::GdipAddPathArc(path, x + w - tr * 2.0, y, tr * 2.0, tr * 2.0, 270.0, 90.0);
+        gp::GdipAddPathArc(path, x + w - br * 2.0, y + h - br * 2.0, br * 2.0, br * 2.0, 0.0, 90.0);
+        gp::GdipAddPathArc(path, x, y + h - bl * 2.0, bl * 2.0, bl * 2.0, 90.0, 90.0);
+        gp::GdipClosePathFigure(path);
         path
     }
 
@@ -135,7 +140,7 @@ impl Canvas for GdiCanvas {
 
     fn fill_round_rect(&mut self, rect: Rect, radius: Corners, color: Color) {
         unsafe {
-            let path = self.build_round_path(rect, radius.tl);
+            let path = self.build_round_path(rect, radius);
             let mut brush: *mut gp::GpSolidFill = std::ptr::null_mut();
             gp::GdipCreateSolidFill(argb(color), &mut brush);
             gp::GdipFillPath(self.g, brush as *mut gp::GpBrush, path);
@@ -146,7 +151,7 @@ impl Canvas for GdiCanvas {
 
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
         unsafe {
-            let path = self.build_round_path(rect, radius.tl);
+            let path = self.build_round_path(rect, radius);
             let mut pen: *mut gp::GpPen = std::ptr::null_mut();
             gp::GdipCreatePen1(argb(color), line_width, UNIT_PIXEL, &mut pen);
             gp::GdipDrawPath(self.g, pen, path);

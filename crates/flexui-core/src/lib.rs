@@ -7,6 +7,7 @@ pub mod dispatch;
 pub mod event;
 pub mod layout;
 pub mod paint;
+pub mod sizing;
 pub mod style;
 pub mod widget;
 pub mod widgets;
@@ -17,6 +18,7 @@ pub use dispatch::{hit_test, Dispatcher, EventCtx};
 pub use event::{Event, EventFlow, MouseButton};
 pub use layout::{layout_node, Axis};
 pub use paint::paint_tree;
+pub use sizing::{Align, Justify, Sizing};
 pub use style::{BaseState, StyleSet, StyleSpec, VisualState};
 pub use widget::{
     find_by_name, find_mut_by_name, visit_all_mut, Base, Clickable, Container, HitPolicy, Node,

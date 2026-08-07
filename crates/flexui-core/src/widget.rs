@@ -10,6 +10,7 @@ use flexui_geometry::{Insets, Rect, Size};
 use flexui_gfx::{Canvas, Font};
 
 use crate::event::{Event, EventFlow};
+use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
 
 /// 控件唯一 id。
@@ -81,11 +82,21 @@ pub struct Base {
     /// 布局后的绝对矩形（窗口逻辑坐标）。
     pub rect: Rect,
     pub padding: Insets,
-    pub width: Option<f32>,
-    pub height: Option<f32>,
+    /// 外边距（参与容器排布）。
+    pub margin: Insets,
+    /// 宽/高尺寸模式（Fixed/Content/Fill）。
+    pub width: Sizing,
+    pub height: Sizing,
+    /// Fill 时的分配权重（0 视为 1）。
     pub flex_grow: f32,
     /// Box/VBox/HBox 子控件间距。
     pub spacing: f32,
+    /// 容器主轴对齐（VBox/HBox）。
+    pub justify: Justify,
+    /// 容器交叉轴对齐（VBox/HBox）。
+    pub align: Align,
+    /// 绝对定位（相对父内容区左上角）。设了则 Box 按此摆放，忽略叠放填充。
+    pub pos: Option<(f32, f32)>,
 
     // —— 子控件 ——
     pub children: Vec<Node>,
@@ -116,10 +127,14 @@ impl Base {
             selected_index: 0,
             rect: Rect::default(),
             padding: Insets::default(),
-            width: None,
-            height: None,
+            margin: Insets::default(),
+            width: Sizing::Content,
+            height: Sizing::Content,
             flex_grow: 0.0,
             spacing: 0.0,
+            justify: Justify::Start,
+            align: Align::Stretch,
+            pos: None,
             children: Vec::new(),
             on_click: None,
         }

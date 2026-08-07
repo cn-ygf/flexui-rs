@@ -53,18 +53,34 @@ macro_rules! common_builders {
             }
             /// 固定宽高。
             pub fn size(mut self, w: f32, h: f32) -> Self {
-                self.base.width = Some(w);
-                self.base.height = Some(h);
+                self.base.width = $crate::sizing::Sizing::Fixed(w);
+                self.base.height = $crate::sizing::Sizing::Fixed(h);
                 self
             }
             /// 固定宽。
             pub fn width(mut self, w: f32) -> Self {
-                self.base.width = Some(w);
+                self.base.width = $crate::sizing::Sizing::Fixed(w);
                 self
             }
             /// 固定高。
             pub fn height(mut self, h: f32) -> Self {
-                self.base.height = Some(h);
+                self.base.height = $crate::sizing::Sizing::Fixed(h);
+                self
+            }
+            /// 设置宽度模式（Fixed/Content/Fill）。
+            pub fn width_mode(mut self, s: $crate::sizing::Sizing) -> Self {
+                self.base.width = s;
+                self
+            }
+            /// 设置高度模式（Fixed/Content/Fill）。
+            pub fn height_mode(mut self, s: $crate::sizing::Sizing) -> Self {
+                self.base.height = s;
+                self
+            }
+            /// 两轴都自动撑开（Fill）。
+            pub fn fill(mut self) -> Self {
+                self.base.width = $crate::sizing::Sizing::Fill;
+                self.base.height = $crate::sizing::Sizing::Fill;
                 self
             }
             /// 四边内边距。
@@ -72,7 +88,27 @@ macro_rules! common_builders {
                 self.base.padding = flexui_geometry::Insets::all(p);
                 self
             }
-            /// flex 伸缩系数。
+            /// 四边外边距。
+            pub fn margin(mut self, m: f32) -> Self {
+                self.base.margin = flexui_geometry::Insets::all(m);
+                self
+            }
+            /// 绝对定位（相对父内容区左上角；用于 Box 容器内）。
+            pub fn pos(mut self, x: f32, y: f32) -> Self {
+                self.base.pos = Some((x, y));
+                self
+            }
+            /// 主轴对齐（VBox/HBox）。
+            pub fn justify(mut self, j: $crate::sizing::Justify) -> Self {
+                self.base.justify = j;
+                self
+            }
+            /// 交叉轴对齐（VBox/HBox）。
+            pub fn align(mut self, a: $crate::sizing::Align) -> Self {
+                self.base.align = a;
+                self
+            }
+            /// flex 伸缩系数（主轴 Fill 的分配权重）。
             pub fn flex(mut self, g: f32) -> Self {
                 self.base.flex_grow = g;
                 self
