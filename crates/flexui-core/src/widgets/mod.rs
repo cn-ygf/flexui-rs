@@ -57,8 +57,11 @@ macro_rules! common_builders {
                 self.base.hit = h;
                 self
             }
-            /// 点击回调。
-            pub fn on_click(mut self, f: impl FnMut() + 'static) -> Self {
+            /// 点击回调（参数为事件上下文，可按 name 访问/修改其它控件）。
+            pub fn on_click(
+                mut self,
+                f: impl FnMut(&mut $crate::dispatch::EventCtx) + 'static,
+            ) -> Self {
                 self.base.on_click = Some(Box::new(f));
                 self
             }

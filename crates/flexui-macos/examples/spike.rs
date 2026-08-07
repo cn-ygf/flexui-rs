@@ -63,7 +63,7 @@ fn build_ui() -> (Node, Dispatcher) {
     let btn_ok = Button::new("点我 (+1)")
         .style(button_style())
         .size(140.0, 44.0)
-        .on_click(move || {
+        .on_click(move |_ctx| {
             c2.set(c2.get() + 1);
             println!("[demo] 按钮点击，总计 {}", c2.get());
         });

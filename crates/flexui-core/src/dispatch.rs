@@ -6,7 +6,52 @@
 use flexui_geometry::Point;
 
 use crate::event::{Event, EventFlow, MouseButton};
-use crate::widget::{HitPolicy, Widget, WidgetId, WidgetRole};
+use crate::widget::{find_by_name, HitPolicy, Widget, WidgetId, WidgetRole};
+
+/// 点击回调类型别名。
+pub type ClickHandler = Box<dyn FnMut(&mut EventCtx)>;
+
+/// 事件上下文：传给控件回调（on_click），可按 name 访问/修改整棵控件树。
+///
+/// 因此按钮点击能改别的控件（如更新状态标签），实现「可见的事件响应」。
+pub struct EventCtx<'a> {
+    root: &'a mut dyn Widget,
+}
+
+impl<'a> EventCtx<'a> {
+    fn new(root: &'a mut dyn Widget) -> Self {
+        Self { root }
+    }
+
+    /// 对名为 name 的控件执行 f；找到则返回 Some(f 的返回值)。
+    pub fn with<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
+        let id = find_by_name(self.root, name)?;
+        let mut f = Some(f);
+        let mut out = None;
+        visit_mut(self.root, id, &mut |w| {
+            if let Some(f) = f.take() {
+                out = Some(f(w));
+            }
+        });
+        out
+    }
+
+    /// 便捷：设置某控件的文本。
+    pub fn set_text(&mut self, name: &str, text: impl Into<String>) {
+        let text = text.into();
+        self.with(name, move |w| w.base_mut().text = text);
+    }
+
+    /// 便捷：读取某控件的 selected（CheckBox/Radio）。
+    pub fn is_selected(&mut self, name: &str) -> Option<bool> {
+        self.with(name, |w| w.base().selected)
+    }
+
+    /// 便捷：设置某控件是否可用。
+    pub fn set_enabled(&mut self, name: &str, enabled: bool) {
+        self.with(name, move |w| w.base_mut().enabled = enabled);
+    }
+}
 
 /// Radio 组 → TabBox 的绑定（组成 tabbar）。
 pub struct TabBinding {
@@ -137,28 +182,29 @@ impl Dispatcher {
         }
     }
 
-    /// 触发某控件的点击语义：选择切换 + 回调 + Radio 互斥 + tabbar 翻页。
+    /// 触发某控件的点击语义：选择切换 + Radio 互斥 + tabbar 翻页 + 回调。
     fn activate(&mut self, root: &mut dyn Widget, id: WidgetId) {
+        // 1. 选择态变化 + 采集信息（此时不触发回调）。
         let mut info: Option<(WidgetRole, Option<u32>, Option<usize>)> = None;
+        let mut enabled = false;
         visit_mut(root, id, &mut |w| {
             let b = w.base_mut();
             if !b.enabled {
                 return;
             }
+            enabled = true;
             match b.role {
                 WidgetRole::CheckBox => b.selected = !b.selected,
                 WidgetRole::Radio => b.selected = true,
                 _ => {}
             }
             info = Some((b.role, b.group, b.tab_index));
-            // 触发点击回调（取出后调用再放回，避免借用冲突）。
-            if let Some(mut cb) = b.on_click.take() {
-                cb();
-                b.on_click = Some(cb);
-            }
         });
+        if !enabled {
+            return;
+        }
 
-        // Radio：同组互斥 + tabbar 联动。
+        // 2. Radio：同组互斥 + tabbar 联动。
         if let Some((WidgetRole::Radio, Some(g), tab_index)) = info {
             for_each_mut(root, &mut |w| {
                 let b = w.base_mut();
@@ -180,6 +226,21 @@ impl Dispatcher {
                     });
                 }
             }
+        }
+
+        // 3. 触发点击回调：先把闭包取出（释放对该节点的借用），再以 EventCtx 调用
+        //    （此时回调可 &mut 整棵树、按 name 改别的控件），最后放回。
+        let mut taken: Option<ClickHandler> = None;
+        visit_mut(root, id, &mut |w| {
+            taken = w.base_mut().on_click.take();
+        });
+        if let Some(mut cb) = taken {
+            let mut ctx = EventCtx::new(root);
+            cb(&mut ctx);
+            let mut slot = Some(cb);
+            visit_mut(root, id, &mut |w| {
+                w.base_mut().on_click = slot.take();
+            });
         }
     }
 }
@@ -237,7 +298,7 @@ mod tests {
     use super::*;
     use crate::event::MouseButton;
     use crate::layout::layout_node;
-    use crate::widgets::{Button, Radio, TabBox, VBox};
+    use crate::widgets::{Button, Label, Radio, TabBox, VBox};
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
@@ -264,13 +325,30 @@ mod tests {
     fn 点击按钮触发回调() {
         let hits = Rc::new(Cell::new(0));
         let h2 = hits.clone();
-        let btn = Button::new("ok").size(100.0, 40.0).on_click(move || h2.set(h2.get() + 1));
+        let btn = Button::new("ok").size(100.0, 40.0).on_click(move |_ctx| h2.set(h2.get() + 1));
         let mut root = VBox::new().push(btn);
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &cv);
         let mut disp = Dispatcher::new();
         click_at(&mut disp, &mut root, Point::new(50.0, 20.0));
         assert_eq!(hits.get(), 1);
+    }
+
+    #[test]
+    fn 点击回调经_eventctx_可改别的控件() {
+        // Button(name=btn) 点击 → 把 Label(name=out) 文本改成 "changed"
+        let btn = Button::new("go").name("btn").size(100.0, 40.0).on_click(|ctx| {
+            ctx.set_text("out", "changed");
+        });
+        let out = Label::new("").name("out").size(100.0, 20.0);
+        let mut root = VBox::new().push(btn).push(out);
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 点击按钮（第一个子控件, y 在 0..40）
+        click_at(&mut disp, &mut root, Point::new(50.0, 20.0));
+        // 第二个子控件是 out 标签
+        assert_eq!(root.base().children[1].base().text, "changed");
     }
 
     #[test]

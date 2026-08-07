@@ -105,7 +105,8 @@ pub extern "C" fn flex_run_xml(
             let b = w.base_mut();
             if b.role == WidgetRole::Button {
                 if let Some(name) = b.name.clone() {
-                    b.on_click = Some(Box::new(move || fire_click(&name)));
+                    b.on_click =
+                        Some(Box::new(move |_ctx: &mut flexui_core::EventCtx| fire_click(&name)));
                 }
             }
         });

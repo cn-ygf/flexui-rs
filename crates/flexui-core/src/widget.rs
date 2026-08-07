@@ -90,8 +90,8 @@ pub struct Base {
     // —— 子控件 ——
     pub children: Vec<Node>,
 
-    // —— 回调 ——
-    pub on_click: Option<Box<dyn FnMut()>>,
+    // —— 回调（点击时触发，参数为事件上下文，可按 name 访问整棵控件树）——
+    pub on_click: Option<crate::dispatch::ClickHandler>,
 }
 
 impl Base {
@@ -191,6 +191,19 @@ pub fn find_by_name(node: &dyn Widget, name: &str) -> Option<WidgetId> {
     for child in node.base().children.iter() {
         if let Some(id) = find_by_name(child.as_ref(), name) {
             return Some(id);
+        }
+    }
+    None
+}
+
+/// 按 name 查找控件并返回可变引用（首个匹配）。供动态构建后直接修改控件用（W8）。
+pub fn find_mut_by_name<'a>(node: &'a mut dyn Widget, name: &str) -> Option<&'a mut dyn Widget> {
+    if node.base().name.as_deref() == Some(name) {
+        return Some(node);
+    }
+    for child in node.base_mut().children.iter_mut() {
+        if let Some(found) = find_mut_by_name(child.as_mut(), name) {
+            return Some(found);
         }
     }
     None

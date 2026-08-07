@@ -66,9 +66,7 @@ fn write_solid_bmp(path: &std::path::Path, w: i32, h: i32, rgb: [u8; 3]) -> std:
             buf.push(green);
             buf.push(red);
         }
-        for _ in 0..(row_bytes - w * 3) {
-            buf.push(0);
-        }
+        buf.resize(buf.len() + (row_bytes - w * 3) as usize, 0);
     }
 
     let mut f = std::fs::File::create(path)?;

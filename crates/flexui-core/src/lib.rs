@@ -12,12 +12,15 @@ pub mod widget;
 pub mod widgets;
 
 // 常用类型再导出，方便上层与后端使用。
-pub use dispatch::{hit_test, Dispatcher};
+pub use dispatch::{hit_test, Dispatcher, EventCtx};
 pub use event::{Event, EventFlow, MouseButton};
 pub use layout::{layout_node, Axis};
 pub use paint::paint_tree;
 pub use style::{BaseState, StyleSet, StyleSpec, VisualState};
-pub use widget::{find_by_name, visit_all_mut, Base, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+pub use widget::{
+    find_by_name, find_mut_by_name, visit_all_mut, Base, HitPolicy, Node, Widget, WidgetId,
+    WidgetRole,
+};
 pub use widgets::{Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, TabBox, VBox};
 
 // 几何/绘图类型透传，便于上层一次性引入。
