@@ -1,10 +1,40 @@
-//! 控件库（L4）。所有控件内嵌 `Base`，共享统一的绘制/布局/分发管线。
+//! 控件库（L4）：**按控件拆分文件**，每个控件一个模块。
+//!
+//! 所有控件内嵌 `Base` + 实现 `Widget`，共享统一的绘制/布局/分发管线；
+//! 能力 trait（TextControl/Clickable/Container）表达类型层级（见 widget.rs）。
+//!
+//! - 基础控件：`label` `button` `image` `checkbox` `edit`
+//! - 扩展控件：`radio`（+group / tabbar）
+//! - 容器：`panel`(Box) `vbox` `hbox` `tabbox`
 
-mod containers;
-mod controls;
+mod button;
+mod checkbox;
+mod edit;
+mod hbox;
+mod image;
+mod label;
+mod panel;
+mod radio;
+mod tabbox;
+mod vbox;
 
-pub use containers::{HBox, Panel, TabBox, VBox};
-pub use controls::{Button, CheckBox, Edit, Image, Label, Radio};
+pub use button::Button;
+pub use checkbox::CheckBox;
+pub use edit::Edit;
+pub use hbox::HBox;
+pub use image::Image;
+pub use label::Label;
+pub use panel::Panel;
+pub use radio::Radio;
+pub use tabbox::TabBox;
+pub use vbox::VBox;
+
+use flexui_geometry::{Color, Corners, Rect};
+use flexui_gfx::{Canvas, TextAlign};
+
+use crate::paint::draw_aligned_text;
+use crate::style::StyleSpec;
+use crate::widget::Base;
 
 /// 为控件生成一组通用 Builder 方法，减少样板。要求结构体有名为 `base` 的字段。
 #[macro_export]
@@ -67,4 +97,47 @@ macro_rules! common_builders {
             }
         }
     };
+}
+
+/// 共享：绘制左侧指示器（方框/圆点）+ 右侧文字。CheckBox/Radio 复用。
+/// `circular=true` 画单选圆点，否则画勾选方框。
+pub(crate) fn paint_indicator_and_text(
+    base: &Base,
+    cv: &mut dyn Canvas,
+    style: &StyleSpec,
+    circular: bool,
+) {
+    let content = crate::layout::content_rect(base);
+    let box_size = 16.0;
+    let bx = content.left();
+    let by = content.top() + (content.size.height - box_size) / 2.0;
+    let ind = Rect::new(bx, by, box_size, box_size);
+    let border = style.border_color.unwrap_or(Color::from_u8(140, 150, 170, 255));
+    let radius = if circular {
+        Corners::all(box_size / 2.0)
+    } else {
+        Corners::all(3.0)
+    };
+    // 指示器外框
+    cv.stroke_round_rect(ind, radius, border, 1.5);
+    // 选中：填充内部
+    if base.selected {
+        let fill = style.fg_color.unwrap_or(Color::from_u8(52, 120, 246, 255));
+        let inner = ind.inset_all(4.0);
+        let inner_radius = if circular {
+            Corners::all((box_size - 8.0) / 2.0)
+        } else {
+            Corners::all(2.0)
+        };
+        cv.fill_round_rect(inner, inner_radius, fill);
+    }
+    // 文字
+    let text_rect = Rect::new(
+        content.left() + box_size + 8.0,
+        content.top(),
+        (content.size.width - box_size - 8.0).max(0.0),
+        content.size.height,
+    );
+    let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
+    draw_aligned_text(cv, &base.text, text_rect, &base.font, color, TextAlign::Left);
 }
