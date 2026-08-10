@@ -7,7 +7,10 @@
 pub use flexui_core::*;
 
 // XML 布局加载。
-pub use flexui_xml::{load_res, load_str as load_xml_str, Context, LoadError, LoadResult};
+pub use flexui_xml::{
+    build_fragment_res, build_fragment_str, load_res, load_str as load_xml_str, load_window_res,
+    load_window_str, Context, LoadError, LoadResult, WindowDoc,
+};
 
 // 资源系统（RM1-5）。
 pub use flexui_resource::{
@@ -112,11 +115,15 @@ impl<W: WindowImpl> Window<W> {
     /// 启动：加载皮肤 → 建窗 → on_init → 进主事件循环（阻塞）。
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn run(self) {
-        let config = self.imp.config();
         let ctx = Context::new();
-        let (root, bindings) = match self.imp.skin() {
-            Skin::Xml(xml) => match load_xml_str(&xml, &ctx) {
-                Ok(r) => (r.root, r.bindings),
+        // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
+        let (config, root, bindings) = match self.imp.skin() {
+            Skin::Xml(xml) => match load_window_str(&xml, &ctx) {
+                Ok(doc) => (
+                    doc.config.unwrap_or_else(|| self.imp.config()),
+                    doc.root,
+                    doc.bindings,
+                ),
                 Err(e) => {
                     eprintln!("[flexui] 皮肤 XML 加载失败: {e}");
                     return;
@@ -124,15 +131,19 @@ impl<W: WindowImpl> Window<W> {
             },
             Skin::Res(path) => {
                 let res = self.imp.resources();
-                match load_res(&res, &path, &ctx) {
-                    Ok(r) => (r.root, r.bindings),
+                match load_window_res(&res, &path, &ctx) {
+                    Ok(doc) => (
+                        doc.config.unwrap_or_else(|| self.imp.config()),
+                        doc.root,
+                        doc.bindings,
+                    ),
                     Err(e) => {
                         eprintln!("[flexui] 皮肤资源加载失败: {e}");
                         return;
                     }
                 }
             }
-            Skin::Tree(node) => (node, Vec::new()),
+            Skin::Tree(node) => (self.imp.config(), node, Vec::new()),
         };
         let mut disp = Dispatcher::new();
         for (group, tabbox) in bindings {

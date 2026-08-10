@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use flexui_core::{
     Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, ImageFit,
     ImageSource, Insets, Justify, Label, Node, Panel, Radio, Sizing, StyleSet, StyleSpec, TabBox,
-    TextAlign, VBox, VisualState, WidgetId,
+    TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig,
 };
 use flexui_resource::ResourceManager;
 
@@ -68,29 +68,133 @@ impl From<parser::ParseError> for LoadError {
     }
 }
 
-/// 解析并构建控件树（图片按文件路径处理）。
-pub fn load_str(xml: &str, ctx: &Context) -> Result<LoadResult, LoadError> {
-    let el = parser::parse(xml)?;
-    let mut bindings = Vec::new();
-    let root = build(&el, ctx, None, &mut bindings)?
-        .ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
-    Ok(LoadResult { root, bindings })
+/// 构建环境：贯穿递归的上下文（求值上下文、资源、tabbar 绑定、Include 栈）。
+struct Env<'a> {
+    ctx: &'a Context,
+    res: Option<&'a ResourceManager>,
+    bindings: Vec<(u32, WidgetId)>,
+    includes: Vec<String>,
 }
 
-/// 经资源系统加载 skin：XML 文本与图片（src/bgimage/fgimage）都走 ResourceManager（RM5）。
-pub fn load_res(
-    res: &ResourceManager,
-    path: &str,
-    ctx: &Context,
-) -> Result<LoadResult, LoadError> {
+/// 解析并构建控件树（图片按文件路径处理）。
+pub fn load_str(xml: &str, ctx: &Context) -> Result<LoadResult, LoadError> {
+    load_root(xml, ctx, None)
+}
+
+/// 经资源系统加载 skin：XML 文本与图片（src/bgimage/fgimage）+ Include 都走 ResourceManager（RM5/W7）。
+pub fn load_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<LoadResult, LoadError> {
     let xml = res
         .read_string(path)
         .map_err(|e| LoadError(format!("读取 skin 失败: {e}")))?;
-    let el = parser::parse(&xml)?;
-    let mut bindings = Vec::new();
-    let root = build(&el, ctx, Some(res), &mut bindings)?
-        .ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
-    Ok(LoadResult { root, bindings })
+    load_root(&xml, ctx, Some(res))
+}
+
+/// 动态从 XML 字符串构建一个布局片段（根为普通容器，非 `<Window>`）。供代码动态 build（W8）。
+pub fn build_fragment_str(xml: &str, ctx: &Context) -> Result<Node, LoadError> {
+    Ok(load_str(xml, ctx)?.root)
+}
+
+/// 动态从资源路径构建布局片段（W8）。
+pub fn build_fragment_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<Node, LoadError> {
+    Ok(load_res(res, path, ctx)?.root)
+}
+
+/// 窗口文档：`<Window>` 根解析出的配置 + 内容树。
+pub struct WindowDoc {
+    /// 若 XML 根是 `<Window>`，则为其属性解析出的配置，否则 None。
+    pub config: Option<WindowConfig>,
+    pub root: Node,
+    pub bindings: Vec<(u32, WidgetId)>,
+}
+
+/// 加载以 `<Window>` 为根的窗口 XML（W6）；根非 Window 时 config 为 None、按普通片段处理。
+pub fn load_window_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<WindowDoc, LoadError> {
+    let xml = res
+        .read_string(path)
+        .map_err(|e| LoadError(format!("读取 skin 失败: {e}")))?;
+    load_window(&xml, ctx, Some(res))
+}
+
+/// 加载以 `<Window>` 为根的窗口 XML 字符串（W6）。
+pub fn load_window_str(xml: &str, ctx: &Context) -> Result<WindowDoc, LoadError> {
+    load_window(xml, ctx, None)
+}
+
+fn load_root(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Result<LoadResult, LoadError> {
+    let el = parser::parse(xml)?;
+    let mut env = Env {
+        ctx,
+        res,
+        bindings: Vec::new(),
+        includes: Vec::new(),
+    };
+    let root = build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
+    Ok(LoadResult {
+        root,
+        bindings: env.bindings,
+    })
+}
+
+fn load_window(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Result<WindowDoc, LoadError> {
+    let el = parser::parse(xml)?;
+    let mut env = Env {
+        ctx,
+        res,
+        bindings: Vec::new(),
+        includes: Vec::new(),
+    };
+    if el.tag.to_lowercase() == "window" {
+        let config = parse_window_config(&el);
+        // Window 的子节点即内容；多个则包进 VBox。
+        let mut kids: Vec<Node> = Vec::new();
+        for child in &el.children {
+            if let Some(c) = build(child, &mut env)? {
+                kids.push(c);
+            }
+        }
+        let root: Node = match kids.len() {
+            1 => kids.pop().unwrap(),
+            _ => {
+                let mut v = VBox::new();
+                for k in kids {
+                    v = v.push_node(k);
+                }
+                Box::new(v)
+            }
+        };
+        Ok(WindowDoc {
+            config: Some(config),
+            root,
+            bindings: env.bindings,
+        })
+    } else {
+        let root = build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
+        Ok(WindowDoc {
+            config: None,
+            root,
+            bindings: env.bindings,
+        })
+    }
+}
+
+/// 从 `<Window>` 属性解析窗口配置。
+fn parse_window_config(el: &Element) -> WindowConfig {
+    let mut cfg = WindowConfig::new(
+        el.attr("title").unwrap_or("flexui-rs"),
+        el.attr("width").and_then(|s| s.parse().ok()).unwrap_or(640.0),
+        el.attr("height").and_then(|s| s.parse().ok()).unwrap_or(440.0),
+    );
+    if let Some(r) = el.attr("resizable") {
+        cfg.resizable = parse_bool(r);
+    }
+    if let Some(t) = el.attr("titlebar") {
+        cfg.titlebar = match t.to_lowercase().as_str() {
+            "hidden" | "hiddenkeepcontrols" => TitlebarMode::HiddenKeepControls,
+            "none" | "borderless" => TitlebarMode::None,
+            _ => TitlebarMode::System,
+        };
+    }
+    cfg
 }
 
 /// 解析图片来源：有资源管理器则读成字节（支持 zip/内嵌），否则按文件路径。
@@ -114,40 +218,67 @@ fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
     ImageSource::path(path)
 }
 
-fn build(
-    el: &Element,
-    ctx: &Context,
-    res: Option<&ResourceManager>,
-    bindings: &mut Vec<(u32, WidgetId)>,
-) -> Result<Option<Node>, LoadError> {
+/// Include 最大嵌套深度（防环兜底）。
+const MAX_INCLUDE_DEPTH: usize = 32;
+
+fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
     // v-if：为假则整棵子树不生成（加载期静态求值）。
     if let Some(cond) = el.attr("v-if") {
-        if !expr::eval(cond, ctx) {
+        if !expr::eval(cond, env.ctx) {
             return Ok(None);
         }
     }
 
     let tag = el.tag.to_lowercase();
-    let mut node = make_node(&tag, el, res)?;
 
-    // 应用属性（含分状态样式）。
-    apply_attrs(node.base_mut(), &tag, &el.attrs, res);
+    // <Include src="逻辑路径"/>：读取子 XML 就地展开（W7），带防环。
+    if tag == "include" {
+        return build_include(el, env);
+    }
+
+    let mut node = make_node(&tag, el, env.res)?;
+    apply_attrs(node.base_mut(), &tag, &el.attrs, env.res);
 
     // TabBox 的 tabbar 绑定。
     if tag == "tabbox" {
         if let Some(g) = el.attr("bindgroup").and_then(|s| s.parse::<u32>().ok()) {
-            bindings.push((g, node.base().id));
+            env.bindings.push((g, node.base().id));
         }
     }
 
     // 递归子节点。
     for child in &el.children {
-        if let Some(c) = build(child, ctx, res, bindings)? {
+        if let Some(c) = build(child, env)? {
             node.base_mut().children.push(c);
         }
     }
 
     Ok(Some(node))
+}
+
+/// 展开 `<Include src="...">`：经资源读取子 XML 并 build，含循环/深度防护。
+fn build_include(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
+    let src = el
+        .attr("src")
+        .ok_or_else(|| LoadError("<Include> 缺少 src".into()))?
+        .to_string();
+    let rm = env
+        .res
+        .ok_or_else(|| LoadError("<Include> 需要资源管理器（用 load_res/load_window_res）".into()))?;
+    if env.includes.contains(&src) {
+        return Err(LoadError(format!("<Include> 循环引用: {src}")));
+    }
+    if env.includes.len() >= MAX_INCLUDE_DEPTH {
+        return Err(LoadError("<Include> 嵌套过深".into()));
+    }
+    let xml = rm
+        .read_string(&src)
+        .map_err(|e| LoadError(format!("读取 Include {src} 失败: {e}")))?;
+    let sub = parser::parse(&xml)?;
+    env.includes.push(src);
+    let node = build(&sub, env)?;
+    env.includes.pop();
+    Ok(node)
 }
 
 /// 按标签名构造控件。
@@ -522,7 +653,58 @@ mod expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui_core::{layout_node, Canvas, Font, Rect, Size};
+    use flexui_core::{find_by_name, layout_node, Canvas, Font, Rect, Size};
+    use flexui_resource::{DirProvider, ResourceManager};
+
+    #[test]
+    fn window_根解析配置() {
+        let xml = r#"<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false">
+            <VBox><Label name="hello" text="hi"/></VBox>
+        </Window>"#;
+        let doc = load_window_str(xml, &Context::new()).unwrap();
+        let cfg = doc.config.expect("应有窗口配置");
+        assert_eq!(cfg.title, "演示");
+        assert_eq!(cfg.width, 800.0);
+        assert!(!cfg.resizable);
+        assert_eq!(cfg.titlebar, flexui_core::TitlebarMode::HiddenKeepControls);
+        // 内容根含具名控件
+        assert!(find_by_name(doc.root.as_ref(), "hello").is_some());
+    }
+
+    #[test]
+    fn include_子xml展开() {
+        let dir = std::env::temp_dir().join(format!("flexui_inc_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("parts.xml"), r#"<Label name="fromInclude" text="子"/>"#).unwrap();
+        std::fs::write(
+            dir.join("main.xml"),
+            r#"<VBox><Include src="parts.xml"/></VBox>"#,
+        )
+        .unwrap();
+        let mut rm = ResourceManager::new();
+        rm.mount(DirProvider::new(&dir));
+        let res = load_res(&rm, "main.xml", &Context::new()).unwrap();
+        assert!(find_by_name(res.root.as_ref(), "fromInclude").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn include_循环报错() {
+        let dir = std::env::temp_dir().join(format!("flexui_cyc_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.xml"), r#"<VBox><Include src="b.xml"/></VBox>"#).unwrap();
+        std::fs::write(dir.join("b.xml"), r#"<VBox><Include src="a.xml"/></VBox>"#).unwrap();
+        let mut rm = ResourceManager::new();
+        rm.mount(DirProvider::new(&dir));
+        assert!(load_res(&rm, "a.xml", &Context::new()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_fragment_动态构建() {
+        let frag = build_fragment_str(r#"<HBox><Button name="ok" text="确定"/></HBox>"#, &Context::new()).unwrap();
+        assert!(find_by_name(frag.as_ref(), "ok").is_some());
+    }
 
     struct FakeCanvas;
     impl Canvas for FakeCanvas {
