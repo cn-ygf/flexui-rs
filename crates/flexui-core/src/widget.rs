@@ -60,6 +60,8 @@ pub struct Base {
     pub role: WidgetRole,
     /// 文本内容（Label/Button/Edit/CheckBox/Radio 复用）。
     pub text: String,
+    /// 文本光标位置（字符索引，Edit 用）。
+    pub cursor: usize,
     pub font: Font,
     pub style: StyleSet,
 
@@ -120,6 +122,7 @@ impl Base {
             name: None,
             role,
             text: String::new(),
+            cursor: 0,
             font: Font::default(),
             style: StyleSet::new(),
             enabled: true,

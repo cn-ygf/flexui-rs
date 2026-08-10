@@ -12,6 +12,7 @@ use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{NSEvent, NSView, NSWindow, NSWindowDelegate};
 use objc2_foundation::{MainThreadMarker, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
+use flexui_core::event::keys;
 use flexui_core::{
     layout_node, paint_tree, Dispatcher, Event, MouseButton, Node, Rect, Size, WindowCtx,
     WindowDelegate, WindowHandle,
@@ -206,12 +207,19 @@ impl FlexView {
         if let Some(s) = chars {
             let text = s.to_string();
             for ch in text.chars() {
-                let ev = if ch == '\u{7f}' || ch == '\u{8}' {
-                    Event::KeyDown { key: 8 }
-                } else if ch == '\t' {
-                    Event::KeyDown { key: 9 } // Tab → 焦点遍历
-                } else {
-                    Event::Char { ch }
+                // 把 macOS 功能键字符映射到平台无关键码；可见字符走 Char。
+                let ev = match ch as u32 {
+                    0x7f | 0x08 => Event::KeyDown { key: keys::BACKSPACE },
+                    0x09 => Event::KeyDown { key: keys::TAB },
+                    0xF702 => Event::KeyDown { key: keys::LEFT },
+                    0xF703 => Event::KeyDown { key: keys::RIGHT },
+                    0xF700 => Event::KeyDown { key: keys::UP },
+                    0xF701 => Event::KeyDown { key: keys::DOWN },
+                    0xF729 => Event::KeyDown { key: keys::HOME },
+                    0xF72B => Event::KeyDown { key: keys::END },
+                    0xF728 => Event::KeyDown { key: keys::DELETE },
+                    _ if !ch.is_control() => Event::Char { ch },
+                    _ => continue,
                 };
                 self.dispatch(ev);
             }

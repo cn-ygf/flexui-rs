@@ -8,7 +8,7 @@ use flexui::{
 };
 
 fn item_style(i: usize) -> StyleSet {
-    let bg = if i % 2 == 0 {
+    let bg = if i.is_multiple_of(2) {
         Color::from_u8(44, 48, 60, 255)
     } else {
         Color::from_u8(36, 40, 52, 255)

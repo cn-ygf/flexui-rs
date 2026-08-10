@@ -4,7 +4,7 @@ use flexui_geometry::{Color, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
 use crate::common_builders;
-use crate::event::{Event, EventFlow};
+use crate::event::{keys, Event, EventFlow};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
@@ -23,7 +23,42 @@ impl Edit {
     }
     pub fn text(mut self, t: impl Into<String>) -> Self {
         self.base.text = t.into();
+        self.base.cursor = self.base.text.chars().count();
         self
+    }
+
+    fn char_count(&self) -> usize {
+        self.base.text.chars().count()
+    }
+    /// 在光标处插入字符。
+    fn insert(&mut self, ch: char) {
+        let mut chars: Vec<char> = self.base.text.chars().collect();
+        let idx = self.base.cursor.min(chars.len());
+        chars.insert(idx, ch);
+        self.base.text = chars.into_iter().collect();
+        self.base.cursor = idx + 1;
+    }
+    /// 删除光标前一个字符（退格）。
+    fn backspace(&mut self) {
+        if self.base.cursor == 0 {
+            return;
+        }
+        let mut chars: Vec<char> = self.base.text.chars().collect();
+        let idx = self.base.cursor - 1;
+        if idx < chars.len() {
+            chars.remove(idx);
+            self.base.text = chars.into_iter().collect();
+        }
+        self.base.cursor = idx;
+    }
+    /// 删除光标处字符（Delete）。
+    fn delete_forward(&mut self) {
+        let mut chars: Vec<char> = self.base.text.chars().collect();
+        let idx = self.base.cursor;
+        if idx < chars.len() {
+            chars.remove(idx);
+            self.base.text = chars.into_iter().collect();
+        }
     }
 }
 
@@ -48,9 +83,10 @@ impl Widget for Edit {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
         draw_aligned_text(cv, &self.base.text, content, &self.base.font, color, TextAlign::Left);
-        // focus 时在文字末尾画一根光标。
+        // focus 时在光标位置画竖线（度量光标前子串宽度）。
         if self.base.focused {
-            let tw = cv.measure_text(&self.base.text, &self.base.font).width;
+            let before: String = self.base.text.chars().take(self.base.cursor).collect();
+            let tw = cv.measure_text(&before, &self.base.font).width;
             let cx = content.left() + tw + 1.0;
             cv.fill_rect(
                 Rect::new(cx, content.top() + 2.0, 1.5, content.size.height - 4.0),
@@ -61,14 +97,36 @@ impl Widget for Edit {
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         match ev {
             Event::Char { ch } if !ch.is_control() => {
-                self.base.text.push(*ch);
+                self.insert(*ch);
                 EventFlow::Consumed
             }
-            // 退格键（macOS/Win 退格常见键码 8）。
-            Event::KeyDown { key } if *key == 8 => {
-                self.base.text.pop();
-                EventFlow::Consumed
-            }
+            Event::KeyDown { key } => match *key {
+                keys::BACKSPACE => {
+                    self.backspace();
+                    EventFlow::Consumed
+                }
+                keys::DELETE => {
+                    self.delete_forward();
+                    EventFlow::Consumed
+                }
+                keys::LEFT => {
+                    self.base.cursor = self.base.cursor.saturating_sub(1);
+                    EventFlow::Consumed
+                }
+                keys::RIGHT => {
+                    self.base.cursor = (self.base.cursor + 1).min(self.char_count());
+                    EventFlow::Consumed
+                }
+                keys::HOME => {
+                    self.base.cursor = 0;
+                    EventFlow::Consumed
+                }
+                keys::END => {
+                    self.base.cursor = self.char_count();
+                    EventFlow::Consumed
+                }
+                _ => EventFlow::Ignored,
+            },
             _ => EventFlow::Ignored,
         }
     }

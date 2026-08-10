@@ -5,6 +5,7 @@
 
 use std::ptr::{null, null_mut};
 
+use flexui_core::event::keys;
 use flexui_core::{
     hit_test, layout_node, paint_tree, Color, Dispatcher, Event, MouseButton, Node, Point, Rect,
     TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
@@ -222,6 +223,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     button: MouseButton::Left,
                 },
             );
+            0
+        }
+        // 方向/Home/End/Delete 等特殊键（不产生 WM_CHAR）→ 平台无关键码。
+        WM_KEYDOWN => {
+            let key = match wparam as u32 {
+                0x25 => keys::LEFT,
+                0x27 => keys::RIGHT,
+                0x26 => keys::UP,
+                0x28 => keys::DOWN,
+                0x24 => keys::HOME,
+                0x23 => keys::END,
+                0x2E => keys::DELETE,
+                _ => return DefWindowProcW(hwnd, msg, wparam, lparam), // 其余交系统（保留 WM_CHAR）
+            };
+            dispatch(hwnd, state, Event::KeyDown { key });
             0
         }
         WM_CHAR => {

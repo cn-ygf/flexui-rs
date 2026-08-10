@@ -412,6 +412,29 @@ mod tests {
     }
 
     #[test]
+    fn edit_光标编辑() {
+        use crate::event::keys;
+        use crate::widgets::Edit;
+        let mut e = Edit::new();
+        for ch in "abc".chars() {
+            e.on_event(&Event::Char { ch });
+        }
+        assert_eq!(e.base().text, "abc");
+        // 左移后插入 X → abXc
+        e.on_event(&Event::KeyDown { key: keys::LEFT });
+        e.on_event(&Event::Char { ch: 'X' });
+        assert_eq!(e.base().text, "abXc");
+        // Home + Delete 删首 → bXc
+        e.on_event(&Event::KeyDown { key: keys::HOME });
+        e.on_event(&Event::KeyDown { key: keys::DELETE });
+        assert_eq!(e.base().text, "bXc");
+        // End + Backspace 删末 → bX
+        e.on_event(&Event::KeyDown { key: keys::END });
+        e.on_event(&Event::KeyDown { key: keys::BACKSPACE });
+        assert_eq!(e.base().text, "bX");
+    }
+
+    #[test]
     fn tab_焦点遍历() {
         let mut root = VBox::new()
             .push(Button::new("a").size(50.0, 30.0))

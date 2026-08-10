@@ -36,6 +36,21 @@ pub enum Event {
     ScaleChanged { scale: f32 },
 }
 
+/// 平台无关的按键码常量（后端把各自的原始键码映射到这些值再发出）。
+pub mod keys {
+    pub const BACKSPACE: u32 = 8;
+    pub const TAB: u32 = 9;
+    pub const ENTER: u32 = 13;
+    pub const ESCAPE: u32 = 27;
+    pub const DELETE: u32 = 127;
+    pub const LEFT: u32 = 0x1000;
+    pub const RIGHT: u32 = 0x1001;
+    pub const HOME: u32 = 0x1002;
+    pub const END: u32 = 0x1003;
+    pub const UP: u32 = 0x1004;
+    pub const DOWN: u32 = 0x1005;
+}
+
 /// 事件处理后的传播控制。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventFlow {
