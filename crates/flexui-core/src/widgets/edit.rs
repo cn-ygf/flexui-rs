@@ -82,14 +82,28 @@ impl Widget for Edit {
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
-        draw_aligned_text(cv, &self.base.text, content, &self.base.font, color, TextAlign::Left);
-        // 仅在获得焦点且闪烁相位为亮时画光标；高度与字号一致、垂直居中。
+        // 显示串 = 光标前文本 + IME 组合串 + 光标后文本；组合串加下划线以示未提交。
+        let before: String = self.base.text.chars().take(self.base.cursor).collect();
+        let after: String = self.base.text.chars().skip(self.base.cursor).collect();
+        let display = format!("{before}{}{after}", self.base.marked);
+        draw_aligned_text(cv, &display, content, &self.base.font, color, TextAlign::Left);
+
+        let before_w = cv.measure_text(&before, &self.base.font).width;
+        let caret_h = self.base.font.size;
+        let cy = content.top() + (content.size.height - caret_h) / 2.0;
+        // 组合串下划线。
+        if !self.base.marked.is_empty() {
+            let marked_w = cv.measure_text(&self.base.marked, &self.base.font).width;
+            let uy = (cy + caret_h - 1.0).min(content.bottom() - 1.0);
+            cv.fill_rect(
+                Rect::new(content.left() + before_w, uy, marked_w.max(1.0), 1.0),
+                color,
+            );
+        }
+        // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与字号一致、垂直居中。
         if self.base.focused && self.base.caret_on {
-            let before: String = self.base.text.chars().take(self.base.cursor).collect();
-            let tw = cv.measure_text(&before, &self.base.font).width;
-            let cx = content.left() + tw + 1.0;
-            let caret_h = self.base.font.size;
-            let cy = content.top() + (content.size.height - caret_h) / 2.0;
+            let marked_w = cv.measure_text(&self.base.marked, &self.base.font).width;
+            let cx = content.left() + before_w + marked_w + 1.0;
             cv.fill_rect(Rect::new(cx, cy.max(content.top()), 1.5, caret_h), color);
         }
     }
@@ -134,3 +148,45 @@ impl Widget for Edit {
 common_builders!(Edit);
 
 impl TextControl for Edit {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::layout_node;
+    use flexui_geometry::{Color, Corners, Point, Rect, Size};
+    use flexui_gfx::Font;
+    use std::cell::RefCell;
+
+    /// 记录最后一次 draw_text 文本，用于验证 IME 组合串已内联绘制。
+    struct RecCanvas {
+        last_text: RefCell<String>,
+    }
+    impl Canvas for RecCanvas {
+        fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+        fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+        fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+        fn draw_text(&mut self, t: &str, _o: Point, _f: &Font, _c: Color) {
+            *self.last_text.borrow_mut() = t.to_string();
+        }
+        fn measure_text(&self, t: &str, f: &Font) -> Size {
+            Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+        }
+    }
+
+    #[test]
+    fn ime_组合串内联绘制在光标处() {
+        // 文本 "ac"，光标在中间（1），组合串 "b" → 显示 "abc"，text 不变。
+        let mut e = Edit::new().text("ac");
+        e.base_mut().cursor = 1;
+        e.base_mut().marked = "b".to_string();
+        e.base_mut().focused = true;
+        let cv = RecCanvas { last_text: RefCell::new(String::new()) };
+        let mut cv = cv;
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let style = StyleSpec::default();
+        e.paint_content(&mut cv, &style);
+        assert_eq!(*cv.last_text.borrow(), "abc");
+        assert_eq!(e.base().text, "ac", "组合串不改动已提交文本");
+    }
+}

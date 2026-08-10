@@ -19,6 +19,10 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
+use windows_sys::Win32::UI::Input::Ime::{
+    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow,
+    COMPOSITIONFORM, CFS_POINT, GCS_COMPSTR, GCS_RESULTSTR,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::GdiCanvas;
@@ -214,6 +218,90 @@ unsafe fn to_physical_rect(hwnd: HWND, r: Rect) -> RECT {
     }
 }
 
+/// 读取 IME 组合字符串（GCS_COMPSTR 预览 / GCS_RESULTSTR 结果）。
+unsafe fn imm_comp_string(hwnd: HWND, gcs: u32) -> Option<String> {
+    let himc = ImmGetContext(hwnd);
+    if himc.is_null() {
+        return None;
+    }
+    // 先取字节长度，再取内容（UTF-16LE）。
+    let bytes = ImmGetCompositionStringW(himc, gcs, null_mut(), 0);
+    let result = if bytes > 0 {
+        let n = bytes as usize;
+        let mut buf = vec![0u8; n];
+        ImmGetCompositionStringW(himc, gcs, buf.as_mut_ptr() as *mut core::ffi::c_void, n as u32);
+        let u16buf: Vec<u16> = buf
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        Some(String::from_utf16_lossy(&u16buf))
+    } else {
+        None
+    };
+    ImmReleaseContext(hwnd, himc);
+    result
+}
+
+/// 对焦点控件的 Base 执行 f，返回其逻辑矩形（供失效重绘）。
+unsafe fn with_focus_base(
+    state: *mut AppState,
+    f: impl FnOnce(&mut flexui_core::Base),
+) -> Option<Rect> {
+    if state.is_null() {
+        return None;
+    }
+    let st = &mut *state;
+    let id = st.disp.focus()?;
+    let w = flexui_core::find_mut_by_id(st.root.as_mut(), id)?;
+    let b = w.base_mut();
+    f(b);
+    Some(b.rect)
+}
+
+/// 设置焦点控件的 IME 组合串并失效其区域。
+unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
+    let owned = text.to_string();
+    if let Some(r) = with_focus_base(state, move |b| b.marked = owned) {
+        let rc = to_physical_rect(hwnd, r);
+        InvalidateRect(hwnd, &rc, 0);
+    }
+}
+
+/// 清除焦点控件的 IME 组合串并失效其区域。
+unsafe fn clear_marked_on_focus(hwnd: HWND, state: *mut AppState) {
+    if let Some(r) = with_focus_base(state, |b| b.marked.clear()) {
+        let rc = to_physical_rect(hwnd, r);
+        InvalidateRect(hwnd, &rc, 0);
+    }
+}
+
+/// 把 IME 候选/组合窗定位到焦点控件光标附近（物理客户坐标）。
+unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
+    if state.is_null() {
+        return;
+    }
+    let st = &mut *state;
+    let Some(id) = st.disp.focus() else { return };
+    let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else { return };
+    let r = w.base().rect;
+    let dpi = GetDpiForWindow(hwnd);
+    let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+    let himc = ImmGetContext(hwnd);
+    if himc.is_null() {
+        return;
+    }
+    let form = COMPOSITIONFORM {
+        dwStyle: CFS_POINT,
+        ptCurrentPos: POINT {
+            x: (r.left() * scale) as i32,
+            y: (r.bottom() * scale) as i32,
+        },
+        rcArea: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    ImmSetCompositionWindow(himc, &form);
+    ImmReleaseContext(hwnd, himc);
+}
+
 /// 窗口过程。
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
@@ -293,6 +381,37 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 return 0;
             };
             dispatch(hwnd, state, ev);
+            0
+        }
+        // —— IME 组合（内联绘制组合串，与 macOS 对位）——
+        WM_IME_STARTCOMPOSITION => {
+            // 抑制系统默认组合窗，改为内联显示；候选窗定位到光标处。
+            position_ime(hwnd, state);
+            0
+        }
+        WM_IME_COMPOSITION => {
+            let flags = lparam as u32;
+            // 上屏结果串 → 逐字符发 Char 并清组合串。
+            if flags & GCS_RESULTSTR != 0 {
+                if let Some(s) = imm_comp_string(hwnd, GCS_RESULTSTR) {
+                    clear_marked_on_focus(hwnd, state);
+                    for ch in s.chars() {
+                        if !ch.is_control() {
+                            dispatch(hwnd, state, Event::Char { ch });
+                        }
+                    }
+                }
+            }
+            // 组合中的预览串 → 存到焦点控件、重定位候选窗。
+            if flags & GCS_COMPSTR != 0 {
+                let comp = imm_comp_string(hwnd, GCS_COMPSTR).unwrap_or_default();
+                set_marked_on_focus(hwnd, state, &comp);
+                position_ime(hwnd, state);
+            }
+            0
+        }
+        WM_IME_ENDCOMPOSITION => {
+            clear_marked_on_focus(hwnd, state);
             0
         }
         WM_MOUSEWHEEL => {

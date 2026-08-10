@@ -21,8 +21,8 @@ pub use paint::paint_tree;
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{BaseState, StyleSet, StyleSpec, VisualState};
 pub use widget::{
-    find_by_name, find_mut_by_name, visit_all_mut, Base, Clickable, Container, HitPolicy, Node,
-    TextControl, Widget, WidgetId, WidgetRole,
+    find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable, Container,
+    HitPolicy, Node, TextControl, Widget, WidgetId, WidgetRole,
 };
 pub use window::{
     NoopDelegate, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,

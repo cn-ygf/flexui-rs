@@ -62,6 +62,8 @@ pub struct Base {
     pub text: String,
     /// 文本光标位置（字符索引，Edit 用）。
     pub cursor: usize,
+    /// IME 组合中的预览文本（marked text），显示在光标处，未提交。
+    pub marked: String,
     pub font: Font,
     pub style: StyleSet,
 
@@ -125,6 +127,7 @@ impl Base {
             role,
             text: String::new(),
             cursor: 0,
+            marked: String::new(),
             font: Font::default(),
             style: StyleSet::new(),
             enabled: true,
@@ -262,6 +265,19 @@ pub fn find_by_name(node: &dyn Widget, name: &str) -> Option<WidgetId> {
     for child in node.base().children.iter() {
         if let Some(id) = find_by_name(child.as_ref(), name) {
             return Some(id);
+        }
+    }
+    None
+}
+
+/// 按 id 查找控件并返回可变引用（首个匹配）。供后端 IME 等按焦点 id 定位控件用。
+pub fn find_mut_by_id(node: &mut dyn Widget, id: WidgetId) -> Option<&mut dyn Widget> {
+    if node.base().id == id {
+        return Some(node);
+    }
+    for child in node.base_mut().children.iter_mut() {
+        if let Some(found) = find_mut_by_id(child.as_mut(), id) {
+            return Some(found);
         }
     }
     None
