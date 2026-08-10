@@ -71,6 +71,8 @@ pub struct Base {
     pub pressed: bool,
     pub focused: bool,
     pub focusable: bool,
+    /// 光标闪烁相位（true=显示），由分发器的 blink 定时切换；Edit 绘制光标用。
+    pub caret_on: bool,
     pub visible: bool,
     pub hit: HitPolicy,
 
@@ -129,6 +131,7 @@ impl Base {
             hover: false,
             pressed: false,
             focused: false,
+            caret_on: true,
             focusable: matches!(role, WidgetRole::Button | WidgetRole::Radio | WidgetRole::CheckBox | WidgetRole::Edit),
             visible: true,
             hit: HitPolicy::Solid,

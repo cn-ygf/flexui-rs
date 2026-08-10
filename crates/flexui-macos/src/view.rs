@@ -20,6 +20,14 @@ use flexui_core::{
 
 use crate::canvas::CgCanvas;
 
+/// 逻辑矩形 → NSRect（视图为 flipped，坐标一致）。
+fn to_nsrect(r: Rect) -> NSRect {
+    NSRect::new(
+        NSPoint::new(r.origin.x as f64, r.origin.y as f64),
+        NSSize::new(r.size.width as f64, r.size.height as f64),
+    )
+}
+
 /// macOS 窗口控制句柄（实现平台无关的 WindowHandle）。
 pub struct MacWindowHandle {
     window: Retained<NSWindow>,
@@ -109,6 +117,23 @@ define_class!(
             self.handle_key(event);
         }
 
+        // 光标闪烁定时器回调。
+        #[unsafe(method(blinkTimer:))]
+        fn blink_timer(&self, _timer: &AnyObject) {
+            self.fire_blink();
+        }
+
+        // 背板属性（缩放）变化 → 发 ScaleChanged 并重绘。
+        #[unsafe(method(viewDidChangeBackingProperties))]
+        fn backing_changed(&self) {
+            let scale = self
+                .window()
+                .map(|w| w.backingScaleFactor() as f32)
+                .unwrap_or(1.0);
+            self.dispatch(Event::ScaleChanged { scale });
+            self.setNeedsDisplay(true);
+        }
+
         #[unsafe(method(isFlipped))]
         fn is_flipped(&self) -> bool {
             true
@@ -177,15 +202,15 @@ impl FlexView {
         flexui_core::Point::new(p.x as f32, p.y as f32)
     }
 
-    /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需重绘。
+    /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
     fn dispatch(&self, ev: Event) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, disp, delegate } = &mut *st;
         disp.handle(root.as_mut(), &ev);
         let need = disp.take_redraw();
+        let dirty = disp.take_dirty();
         let acts = disp.take_activations();
-        let redraw = need || !acts.is_empty();
 
         if !acts.is_empty() {
             if let Some(win) = window {
@@ -197,8 +222,22 @@ impl FlexView {
             }
         }
         drop(st);
-        if redraw {
+        // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。
+        if need || !acts.is_empty() {
             self.setNeedsDisplay(true);
+        } else if let Some(r) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(r));
+        }
+    }
+
+    /// 光标闪烁定时回调：切换焦点控件 caret 相位，只失效其区域。
+    fn fire_blink(&self) {
+        let mut st = self.ivars().state.borrow_mut();
+        let AppState { root, disp, .. } = &mut *st;
+        let rect = disp.blink(root.as_mut());
+        drop(st);
+        if let Some(r) = rect {
+            self.setNeedsDisplayInRect(to_nsrect(r));
         }
     }
 

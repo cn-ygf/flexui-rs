@@ -16,7 +16,7 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSWindow, NSWindowStyleMask,
     NSWindowTitleVisibility,
 };
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
 use flexui_core::{Dispatcher, Node, TitlebarMode, WindowConfig, WindowDelegate};
 
@@ -81,6 +81,18 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
 
     // 窗口/控件就绪后触发 on_init（≈ InitWindow）。
     view.fire_init(&window);
+
+    // 光标闪烁定时器（0.53s 切换一次）。
+    #[allow(non_snake_case)]
+    let _blink = unsafe {
+        NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
+            0.53,
+            &view,
+            objc2::sel!(blinkTimer:),
+            None,
+            true,
+        )
+    };
 
     window.center();
     window.makeKeyAndOrderFront(None);

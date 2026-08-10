@@ -83,15 +83,14 @@ impl Widget for Edit {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
         draw_aligned_text(cv, &self.base.text, content, &self.base.font, color, TextAlign::Left);
-        // focus 时在光标位置画竖线（度量光标前子串宽度）。
-        if self.base.focused {
+        // 仅在获得焦点且闪烁相位为亮时画光标；高度与字号一致、垂直居中。
+        if self.base.focused && self.base.caret_on {
             let before: String = self.base.text.chars().take(self.base.cursor).collect();
             let tw = cv.measure_text(&before, &self.base.font).width;
             let cx = content.left() + tw + 1.0;
-            cv.fill_rect(
-                Rect::new(cx, content.top() + 2.0, 1.5, content.size.height - 4.0),
-                color,
-            );
+            let caret_h = self.base.font.size;
+            let cy = content.top() + (content.size.height - caret_h) / 2.0;
+            cv.fill_rect(Rect::new(cx, cy.max(content.top()), 1.5, caret_h), color);
         }
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {

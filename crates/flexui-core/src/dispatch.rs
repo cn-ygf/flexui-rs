@@ -3,7 +3,7 @@
 //! 维护 hover/pressed/focus 状态，做命中测试（含穿透），把鼠标交互翻译为
 //! 控件状态变化与点击回调；处理 Radio 分组互斥，并按 tabbar 绑定驱动 TabBox 翻页。
 
-use flexui_geometry::Point;
+use flexui_geometry::{Point, Rect};
 
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::widget::{find_by_name, HitPolicy, Widget, WidgetId, WidgetRole};
@@ -65,6 +65,8 @@ pub struct Dispatcher {
     pressed: Option<WidgetId>,
     focus: Option<WidgetId>,
     needs_redraw: bool,
+    /// 局部脏矩形（联合），后端据此只失效这块区域（脏区重绘）。
+    dirty: Option<Rect>,
     bindings: Vec<TabBinding>,
     /// 本轮被激活（点击）的具名控件，供窗口层统一 on_activate 通知（≈ duilib Notify）。
     activated: Vec<String>,
@@ -77,6 +79,7 @@ impl Dispatcher {
             pressed: None,
             focus: None,
             needs_redraw: false,
+            dirty: None,
             bindings: Vec::new(),
             activated: Vec::new(),
         }
@@ -92,11 +95,36 @@ impl Dispatcher {
         self.bindings.push(TabBinding { group, tabbox });
     }
 
-    /// 取走「需要重绘」标志（后端据此调用平台重绘）。
+    /// 取走「需要整窗重绘」标志。
     pub fn take_redraw(&mut self) -> bool {
         let r = self.needs_redraw;
         self.needs_redraw = false;
         r
+    }
+
+    /// 取走局部脏矩形（后端优先按此失效；无则看 take_redraw）。
+    pub fn take_dirty(&mut self) -> Option<Rect> {
+        self.dirty.take()
+    }
+
+    /// 累积脏矩形（求并）。
+    fn mark_dirty(&mut self, r: Rect) {
+        self.dirty = Some(match self.dirty {
+            Some(d) => union_rect(d, r),
+            None => r,
+        });
+    }
+
+    /// 光标闪烁：切换焦点控件 caret 相位，返回其矩形供局部失效（无焦点返回 None）。
+    pub fn blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        let fid = self.focus?;
+        let mut rect = None;
+        visit_mut(root, fid, &mut |w| {
+            let b = w.base_mut();
+            b.caret_on = !b.caret_on;
+            rect = Some(b.rect);
+        });
+        rect
     }
 
     /// 当前焦点控件 id。
@@ -136,7 +164,10 @@ impl Dispatcher {
                         consumed = w.on_event(ev) == EventFlow::Consumed;
                     });
                     if consumed {
-                        self.needs_redraw = true;
+                        // 只脏焦点控件区域（打字只重绘输入框）。
+                        if let Some(r) = rect_of(root, fid) {
+                            self.mark_dirty(r);
+                        }
                     }
                 }
             }
@@ -168,6 +199,9 @@ impl Dispatcher {
         for_each_mut(root, &mut |w| {
             let b = w.base_mut();
             b.focused = b.id == next;
+            if b.focused {
+                b.caret_on = true;
+            }
         });
         self.needs_redraw = true;
     }
@@ -183,26 +217,35 @@ impl Dispatcher {
             }
         });
         if let Some(id) = target {
+            let mut rect = None;
             visit_mut(root, id, &mut |w| {
                 let b = w.base_mut();
                 let max_scroll = (b.content_h - b.rect.size.height).max(0.0);
                 b.scroll_y = (b.scroll_y - dy).clamp(0.0, max_scroll);
+                rect = Some(b.rect);
             });
-            self.needs_redraw = true;
+            if let Some(r) = rect {
+                self.mark_dirty(r); // 只脏滚动区
+            }
         }
     }
 
-    /// 更新 hover 状态。
+    /// 更新 hover 状态（只脏「旧+新」悬停控件区域）。
     fn set_hover(&mut self, root: &mut dyn Widget, hit: Option<WidgetId>) {
         if self.hover == hit {
             return;
         }
+        let old = self.hover;
         self.hover = hit;
         for_each_mut(root, &mut |w| {
             let b = w.base_mut();
             b.hover = Some(b.id) == hit && b.enabled;
         });
-        self.needs_redraw = true;
+        for id in [old, hit].into_iter().flatten() {
+            if let Some(r) = rect_of(root, id) {
+                self.mark_dirty(r);
+            }
+        }
     }
 
     /// 处理按下：设置 pressed 与 focus。
@@ -225,6 +268,9 @@ impl Dispatcher {
             let b = w.base_mut();
             b.pressed = Some(b.id) == hit && b.enabled;
             b.focused = Some(b.id) == focus_target;
+            if b.focused {
+                b.caret_on = true; // 获焦立即显示光标
+            }
         });
         self.needs_redraw = true;
     }
@@ -333,6 +379,28 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
         HitPolicy::Solid => Some(b.id),
         HitPolicy::Transparent => None,
     }
+}
+
+/// 两矩形的包围并集。
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    let l = a.left().min(b.left());
+    let t = a.top().min(b.top());
+    let r = a.right().max(b.right());
+    let bo = a.bottom().max(b.bottom());
+    Rect::new(l, t, r - l, bo - t)
+}
+
+/// 按 id 找控件的绝对矩形。
+fn rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
+    if node.base().id == id {
+        return Some(node.base().rect);
+    }
+    for child in node.base().children.iter() {
+        if let Some(r) = rect_of(child.as_ref(), id) {
+            return Some(r);
+        }
+    }
+    None
 }
 
 /// 前序遍历，对每个节点执行 f。

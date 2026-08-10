@@ -132,6 +132,9 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
 
         ShowWindow(hwnd, SW_SHOW);
 
+        // 光标闪烁定时器（530ms）。
+        SetTimer(hwnd, 1, 530, None);
+
         // 窗口就绪后触发 on_init（≈ InitWindow）。
         {
             let st = &mut *state;
@@ -162,7 +165,7 @@ fn mouse_pos(lparam: LPARAM) -> flexui_core::Point {
     flexui_core::Point::new(x, y)
 }
 
-/// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需重绘。
+/// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
 unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     if state.is_null() {
         return;
@@ -170,6 +173,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     let st = &mut *state;
     st.disp.handle(st.root.as_mut(), &ev);
     let need = st.disp.take_redraw();
+    let dirty = st.disp.take_dirty();
     let acts = st.disp.take_activations();
 
     if !acts.is_empty() {
@@ -181,8 +185,24 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
             delegate.on_activate(name, &mut ctx);
         }
     }
+    // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
     if need || !acts.is_empty() {
         InvalidateRect(hwnd, null(), 0);
+    } else if let Some(r) = dirty {
+        let rc = to_physical_rect(hwnd, r);
+        InvalidateRect(hwnd, &rc, 0);
+    }
+}
+
+/// 逻辑矩形 → 物理 RECT（按窗口 DPI 缩放）。
+unsafe fn to_physical_rect(hwnd: HWND, r: Rect) -> RECT {
+    let dpi = GetDpiForWindow(hwnd);
+    let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+    RECT {
+        left: (r.left() * scale) as i32,
+        top: (r.top() * scale) as i32,
+        right: (r.right() * scale).ceil() as i32,
+        bottom: (r.bottom() * scale).ceil() as i32,
     }
 }
 
@@ -277,6 +297,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             InvalidateRect(hwnd, null(), 0);
             0
         }
+        // 光标闪烁定时器：切换焦点控件 caret 相位，只失效其区域。
+        WM_TIMER => {
+            if !state.is_null() {
+                let st = &mut *state;
+                if let Some(r) = st.disp.blink(st.root.as_mut()) {
+                    let rc = to_physical_rect(hwnd, r);
+                    InvalidateRect(hwnd, &rc, 0);
+                }
+            }
+            0
+        }
         // 背景擦除由我们的双缓冲全覆盖，拦截以消除闪烁。
         WM_ERASEBKGND => 1,
         // 关闭请求 → 窗口委托 on_close；返回 false 阻止关闭。
@@ -333,6 +364,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
             }
+            // 缩放变化事件（新 DPI 在 wparam 低字）。
+            let dpi = (wparam & 0xFFFF) as u32;
+            let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+            dispatch(hwnd, state, Event::ScaleChanged { scale });
             InvalidateRect(hwnd, null(), 0);
             0
         }
