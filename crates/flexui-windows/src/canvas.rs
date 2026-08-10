@@ -110,6 +110,30 @@ impl GdiCanvas {
         }
     }
 
+    /// 从 RGBA(premultiplied) 字节建 GDI+ 位图并绘制（供 SVG 光栅化结果用）。
+    unsafe fn draw_rgba(&self, rgba: &[u8], w: u32, h: u32, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
+        // tiny_skia RGBA(premult) → GDI+ 期望 BGRA 字节序（小端 PARGB）。
+        let mut bgra = rgba.to_vec();
+        for px in bgra.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        let mut img: *mut gp::GpBitmap = std::ptr::null_mut();
+        let stride = (w * 4) as i32;
+        if gp::GdipCreateBitmapFromScan0(
+            w as i32,
+            h as i32,
+            stride,
+            crate::gdiplus::PIXEL_FORMAT_32BPP_PARGB,
+            bgra.as_ptr(),
+            &mut img,
+        ) == 0
+            && !img.is_null()
+        {
+            self.draw_gpimage(img as *mut gp::GpImage, rect, tint, fit);
+            gp::GdipDisposeImage(img as *mut gp::GpImage);
+        }
+    }
+
     /// 绘制一个已加载的 GpImage（tint 用 ColorMatrix 重着色；按 fit 布局）。
     unsafe fn draw_gpimage(&self, img: *mut gp::GpImage, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
         let mut iw = 0u32;
@@ -386,7 +410,14 @@ impl Canvas for GdiCanvas {
                     let _ = std::fs::remove_file(&tmp);
                 }
             }
-            ImageSource::Svg(_) => { /* 见 SVG 支持（chunk 3） */ }
+            ImageSource::Svg(b) => {
+                // 按目标尺寸 2× 超采样光栅化（配合窗口 DPI world transform，高分屏清晰）。
+                let pw = ((rect.size.width * 2.0).round() as u32).max(1);
+                let ph = ((rect.size.height * 2.0).round() as u32).max(1);
+                if let Some(rgba) = flexui_svg::rasterize(b, pw, ph) {
+                    unsafe { self.draw_rgba(&rgba, pw, ph, rect, tint, &fit) };
+                }
+            }
         }
     }
 

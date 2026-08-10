@@ -50,6 +50,8 @@
       <Label text="第二页 · VBox + Image + Edit" normal-fgcolor="#FFFFFF"/>
       <HBox spacing="12" height="52">
         <Image src="logo.bmp" width="48" height="48"/>
+        <Image src="icon.svg" width="48" height="48"/>
+        <Image src="icon.svg" width="48" height="48" normal-fgtint="#FF9900"/>
         <Edit name="edit1" text="在这里输入…" flex="1" height="32"
               normal-bgcolor="#20242C" normal-fgcolor="#FFFFFF"
               border-width="1" normal-bordercolor="#4A5064" corner-radius="6"/>

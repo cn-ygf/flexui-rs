@@ -94,10 +94,21 @@ pub fn load_res(
 }
 
 /// 解析图片来源：有资源管理器则读成字节（支持 zip/内嵌），否则按文件路径。
+/// `.svg` 走矢量光栅化路径。
 fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
+    let is_svg = path.to_lowercase().ends_with(".svg");
     if let Some(rm) = res {
         if let Ok(bytes) = rm.read(path) {
-            return ImageSource::bytes(bytes);
+            return if is_svg {
+                ImageSource::svg(bytes)
+            } else {
+                ImageSource::bytes(bytes)
+            };
+        }
+    }
+    if is_svg {
+        if let Ok(bytes) = std::fs::read(path) {
+            return ImageSource::svg(bytes);
         }
     }
     ImageSource::path(path)

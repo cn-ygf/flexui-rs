@@ -33,10 +33,20 @@ fn main() {
     let tint_ok = tr > 180 && tg < 80 && tb < 80;
 
     let _ = std::fs::remove_file(&path);
-    if plain_ok && tint_ok {
+
+    // 3) SVG：蓝色矩形 SVG，光栅化绘制，期望蓝色。
+    let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#0000FF"/></svg>"##;
+    let mut root3 = Panel::new().push(Image::new(ImageSource::svg(svg.to_vec())));
+    let px3 = flexui_windows::render_tree_argb(&mut root3 as &mut dyn Widget, 40, 40, (20, 20))
+        .expect("离屏渲染失败");
+    println!("svg pixel    = {px3:#010X} (期望蓝 0xFF0000FF)");
+    let (sr, sg, sb) = ((px3 >> 16) & 0xFF, (px3 >> 8) & 0xFF, px3 & 0xFF);
+    let svg_ok = sb > 180 && sr < 80 && sg < 80;
+
+    if plain_ok && tint_ok && svg_ok {
         println!("WIN-IMAGE-OK");
     } else {
-        println!("WIN-IMAGE-FAIL (plain={plain_ok} tint={tint_ok})");
+        println!("WIN-IMAGE-FAIL (plain={plain_ok} tint={tint_ok} svg={svg_ok})");
         std::process::exit(1);
     }
 }

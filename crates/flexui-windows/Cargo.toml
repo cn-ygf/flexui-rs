@@ -7,6 +7,7 @@ edition = "2021"
 flexui-geometry = { workspace = true }
 flexui-gfx = { workspace = true }
 flexui-core = { workspace = true }
+flexui-svg = { workspace = true }
 
 # windows-sys 是 Windows 系统 API 的 Rust 绑定（raw-dylib，无需导入库），
 # 仅在为 Windows 目标编译时引入；非 Windows 平台本 crate 编译为空。

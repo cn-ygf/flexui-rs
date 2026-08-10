@@ -11,8 +11,8 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::AllocAnyThread;
 use objc2_app_kit::{
-    NSBezierPath, NSColor, NSCompositingOperation, NSFont, NSFontAttributeName,
-    NSForegroundColorAttributeName, NSGraphicsContext, NSImage, NSStringDrawing,
+    NSBezierPath, NSBitmapImageRep, NSColor, NSCompositingOperation, NSDeviceRGBColorSpace, NSFont,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSGraphicsContext, NSImage, NSStringDrawing,
 };
 use objc2_foundation::{NSData, NSDictionary, NSPoint, NSRect, NSSize, NSString};
 
@@ -37,6 +37,32 @@ fn to_nsrect(r: Rect) -> NSRect {
         NSPoint::new(r.origin.x as f64, r.origin.y as f64),
         NSSize::new(r.size.width as f64, r.size.height as f64),
     )
+}
+
+/// 从 RGBA(premultiplied) 字节建 NSImage（供 SVG 光栅化结果用）。
+unsafe fn nsimage_from_rgba(rgba: &[u8], w: usize, h: usize) -> Option<Retained<NSImage>> {
+    // planes 传 null → NSBitmapImageRep 自行分配缓冲，再把 RGBA 拷进去（避免生命周期问题）。
+    let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+        NSBitmapImageRep::alloc(),
+        std::ptr::null_mut(),
+        w as isize,
+        h as isize,
+        8,
+        4,
+        true,
+        false,
+        NSDeviceRGBColorSpace,
+        (w * 4) as isize,
+        32,
+    )?;
+    let dst = rep.bitmapData();
+    if dst.is_null() {
+        return None;
+    }
+    std::ptr::copy_nonoverlapping(rgba.as_ptr(), dst, w * h * 4);
+    let img = NSImage::initWithSize(NSImage::alloc(), NSSize::new(w as f64, h as f64));
+    img.addRepresentation(&rep);
+    Some(img)
 }
 
 /// 生成 tint 换色后的 NSImage：原图 + SourceAtop 目标色填充（保留 alpha 形状）。
@@ -244,7 +270,13 @@ impl Canvas for CgCanvas {
             ImageSource::Bytes(b) => {
                 NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(b))
             }
-            ImageSource::Svg(_) => None, // 见 SVG 支持（chunk 3）
+            ImageSource::Svg(b) => {
+                // 2× 超采样光栅化 → RGBA → NSImage。
+                let pw = ((rect.size.width * 2.0).round() as u32).max(1);
+                let ph = ((rect.size.height * 2.0).round() as u32).max(1);
+                flexui_svg::rasterize(b, pw, ph)
+                    .and_then(|rgba| unsafe { nsimage_from_rgba(&rgba, pw as usize, ph as usize) })
+            }
         };
         let Some(img) = img else { return };
         // tint 换色（保留 alpha 形状）。
