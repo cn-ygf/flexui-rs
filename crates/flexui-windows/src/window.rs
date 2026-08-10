@@ -76,7 +76,7 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         let class_name = wide("FlexUiWindowClass");
 
         let wc = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW,
+            style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
             lpfnWndProc: Some(wndproc),
             cbClsExtra: 0,
             cbWndExtra: 0,
@@ -175,8 +175,10 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     let need = st.disp.take_redraw();
     let dirty = st.disp.take_dirty();
     let acts = st.disp.take_activations();
+    let doubles = st.disp.take_double_clicks();
+    let contexts = st.disp.take_context_clicks();
 
-    if !acts.is_empty() {
+    if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
         let mut handle = WinWindowHandle { hwnd };
         let root = &mut st.root;
         let delegate = &mut st.delegate;
@@ -184,9 +186,15 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
         for name in &acts {
             delegate.on_activate(name, &mut ctx);
         }
+        for name in &doubles {
+            delegate.on_double_click(name, &mut ctx);
+        }
+        for (name, pos) in &contexts {
+            delegate.on_context(name, pos.x, pos.y, &mut ctx);
+        }
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
-    if need || !acts.is_empty() {
+    if need || !acts.is_empty() || !doubles.is_empty() {
         InvalidateRect(hwnd, null(), 0);
     } else if let Some(r) = dirty {
         let rc = to_physical_rect(hwnd, r);
@@ -258,6 +266,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 _ => return DefWindowProcW(hwnd, msg, wparam, lparam), // 其余交系统（保留 WM_CHAR）
             };
             dispatch(hwnd, state, Event::KeyDown { key });
+            0
+        }
+        WM_RBUTTONUP => {
+            dispatch(
+                hwnd,
+                state,
+                Event::MouseUp { pos: mouse_pos(lparam), button: MouseButton::Right },
+            );
+            0
+        }
+        WM_LBUTTONDBLCLK => {
+            dispatch(hwnd, state, Event::DoubleClick { pos: mouse_pos(lparam) });
             0
         }
         WM_CHAR => {

@@ -22,6 +22,8 @@ pub enum Event {
     MouseDown { pos: Point, button: MouseButton },
     /// 鼠标抬起。
     MouseUp { pos: Point, button: MouseButton },
+    /// 双击（左键，平台原生识别）。
+    DoubleClick { pos: Point },
     /// 滚轮滚动（dx/dy 为逻辑像素增量）。
     MouseWheel { pos: Point, dx: f32, dy: f32 },
     /// 键按下（key 为平台无关键码，一期用 u32 透传）。

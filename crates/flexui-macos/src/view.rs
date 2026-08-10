@@ -96,11 +96,19 @@ define_class!(
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
             self.dispatch(Event::MouseDown { pos: self.point(event), button: MouseButton::Left });
+            if event.clickCount() >= 2 {
+                self.dispatch(Event::DoubleClick { pos: self.point(event) });
+            }
         }
 
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, event: &NSEvent) {
             self.dispatch(Event::MouseUp { pos: self.point(event), button: MouseButton::Left });
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, event: &NSEvent) {
+            self.dispatch(Event::MouseUp { pos: self.point(event), button: MouseButton::Right });
         }
 
         #[unsafe(method(scrollWheel:))]
@@ -211,19 +219,27 @@ impl FlexView {
         let need = disp.take_redraw();
         let dirty = disp.take_dirty();
         let acts = disp.take_activations();
+        let doubles = disp.take_double_clicks();
+        let contexts = disp.take_context_clicks();
 
-        if !acts.is_empty() {
+        if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
             if let Some(win) = window {
                 let mut handle = MacWindowHandle { window: win };
                 let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
                 for name in &acts {
                     delegate.on_activate(name, &mut ctx);
                 }
+                for name in &doubles {
+                    delegate.on_double_click(name, &mut ctx);
+                }
+                for (name, pos) in &contexts {
+                    delegate.on_context(name, pos.x, pos.y, &mut ctx);
+                }
             }
         }
         drop(st);
         // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。
-        if need || !acts.is_empty() {
+        if need || !acts.is_empty() || !doubles.is_empty() {
             self.setNeedsDisplay(true);
         } else if let Some(r) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(r));

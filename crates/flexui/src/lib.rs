@@ -63,6 +63,10 @@ pub trait WindowImpl: 'static {
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
     /// 某具名控件被点击（≈ Notify）。
     fn on_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
+    /// 某具名控件被双击。
+    fn on_double_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
+    /// 某具名控件被右键（上下文菜单），坐标为逻辑像素。
+    fn on_context(&mut self, _name: &str, _x: f32, _y: f32, _ctx: &mut WindowCtx) {}
     /// 窗口尺寸变化。
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下。
@@ -84,6 +88,12 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     }
     fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
         self.imp.on_click(name, ctx);
+    }
+    fn on_double_click(&mut self, name: &str, ctx: &mut WindowCtx) {
+        self.imp.on_double_click(name, ctx);
+    }
+    fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
+        self.imp.on_context(name, x, y, ctx);
     }
     fn on_size(&mut self, w: f32, h: f32, ctx: &mut WindowCtx) {
         self.imp.on_size(w, h, ctx);

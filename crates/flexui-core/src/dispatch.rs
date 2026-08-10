@@ -70,6 +70,10 @@ pub struct Dispatcher {
     bindings: Vec<TabBinding>,
     /// 本轮被激活（点击）的具名控件，供窗口层统一 on_activate 通知（≈ duilib Notify）。
     activated: Vec<String>,
+    /// 本轮双击的具名控件。
+    double_clicked: Vec<String>,
+    /// 本轮右键的具名控件 + 位置（供上下文菜单）。
+    context_clicked: Vec<(String, Point)>,
 }
 
 impl Dispatcher {
@@ -82,12 +86,24 @@ impl Dispatcher {
             dirty: None,
             bindings: Vec::new(),
             activated: Vec::new(),
+            double_clicked: Vec::new(),
+            context_clicked: Vec::new(),
         }
     }
 
     /// 取走本轮被激活的具名控件（窗口驱动据此调 on_activate）。
     pub fn take_activations(&mut self) -> Vec<String> {
         std::mem::take(&mut self.activated)
+    }
+
+    /// 取走本轮双击的具名控件。
+    pub fn take_double_clicks(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.double_clicked)
+    }
+
+    /// 取走本轮右键的具名控件 + 位置。
+    pub fn take_context_clicks(&mut self) -> Vec<(String, Point)> {
+        std::mem::take(&mut self.context_clicked)
     }
 
     /// 注册一个「Radio 组 → TabBox」绑定。
@@ -152,6 +168,25 @@ impl Dispatcher {
             } => {
                 let hit = hit_test(root, *pos);
                 self.release(root, hit);
+            }
+            // 右键抬起 → 记录具名控件供上下文菜单（on_context）。
+            Event::MouseUp {
+                pos,
+                button: MouseButton::Right,
+            } => {
+                if let Some(id) = hit_test(root, *pos) {
+                    if let Some(name) = name_of(root, id) {
+                        self.context_clicked.push((name, *pos));
+                    }
+                }
+            }
+            // 双击 → 记录具名控件（on_double_click）。
+            Event::DoubleClick { pos } => {
+                if let Some(id) = hit_test(root, *pos) {
+                    if let Some(name) = name_of(root, id) {
+                        self.double_clicked.push(name);
+                    }
+                }
             }
             // Tab 键：焦点在可聚焦控件间遍历。
             Event::KeyDown { key: 9 } => {
@@ -390,6 +425,19 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
     Rect::new(l, t, r - l, bo - t)
 }
 
+/// 按 id 找控件的 name。
+fn name_of(node: &dyn Widget, id: WidgetId) -> Option<String> {
+    if node.base().id == id {
+        return node.base().name.clone();
+    }
+    for child in node.base().children.iter() {
+        if let Some(n) = name_of(child.as_ref(), id) {
+            return Some(n);
+        }
+    }
+    None
+}
+
 /// 按 id 找控件的绝对矩形。
 fn rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
     if node.base().id == id {
@@ -477,6 +525,23 @@ mod tests {
         // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
+    }
+
+    #[test]
+    fn 双击与右键记录() {
+        let mut root = VBox::new().push(Button::new("x").name("b").size(50.0, 30.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+        let mut disp = Dispatcher::new();
+        disp.handle(&mut root, &Event::DoubleClick { pos: Point::new(25.0, 15.0) });
+        assert_eq!(disp.take_double_clicks(), vec!["b".to_string()]);
+        disp.handle(
+            &mut root,
+            &Event::MouseUp { pos: Point::new(25.0, 15.0), button: MouseButton::Right },
+        );
+        let ctx = disp.take_context_clicks();
+        assert_eq!(ctx.len(), 1);
+        assert_eq!(ctx[0].0, "b");
     }
 
     #[test]

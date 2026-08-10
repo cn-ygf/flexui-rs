@@ -121,6 +121,10 @@ pub trait WindowDelegate {
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
     /// 某个具名控件被点击（≈ Notify 的 click）。
     fn on_activate(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
+    /// 某个具名控件被双击。
+    fn on_double_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
+    /// 某个具名控件被右键（供上下文菜单），坐标为逻辑像素。
+    fn on_context(&mut self, _name: &str, _x: f32, _y: f32, _ctx: &mut WindowCtx) {}
     /// 窗口尺寸变化。
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下（平台无关键码）。
