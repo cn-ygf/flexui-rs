@@ -19,10 +19,17 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
+use windows_sys::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+};
+use windows_sys::Win32::Foundation::GlobalFree;
+use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::UI::Input::Ime::{
     ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow,
     COMPOSITIONFORM, CFS_POINT, GCS_COMPSTR, GCS_RESULTSTR,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::GdiCanvas;
@@ -304,6 +311,109 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     ImmReleaseContext(hwnd, himc);
 }
 
+/// 写系统剪贴板（CF_UNICODETEXT，UTF-16LE）。
+unsafe fn clip_set(hwnd: HWND, s: &str) {
+    let utf16: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
+    let bytes = utf16.len() * 2;
+    let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if hmem.is_null() {
+        return;
+    }
+    let dst = GlobalLock(hmem) as *mut u16;
+    if !dst.is_null() {
+        std::ptr::copy_nonoverlapping(utf16.as_ptr(), dst, utf16.len());
+        GlobalUnlock(hmem);
+    }
+    if OpenClipboard(hwnd) != 0 {
+        EmptyClipboard();
+        // 成功后剪贴板接管 hmem，不能再释放。
+        SetClipboardData(CF_UNICODETEXT as u32, hmem);
+        CloseClipboard();
+    } else {
+        GlobalFree(hmem);
+    }
+}
+
+/// 读系统剪贴板文本（无则 None）。
+unsafe fn clip_get(hwnd: HWND) -> Option<String> {
+    if OpenClipboard(hwnd) == 0 {
+        return None;
+    }
+    let h = GetClipboardData(CF_UNICODETEXT as u32);
+    let result = if !h.is_null() {
+        let ptr = GlobalLock(h) as *const u16;
+        if ptr.is_null() {
+            None
+        } else {
+            let mut len = 0;
+            while *ptr.add(len) != 0 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(ptr, len);
+            let s = String::from_utf16_lossy(slice);
+            GlobalUnlock(h);
+            Some(s)
+        }
+    } else {
+        None
+    };
+    CloseClipboard();
+    result
+}
+
+/// 失效焦点控件被标脏的区域（剪贴板操作后重绘）。
+unsafe fn invalidate_dirty(hwnd: HWND, st: &mut AppState) {
+    if let Some(r) = st.disp.take_dirty() {
+        let rc = to_physical_rect(hwnd, r);
+        InvalidateRect(hwnd, &rc, 0);
+    }
+}
+
+/// Ctrl+C：复制焦点控件选中文本到剪贴板。
+unsafe fn clipboard_copy(hwnd: HWND, state: *mut AppState) {
+    if state.is_null() {
+        return;
+    }
+    let st = &mut *state;
+    if let Some(s) = st.disp.copy_selection(st.root.as_mut()) {
+        clip_set(hwnd, &s);
+    }
+}
+
+/// Ctrl+X：剪切。
+unsafe fn clipboard_cut(hwnd: HWND, state: *mut AppState) {
+    if state.is_null() {
+        return;
+    }
+    let st = &mut *state;
+    if let Some(s) = st.disp.cut_selection(st.root.as_mut()) {
+        clip_set(hwnd, &s);
+    }
+    invalidate_dirty(hwnd, st);
+}
+
+/// Ctrl+V：粘贴。
+unsafe fn clipboard_paste(hwnd: HWND, state: *mut AppState) {
+    if state.is_null() {
+        return;
+    }
+    if let Some(s) = clip_get(hwnd) {
+        let st = &mut *state;
+        st.disp.paste(st.root.as_mut(), &s);
+        invalidate_dirty(hwnd, st);
+    }
+}
+
+/// Ctrl+A：全选。
+unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
+    if state.is_null() {
+        return;
+    }
+    let st = &mut *state;
+    st.disp.select_all_focused(st.root.as_mut());
+    invalidate_dirty(hwnd, st);
+}
+
 /// 窗口过程。
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
@@ -345,7 +455,33 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 方向/Home/End/Delete 等特殊键（不产生 WM_CHAR）→ 平台无关键码。
         WM_KEYDOWN => {
-            let key = match wparam as u32 {
+            // 高位置位表示按下（GetKeyState 返回 i16，负值即按下）。
+            let ctrl = GetKeyState(VK_CONTROL as i32) < 0;
+            let shift = GetKeyState(VK_SHIFT as i32) < 0;
+            let vk = wparam as u32;
+            // Ctrl + C/X/V/A → 剪贴板/全选（拦截，避免杂散 WM_CHAR）。
+            if ctrl {
+                match vk {
+                    0x43 => {
+                        clipboard_copy(hwnd, state);
+                        return 0;
+                    }
+                    0x58 => {
+                        clipboard_cut(hwnd, state);
+                        return 0;
+                    }
+                    0x56 => {
+                        clipboard_paste(hwnd, state);
+                        return 0;
+                    }
+                    0x41 => {
+                        clipboard_select_all(hwnd, state);
+                        return 0;
+                    }
+                    _ => {}
+                }
+            }
+            let key = match vk {
                 0x25 => keys::LEFT,
                 0x27 => keys::RIGHT,
                 0x26 => keys::UP,
@@ -355,7 +491,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 0x2E => keys::DELETE,
                 _ => return DefWindowProcW(hwnd, msg, wparam, lparam), // 其余交系统（保留 WM_CHAR）
             };
-            dispatch(hwnd, state, Event::KeyDown { key, mods: Mods::default() });
+            let mods = Mods { shift, ctrl, ..Default::default() };
+            dispatch(hwnd, state, Event::KeyDown { key, mods });
             0
         }
         WM_RBUTTONUP => {

@@ -9,7 +9,10 @@ use std::cell::RefCell;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSTextInputClient, NSView, NSWindow, NSWindowDelegate};
+use objc2_app_kit::{
+    NSEvent, NSPasteboard, NSPasteboardTypeString, NSTextInputClient, NSView, NSWindow,
+    NSWindowDelegate,
+};
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound,
     NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSSize, NSString, NSUInteger,
@@ -180,11 +183,21 @@ define_class!(
             self.ime_insert(&text);
         }
 
-        // 未映射为可见字符的命令（退格/方向/回车等）→ 平台无关键码。
+        // 未映射为可见字符的命令：剪贴板/全选走漏斗，其余（退格/方向/回车/Shift扩选）→ 键码。
         #[unsafe(method(doCommandBySelector:))]
         fn do_command(&self, selector: Sel) {
-            if let Some(key) = command_to_key(selector.name().to_bytes()) {
-                self.dispatch(Event::KeyDown { key, mods: Mods::default() });
+            let name = selector.name().to_bytes();
+            match name {
+                b"copy:" => self.ime_copy(),
+                b"cut:" => self.ime_cut(),
+                b"paste:" => self.ime_paste(),
+                b"selectAll:" => self.ime_select_all(),
+                _ => {
+                    if let Some((key, shift)) = command_to_key(name) {
+                        let mods = Mods { shift, ..Default::default() };
+                        self.dispatch(Event::KeyDown { key, mods });
+                    }
+                }
             }
         }
 
@@ -269,22 +282,50 @@ fn ns_to_string(obj: &AnyObject) -> String {
     String::new()
 }
 
-/// NSTextInputClient 命令选择子 → 平台无关键码。
-fn command_to_key(name: &[u8]) -> Option<u32> {
+/// NSTextInputClient 命令选择子 → (平台无关键码, 是否 Shift 扩选)。
+///
+/// `*AndModifySelection:` 系列即按住 Shift 的移动，映射为对应基础键 + shift=true；
+/// 词粒度（moveWord*）近似按字符移动处理。
+fn command_to_key(name: &[u8]) -> Option<(u32, bool)> {
     Some(match name {
-        b"deleteBackward:" => keys::BACKSPACE,
-        b"deleteForward:" => keys::DELETE,
-        b"moveLeft:" => keys::LEFT,
-        b"moveRight:" => keys::RIGHT,
-        b"moveUp:" => keys::UP,
-        b"moveDown:" => keys::DOWN,
-        b"moveToBeginningOfLine:" | b"moveToLeftEndOfLine:" => keys::HOME,
-        b"moveToEndOfLine:" | b"moveToRightEndOfLine:" => keys::END,
-        b"insertTab:" => keys::TAB,
-        b"insertNewline:" | b"insertLineBreak:" => keys::ENTER,
-        b"cancelOperation:" => keys::ESCAPE,
+        b"deleteBackward:" => (keys::BACKSPACE, false),
+        b"deleteForward:" => (keys::DELETE, false),
+        b"moveLeft:" | b"moveWordLeft:" => (keys::LEFT, false),
+        b"moveRight:" | b"moveWordRight:" => (keys::RIGHT, false),
+        b"moveUp:" => (keys::UP, false),
+        b"moveDown:" => (keys::DOWN, false),
+        b"moveToBeginningOfLine:" | b"moveToLeftEndOfLine:" => (keys::HOME, false),
+        b"moveToEndOfLine:" | b"moveToRightEndOfLine:" => (keys::END, false),
+        b"insertTab:" => (keys::TAB, false),
+        b"insertNewline:" | b"insertLineBreak:" => (keys::ENTER, false),
+        b"cancelOperation:" => (keys::ESCAPE, false),
+        // —— Shift 扩选 ——
+        b"moveLeftAndModifySelection:" | b"moveWordLeftAndModifySelection:" => (keys::LEFT, true),
+        b"moveRightAndModifySelection:" | b"moveWordRightAndModifySelection:" => (keys::RIGHT, true),
+        b"moveUpAndModifySelection:" => (keys::UP, true),
+        b"moveDownAndModifySelection:" => (keys::DOWN, true),
+        b"moveToBeginningOfLineAndModifySelection:"
+        | b"moveToLeftEndOfLineAndModifySelection:" => (keys::HOME, true),
+        b"moveToEndOfLineAndModifySelection:" | b"moveToRightEndOfLineAndModifySelection:" => {
+            (keys::END, true)
+        }
         _ => return None,
     })
+}
+
+/// 写系统剪贴板（NSPasteboard 通用板）。
+fn pasteboard_set(s: &str) {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    let ns = NSString::from_str(s);
+    unsafe { pb.setString_forType(&ns, NSPasteboardTypeString) };
+}
+
+/// 读系统剪贴板文本（无文本返回 None）。
+fn pasteboard_get() -> Option<String> {
+    let pb = NSPasteboard::generalPasteboard();
+    let s = unsafe { pb.stringForType(NSPasteboardTypeString) }?;
+    Some(s.to_string())
 }
 
 impl FlexView {
@@ -431,6 +472,61 @@ impl FlexView {
             b.marked.clear();
             b.rect
         }) {
+            self.setNeedsDisplayInRect(to_nsrect(r));
+        }
+    }
+
+    /// 复制：把焦点控件选中文本写入剪贴板。
+    fn ime_copy(&self) {
+        let text = {
+            let mut st = self.ivars().state.borrow_mut();
+            let AppState { root, disp, .. } = &mut *st;
+            disp.copy_selection(root.as_mut())
+        };
+        if let Some(t) = text {
+            pasteboard_set(&t);
+        }
+    }
+
+    /// 剪切：写剪贴板并删除选区、失效其区域。
+    fn ime_cut(&self) {
+        let (text, dirty) = {
+            let mut st = self.ivars().state.borrow_mut();
+            let AppState { root, disp, .. } = &mut *st;
+            let t = disp.cut_selection(root.as_mut());
+            (t, disp.take_dirty())
+        };
+        if let Some(t) = &text {
+            pasteboard_set(t);
+        }
+        if let Some(r) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(r));
+        }
+    }
+
+    /// 粘贴：读剪贴板文本插入到焦点控件。
+    fn ime_paste(&self) {
+        let Some(text) = pasteboard_get() else { return };
+        let dirty = {
+            let mut st = self.ivars().state.borrow_mut();
+            let AppState { root, disp, .. } = &mut *st;
+            disp.paste(root.as_mut(), &text);
+            disp.take_dirty()
+        };
+        if let Some(r) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(r));
+        }
+    }
+
+    /// 全选焦点控件文本。
+    fn ime_select_all(&self) {
+        let dirty = {
+            let mut st = self.ivars().state.borrow_mut();
+            let AppState { root, disp, .. } = &mut *st;
+            disp.select_all_focused(root.as_mut());
+            disp.take_dirty()
+        };
+        if let Some(r) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(r));
         }
     }

@@ -148,6 +148,54 @@ impl Dispatcher {
         self.focus
     }
 
+    /// 复制焦点控件的选中文本（无选区返回 None）。供后端写系统剪贴板。
+    pub fn copy_selection(&mut self, root: &mut dyn Widget) -> Option<String> {
+        let fid = self.focus?;
+        let mut out = None;
+        visit_mut(root, fid, &mut |w| out = w.selected_text());
+        out
+    }
+
+    /// 剪切焦点控件的选中文本：返回文本并删除选区、脏其区域（无选区返回 None）。
+    pub fn cut_selection(&mut self, root: &mut dyn Widget) -> Option<String> {
+        let fid = self.focus?;
+        let mut out = None;
+        let mut deleted = false;
+        visit_mut(root, fid, &mut |w| {
+            out = w.selected_text();
+            if out.is_some() {
+                deleted = w.delete_selection();
+            }
+        });
+        if deleted {
+            if let Some(r) = rect_of(root, fid) {
+                self.mark_dirty(r);
+            }
+        }
+        out
+    }
+
+    /// 把文本粘贴到焦点控件（替换选区或在光标处插入）。
+    pub fn paste(&mut self, root: &mut dyn Widget, s: &str) {
+        let Some(fid) = self.focus else { return };
+        let mut changed = false;
+        visit_mut(root, fid, &mut |w| changed = w.replace_selection(s));
+        if changed {
+            if let Some(r) = rect_of(root, fid) {
+                self.mark_dirty(r);
+            }
+        }
+    }
+
+    /// 全选焦点控件文本。
+    pub fn select_all_focused(&mut self, root: &mut dyn Widget) {
+        let Some(fid) = self.focus else { return };
+        visit_mut(root, fid, &mut |w| w.select_all());
+        if let Some(r) = rect_of(root, fid) {
+            self.mark_dirty(r);
+        }
+    }
+
     /// 把事件转发给指定 id 的控件 on_event；消费则脏其区域。
     fn forward_to_widget(&mut self, root: &mut dyn Widget, id: WidgetId, ev: &Event) {
         let mut consumed = false;
@@ -631,6 +679,30 @@ mod tests {
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(8.0, 20.0) });
         assert_eq!(root.base().sel_range(), Some((1, 3)));
         assert_eq!(root.selected_text().as_deref(), Some("el"));
+    }
+
+    #[test]
+    fn edit_剪贴板漏斗() {
+        let mut root = Edit::new().text("hello");
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 点击以获得焦点。
+        disp.handle(
+            &mut root,
+            &Event::MouseDown { pos: Point::new(0.0, 20.0), button: MouseButton::Left },
+        );
+        // 全选 + 复制。
+        disp.select_all_focused(&mut root);
+        assert_eq!(disp.copy_selection(&mut root).as_deref(), Some("hello"));
+        // 剪切 → 返回文本且清空。
+        assert_eq!(disp.cut_selection(&mut root).as_deref(), Some("hello"));
+        assert_eq!(root.base().text, "");
+        // 粘贴。
+        disp.paste(&mut root, "hi");
+        assert_eq!(root.base().text, "hi");
+        // 无选区复制返回 None。
+        assert_eq!(disp.copy_selection(&mut root), None);
     }
 
     #[test]
