@@ -62,6 +62,10 @@ pub struct Base {
     pub text: String,
     /// 文本光标位置（字符索引，Edit 用）。
     pub cursor: usize,
+    /// 选区锚点（字符索引）。选区在 anchor 与 cursor 之间；None 或与 cursor 相等表示无选区。
+    pub sel_anchor: Option<usize>,
+    /// 是否多行文本（Edit 用）：Enter 插入换行、按 \n 分行显示。
+    pub multiline: bool,
     /// IME 组合中的预览文本（marked text），显示在光标处，未提交。
     pub marked: String,
     pub font: Font,
@@ -127,6 +131,8 @@ impl Base {
             role,
             text: String::new(),
             cursor: 0,
+            sel_anchor: None,
+            multiline: false,
             marked: String::new(),
             font: Font::default(),
             style: StyleSet::new(),
@@ -182,6 +188,17 @@ impl Base {
     pub fn resolved_style(&self) -> StyleSpec {
         self.style.resolve(self.visual_state())
     }
+
+    /// 当前有效选区 [lo, hi)（字符索引）。无选区（锚点为空或与光标重合）返回 None。
+    pub fn sel_range(&self) -> Option<(usize, usize)> {
+        let a = self.sel_anchor?;
+        let c = self.cursor;
+        if a == c {
+            None
+        } else {
+            Some((a.min(c), a.max(c)))
+        }
+    }
 }
 
 /// 所有控件实现的接口。默认实现覆盖「单子/叠放」布局与空内容，
@@ -207,6 +224,22 @@ pub trait Widget {
     fn on_event(&mut self, _ev: &Event) -> EventFlow {
         EventFlow::Ignored
     }
+
+    // —— 文本编辑钩子（供分发器统一驱动复制/剪切/粘贴/全选，Edit 覆写）——
+    /// 当前选中的文本（无选区返回 None）。供复制/剪切读取。
+    fn selected_text(&self) -> Option<String> {
+        None
+    }
+    /// 用 s 替换当前选区（无选区则在光标处插入）。返回内容是否改变。供粘贴用。
+    fn replace_selection(&mut self, _s: &str) -> bool {
+        false
+    }
+    /// 删除当前选区。返回是否存在选区被删除。供剪切用。
+    fn delete_selection(&mut self) -> bool {
+        false
+    }
+    /// 全选文本。
+    fn select_all(&mut self) {}
 }
 
 // —— 能力 trait：以 trait 约束表达「类型层级/继承视图」（组合优于继承的 Rust 表达）——
