@@ -15,6 +15,7 @@ mod image;
 mod label;
 mod panel;
 mod radio;
+mod scroll;
 mod tabbox;
 mod vbox;
 
@@ -26,6 +27,7 @@ pub use image::Image;
 pub use label::Label;
 pub use panel::Panel;
 pub use radio::Radio;
+pub use scroll::ScrollView;
 pub use tabbox::TabBox;
 pub use vbox::VBox;
 

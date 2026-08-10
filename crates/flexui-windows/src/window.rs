@@ -225,16 +225,33 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_CHAR => {
-            // 退格作为 KeyDown(8)，其余作为 Char。
+            // 退格→KeyDown(8)，Tab→KeyDown(9) 焦点遍历，其余作为 Char。
             let code = wparam as u32;
             let ev = if code == 8 {
                 Event::KeyDown { key: 8 }
+            } else if code == 9 {
+                Event::KeyDown { key: 9 }
             } else if let Some(ch) = char::from_u32(code) {
                 Event::Char { ch }
             } else {
                 return 0;
             };
             dispatch(hwnd, state, ev);
+            0
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam >> 16) & 0xFFFF) as u16 as i16;
+            let dy = delta as f32 / 30.0; // 一格(120) ≈ 4px 逻辑
+            // lparam 为屏幕坐标 → 客户区 → 逻辑坐标。
+            let mut pt = POINT {
+                x: (lparam & 0xFFFF) as u16 as i16 as i32,
+                y: ((lparam >> 16) & 0xFFFF) as u16 as i16 as i32,
+            };
+            ScreenToClient(hwnd, &mut pt);
+            let dpi = GetDpiForWindow(hwnd);
+            let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+            let pos = flexui_core::Point::new(pt.x as f32 / scale, pt.y as f32 / scale);
+            dispatch(hwnd, state, Event::MouseWheel { pos, dx: 0.0, dy });
             0
         }
         WM_SIZE => {

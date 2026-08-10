@@ -94,6 +94,15 @@ define_class!(
             self.dispatch(Event::MouseUp { pos: self.point(event), button: MouseButton::Left });
         }
 
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            self.dispatch(Event::MouseWheel {
+                pos: self.point(event),
+                dx: event.deltaX() as f32,
+                dy: event.deltaY() as f32,
+            });
+        }
+
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             self.handle_key(event);
@@ -199,6 +208,8 @@ impl FlexView {
             for ch in text.chars() {
                 let ev = if ch == '\u{7f}' || ch == '\u{8}' {
                     Event::KeyDown { key: 8 }
+                } else if ch == '\t' {
+                    Event::KeyDown { key: 9 } // Tab → 焦点遍历
                 } else {
                     Event::Char { ch }
                 };

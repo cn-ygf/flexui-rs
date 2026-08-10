@@ -27,7 +27,9 @@ pub use widget::{
 pub use window::{
     NoopDelegate, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
-pub use widgets::{Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, TabBox, VBox};
+pub use widgets::{
+    Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, ScrollView, TabBox, VBox,
+};
 
 // 几何/绘图类型透传，便于上层一次性引入。
 pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};

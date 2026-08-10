@@ -98,6 +98,14 @@ pub struct Base {
     /// 绝对定位（相对父内容区左上角）。设了则 Box 按此摆放，忽略叠放填充。
     pub pos: Option<(f32, f32)>,
 
+    // —— 滚动（ScrollView 用）——
+    /// 是否为可滚动容器（供分发器路由滚轮）。
+    pub scrollable: bool,
+    /// 纵向滚动偏移（内容向上卷起的像素）。
+    pub scroll_y: f32,
+    /// 内容总高（arrange 时算出，供滚动夹取）。
+    pub content_h: f32,
+
     // —— 子控件 ——
     pub children: Vec<Node>,
 
@@ -135,6 +143,9 @@ impl Base {
             justify: Justify::Start,
             align: Align::Stretch,
             pos: None,
+            scrollable: false,
+            scroll_y: 0.0,
+            content_h: 0.0,
             children: Vec::new(),
             on_click: None,
         }

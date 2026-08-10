@@ -292,6 +292,7 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
         "checkbox" => Box::new(CheckBox::new("")),
         "radio" => Box::new(Radio::new("")),
         "tabbox" => Box::new(TabBox::new()),
+        "scroll" | "scrollview" => Box::new(flexui_core::ScrollView::new()),
         "edit" => Box::new(Edit::new()),
         "image" => Box::new(Image::new(resolve_image(res, el.attr("src").unwrap_or("")))),
         other => return Err(LoadError(format!("未知标签 <{other}>"))),

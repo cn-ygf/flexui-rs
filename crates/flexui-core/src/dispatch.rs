@@ -125,6 +125,10 @@ impl Dispatcher {
                 let hit = hit_test(root, *pos);
                 self.release(root, hit);
             }
+            // Tab 键：焦点在可聚焦控件间遍历。
+            Event::KeyDown { key: 9 } => {
+                self.focus_next(root);
+            }
             Event::KeyDown { .. } | Event::KeyUp { .. } | Event::Char { .. } => {
                 if let Some(fid) = self.focus {
                     let mut consumed = false;
@@ -136,7 +140,55 @@ impl Dispatcher {
                     }
                 }
             }
+            // 滚轮：滚动光标下最内层可滚动容器。
+            Event::MouseWheel { pos, dy, .. } => {
+                self.scroll_at(root, *pos, *dy);
+            }
             _ => {}
+        }
+    }
+
+    /// 焦点移到下一个可聚焦控件（Tab 遍历）。
+    fn focus_next(&mut self, root: &mut dyn Widget) {
+        let mut order: Vec<WidgetId> = Vec::new();
+        for_each_mut(root, &mut |w| {
+            let b = w.base();
+            if b.focusable && b.enabled && b.visible {
+                order.push(b.id);
+            }
+        });
+        if order.is_empty() {
+            return;
+        }
+        let next = match self.focus.and_then(|f| order.iter().position(|&id| id == f)) {
+            Some(i) => order[(i + 1) % order.len()],
+            None => order[0],
+        };
+        self.focus = Some(next);
+        for_each_mut(root, &mut |w| {
+            let b = w.base_mut();
+            b.focused = b.id == next;
+        });
+        self.needs_redraw = true;
+    }
+
+    /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
+    fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dy: f32) {
+        // 找到包含该点的最深可滚动容器 id。
+        let mut target: Option<WidgetId> = None;
+        for_each_mut(root, &mut |w| {
+            let b = w.base();
+            if b.scrollable && b.visible && b.rect.contains(pos) {
+                target = Some(b.id); // 后序覆盖 → 保留最深（子在父后遍历）
+            }
+        });
+        if let Some(id) = target {
+            visit_mut(root, id, &mut |w| {
+                let b = w.base_mut();
+                let max_scroll = (b.content_h - b.rect.size.height).max(0.0);
+                b.scroll_y = (b.scroll_y - dy).clamp(0.0, max_scroll);
+            });
+            self.needs_redraw = true;
         }
     }
 
@@ -312,7 +364,7 @@ mod tests {
     use super::*;
     use crate::event::MouseButton;
     use crate::layout::layout_node;
-    use crate::widgets::{Button, Label, Radio, TabBox, VBox};
+    use crate::widgets::{Button, Label, Panel, Radio, ScrollView, TabBox, VBox};
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
@@ -333,6 +385,45 @@ mod tests {
     fn click_at(disp: &mut Dispatcher, root: &mut dyn Widget, p: Point) {
         disp.handle(root, &Event::MouseDown { pos: p, button: MouseButton::Left });
         disp.handle(root, &Event::MouseUp { pos: p, button: MouseButton::Left });
+    }
+
+    #[test]
+    fn scrollview_滚轮滚动() {
+        let mut root = ScrollView::new()
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0)); // 5×40 = 200 内容高
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+        assert_eq!(root.base().content_h, 200.0);
+        assert_eq!(root.base().children[0].base().rect.top(), 0.0);
+
+        let mut disp = Dispatcher::new();
+        disp.handle(
+            &mut root,
+            &Event::MouseWheel { pos: Point::new(50.0, 50.0), dx: 0.0, dy: -60.0 },
+        );
+        assert_eq!(root.base().scroll_y, 60.0); // 视口100 内容200 → 可滚到 100，60 有效
+        // 重新布局后首个子应上移 60
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+        assert_eq!(root.base().children[0].base().rect.top(), -60.0);
+    }
+
+    #[test]
+    fn tab_焦点遍历() {
+        let mut root = VBox::new()
+            .push(Button::new("a").size(50.0, 30.0))
+            .push(Button::new("b").size(50.0, 30.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+        let mut disp = Dispatcher::new();
+        disp.handle(&mut root, &Event::KeyDown { key: 9 });
+        assert!(root.base().children[0].base().focused);
+        disp.handle(&mut root, &Event::KeyDown { key: 9 });
+        assert!(root.base().children[1].base().focused);
+        assert!(!root.base().children[0].base().focused);
     }
 
     #[test]
