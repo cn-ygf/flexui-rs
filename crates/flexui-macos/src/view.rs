@@ -17,8 +17,8 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, MouseButton, Node, Rect,
-    Size, WindowCtx, WindowDelegate, WindowHandle,
+    find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, Mods, MouseButton, Node,
+    Rect, Size, WindowCtx, WindowDelegate, WindowHandle,
 };
 
 use crate::canvas::CgCanvas;
@@ -184,7 +184,7 @@ define_class!(
         #[unsafe(method(doCommandBySelector:))]
         fn do_command(&self, selector: Sel) {
             if let Some(key) = command_to_key(selector.name().to_bytes()) {
-                self.dispatch(Event::KeyDown { key });
+                self.dispatch(Event::KeyDown { key, mods: Mods::default() });
             }
         }
 
@@ -408,7 +408,7 @@ impl FlexView {
         self.with_focused(|b| b.marked.clear());
         for ch in text.chars() {
             if ch == '\n' || ch == '\r' {
-                self.dispatch(Event::KeyDown { key: keys::ENTER });
+                self.dispatch(Event::KeyDown { key: keys::ENTER, mods: Mods::default() });
             } else if !ch.is_control() {
                 self.dispatch(Event::Char { ch });
             }

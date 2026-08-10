@@ -189,7 +189,7 @@ impl Dispatcher {
                 }
             }
             // Tab 键：焦点在可聚焦控件间遍历。
-            Event::KeyDown { key: 9 } => {
+            Event::KeyDown { key: 9, .. } => {
                 self.focus_next(root);
             }
             Event::KeyDown { .. } | Event::KeyUp { .. } | Event::Char { .. } => {
@@ -478,7 +478,7 @@ fn visit_mut(node: &mut dyn Widget, id: WidgetId, f: &mut dyn FnMut(&mut dyn Wid
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::MouseButton;
+    use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
     use crate::widgets::{Button, Label, Panel, Radio, ScrollView, TabBox, VBox};
     use flexui_geometry::{Rect, Size};
@@ -496,6 +496,11 @@ mod tests {
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
         }
+    }
+
+    /// 构造无修饰键的 KeyDown（测试便捷）。
+    fn kd(key: u32) -> Event {
+        Event::KeyDown { key, mods: Mods::default() }
     }
 
     fn click_at(disp: &mut Dispatcher, root: &mut dyn Widget, p: Point) {
@@ -554,16 +559,16 @@ mod tests {
         }
         assert_eq!(e.base().text, "abc");
         // 左移后插入 X → abXc
-        e.on_event(&Event::KeyDown { key: keys::LEFT });
+        e.on_event(&kd(keys::LEFT));
         e.on_event(&Event::Char { ch: 'X' });
         assert_eq!(e.base().text, "abXc");
         // Home + Delete 删首 → bXc
-        e.on_event(&Event::KeyDown { key: keys::HOME });
-        e.on_event(&Event::KeyDown { key: keys::DELETE });
+        e.on_event(&kd(keys::HOME));
+        e.on_event(&kd(keys::DELETE));
         assert_eq!(e.base().text, "bXc");
         // End + Backspace 删末 → bX
-        e.on_event(&Event::KeyDown { key: keys::END });
-        e.on_event(&Event::KeyDown { key: keys::BACKSPACE });
+        e.on_event(&kd(keys::END));
+        e.on_event(&kd(keys::BACKSPACE));
         assert_eq!(e.base().text, "bX");
     }
 
@@ -575,9 +580,9 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         let mut disp = Dispatcher::new();
-        disp.handle(&mut root, &Event::KeyDown { key: 9 });
+        disp.handle(&mut root, &kd(9));
         assert!(root.base().children[0].base().focused);
-        disp.handle(&mut root, &Event::KeyDown { key: 9 });
+        disp.handle(&mut root, &kd(9));
         assert!(root.base().children[1].base().focused);
         assert!(!root.base().children[0].base().focused);
     }

@@ -7,8 +7,8 @@ use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    hit_test, layout_node, paint_tree, Color, Dispatcher, Event, MouseButton, Node, Point, Rect,
-    TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
+    hit_test, layout_node, paint_tree, Color, Dispatcher, Event, Mods, MouseButton, Node, Point,
+    Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -353,7 +353,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 0x2E => keys::DELETE,
                 _ => return DefWindowProcW(hwnd, msg, wparam, lparam), // 其余交系统（保留 WM_CHAR）
             };
-            dispatch(hwnd, state, Event::KeyDown { key });
+            dispatch(hwnd, state, Event::KeyDown { key, mods: Mods::default() });
             0
         }
         WM_RBUTTONUP => {
@@ -372,9 +372,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             // 退格→KeyDown(8)，Tab→KeyDown(9) 焦点遍历，其余作为 Char。
             let code = wparam as u32;
             let ev = if code == 8 {
-                Event::KeyDown { key: 8 }
+                Event::KeyDown { key: 8, mods: Mods::default() }
             } else if code == 9 {
-                Event::KeyDown { key: 9 }
+                Event::KeyDown { key: 9, mods: Mods::default() }
             } else if let Some(ch) = char::from_u32(code) {
                 Event::Char { ch }
             } else {

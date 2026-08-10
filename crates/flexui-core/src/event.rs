@@ -13,6 +13,18 @@ pub enum MouseButton {
     Middle,
 }
 
+/// 键盘修饰键状态。`meta` 指平台命令键（macOS Cmd / Windows Win）。
+///
+/// 文本控件主要读 `shift`（配合方向键扩展选区）；复制/剪切/粘贴/全选等由后端
+/// 直接识别命令键并走剪贴板漏斗，不经此结构下发。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mods {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
 /// 统一事件枚举（一期覆盖鼠标 + 键盘 + 窗口基础事件）。
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -26,10 +38,10 @@ pub enum Event {
     DoubleClick { pos: Point },
     /// 滚轮滚动（dx/dy 为逻辑像素增量）。
     MouseWheel { pos: Point, dx: f32, dy: f32 },
-    /// 键按下（key 为平台无关键码，一期用 u32 透传）。
-    KeyDown { key: u32 },
+    /// 键按下（key 为平台无关键码，一期用 u32 透传；mods 为修饰键状态）。
+    KeyDown { key: u32, mods: Mods },
     /// 键抬起。
-    KeyUp { key: u32 },
+    KeyUp { key: u32, mods: Mods },
     /// 字符输入（已由输入法/键盘布局翻译，用于文本框）。
     Char { ch: char },
     /// 窗口尺寸改变（逻辑像素）。

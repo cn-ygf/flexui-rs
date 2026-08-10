@@ -113,7 +113,7 @@ impl Widget for Edit {
                 self.insert(*ch);
                 EventFlow::Consumed
             }
-            Event::KeyDown { key } => match *key {
+            Event::KeyDown { key, .. } => match *key {
                 keys::BACKSPACE => {
                     self.backspace();
                     EventFlow::Consumed
