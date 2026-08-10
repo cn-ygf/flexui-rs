@@ -148,12 +148,31 @@ impl Dispatcher {
         self.focus
     }
 
+    /// 把事件转发给指定 id 的控件 on_event；消费则脏其区域。
+    fn forward_to_widget(&mut self, root: &mut dyn Widget, id: WidgetId, ev: &Event) {
+        let mut consumed = false;
+        visit_mut(root, id, &mut |w| {
+            consumed = w.on_event(ev) == EventFlow::Consumed;
+        });
+        if consumed {
+            if let Some(r) = rect_of(root, id) {
+                self.mark_dirty(r);
+            }
+        }
+    }
+
     /// 分发一个事件到控件树。
     pub fn handle(&mut self, root: &mut dyn Widget, ev: &Event) {
         match ev {
             Event::MouseMove { pos } => {
                 let hit = hit_test(root, *pos);
                 self.set_hover(root, hit);
+                // 若正按住某文本控件：这是一次拖动 → 转发给它延伸选区。
+                if let Some(id) = self.pressed {
+                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                        self.forward_to_widget(root, id, ev);
+                    }
+                }
             }
             Event::MouseDown {
                 pos,
@@ -161,6 +180,12 @@ impl Dispatcher {
             } => {
                 let hit = hit_test(root, *pos);
                 self.press(root, hit);
+                // 命中文本控件：转发按下事件，让其按 x 定位光标/起始锚点。
+                if let Some(id) = self.focus {
+                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                        self.forward_to_widget(root, id, ev);
+                    }
+                }
             }
             Event::MouseUp {
                 pos,
@@ -180,11 +205,14 @@ impl Dispatcher {
                     }
                 }
             }
-            // 双击 → 记录具名控件（on_double_click）。
+            // 双击 → 记录具名控件（on_double_click）；命中文本控件则转发做选词。
             Event::DoubleClick { pos } => {
                 if let Some(id) = hit_test(root, *pos) {
                     if let Some(name) = name_of(root, id) {
                         self.double_clicked.push(name);
+                    }
+                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                        self.forward_to_widget(root, id, ev);
                     }
                 }
             }
@@ -438,6 +466,19 @@ fn name_of(node: &dyn Widget, id: WidgetId) -> Option<String> {
     None
 }
 
+/// 按 id 找控件的角色（用于判断是否文本控件）。
+fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
+    if node.base().id == id {
+        return Some(node.base().role);
+    }
+    for child in node.base().children.iter() {
+        if let Some(r) = role_of(child.as_ref(), id) {
+            return Some(r);
+        }
+    }
+    None
+}
+
 /// 按 id 找控件的绝对矩形。
 fn rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
     if node.base().id == id {
@@ -480,7 +521,7 @@ mod tests {
     use super::*;
     use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
-    use crate::widgets::{Button, Label, Panel, Radio, ScrollView, TabBox, VBox};
+    use crate::widgets::{Button, Edit, Label, Panel, Radio, ScrollView, TabBox, VBox};
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
@@ -570,6 +611,38 @@ mod tests {
         e.on_event(&kd(keys::END));
         e.on_event(&kd(keys::BACKSPACE));
         assert_eq!(e.base().text, "bX");
+    }
+
+    #[test]
+    fn edit_鼠标点击拖拽选区() {
+        // FakeCanvas 下每字符宽 = 14*0.6 = 8.4；边界 i 在 x=8.4i。
+        let mut root = Edit::new().text("hello");
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 点击 x≈25 → 边界3；光标定位、锚点同处（无选区）。
+        disp.handle(
+            &mut root,
+            &Event::MouseDown { pos: Point::new(25.0, 20.0), button: MouseButton::Left },
+        );
+        assert_eq!(root.base().cursor, 3);
+        assert_eq!(root.base().sel_range(), None);
+        // 拖到 x≈8 → 边界1；选区 (1,3) = "el"。
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(8.0, 20.0) });
+        assert_eq!(root.base().sel_range(), Some((1, 3)));
+        assert_eq!(root.selected_text().as_deref(), Some("el"));
+    }
+
+    #[test]
+    fn edit_双击选词() {
+        let mut root = Edit::new().text("foo bar");
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+        // x≈40 落在 "bar" 内 → 选中整词。
+        disp.handle(&mut root, &Event::DoubleClick { pos: Point::new(40.0, 20.0) });
+        assert_eq!(root.base().sel_range(), Some((4, 7)));
+        assert_eq!(root.selected_text().as_deref(), Some("bar"));
     }
 
     #[test]

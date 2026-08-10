@@ -1,10 +1,10 @@
 //! Edit：文本输入（选区、复制/剪切/粘贴、IME；单行/多行）。
 
-use flexui_geometry::{Color, Rect, Size};
+use flexui_geometry::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
 use crate::common_builders;
-use crate::event::{keys, Event, EventFlow};
+use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
@@ -16,12 +16,19 @@ const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
 /// 文本输入控件（选区 + 剪贴板 + IME；单行/多行）。
 pub struct Edit {
     base: Base,
+    /// 单行时每个字符边界的 x 偏移（累积前缀宽度，长度=字符数+1），在 arrange 用真实
+    /// 测量算出，供 on_event 里 x→字符索引映射（否则 on_event 拿不到 Canvas）。
+    caret_offsets: Vec<f32>,
+    /// 偏移缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
+    cache_dirty: bool,
 }
 
 impl Edit {
     pub fn new() -> Self {
         Self {
             base: Base::new(WidgetRole::Edit),
+            caret_offsets: Vec::new(),
+            cache_dirty: true,
         }
     }
     pub fn text(mut self, t: impl Into<String>) -> Self {
@@ -64,6 +71,7 @@ impl Edit {
         self.base.text = chars.into_iter().collect();
         self.base.cursor = lo;
         self.base.sel_anchor = None;
+        self.cache_dirty = true;
     }
 
     /// 在光标处插入字符串；若有选区则先替换掉选区。
@@ -81,6 +89,7 @@ impl Edit {
         self.base.text = chars.into_iter().collect();
         self.base.cursor = idx + n;
         self.base.sel_anchor = None;
+        self.cache_dirty = true;
     }
 
     /// 在光标处插入单个字符（选区替换语义同 insert_str）。
@@ -111,6 +120,58 @@ impl Edit {
         let idx = self.base.cursor;
         self.delete_range(idx, idx + 1);
     }
+
+    /// 本地 x（相对内容区左边）→ 最近字符边界索引。缓存过期时回退等宽估算。
+    fn index_at_x(&self, local_x: f32) -> usize {
+        let n = self.char_count();
+        if self.cache_dirty || self.caret_offsets.len() != n + 1 {
+            let cw = (self.base.font.size * 0.6).max(1.0);
+            return ((local_x / cw).round().max(0.0) as usize).min(n);
+        }
+        let mut best = 0;
+        let mut best_d = f32::INFINITY;
+        for (i, &x) in self.caret_offsets.iter().enumerate() {
+            let d = (x - local_x).abs();
+            if d < best_d {
+                best_d = d;
+                best = i;
+            }
+        }
+        best
+    }
+
+    /// 绝对坐标 → 字符索引（单行）。
+    fn hit_index(&self, pos: Point) -> usize {
+        let content = layout::content_rect(&self.base);
+        self.index_at_x(pos.x - content.left())
+    }
+
+    /// idx 处的词范围 [start,end)（按字母数字/其它二分类扩展，供双击选词）。
+    fn word_range_at(&self, idx: usize) -> (usize, usize) {
+        let chars: Vec<char> = self.base.text.chars().collect();
+        let n = chars.len();
+        if n == 0 {
+            return (0, 0);
+        }
+        let i = idx.min(n);
+        let is_word = |c: char| c.is_alphanumeric() || c == '_';
+        // 探针取当前字符（在末尾则取前一个）决定分类。
+        let probe = if i < n { chars[i] } else { chars[i - 1] };
+        let cls = is_word(probe);
+        let mut start = i.min(n - 1);
+        // 若命中在词末尾边界，从 i-1 起。
+        if i >= n {
+            start = n - 1;
+        }
+        let mut end = start;
+        while start > 0 && is_word(chars[start - 1]) == cls {
+            start -= 1;
+        }
+        while end < n && is_word(chars[end]) == cls {
+            end += 1;
+        }
+        (start, end)
+    }
 }
 
 impl Default for Edit {
@@ -129,6 +190,19 @@ impl Widget for Edit {
     fn measure(&mut self, _avail: Size, cv: &dyn Canvas) -> Size {
         let s = cv.measure_text("Ag", &self.base.font);
         layout::size_from_content(&self.base, 120.0, s.height + 8.0)
+    }
+    fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
+        layout::arrange_stack(&mut self.base, content, cv);
+        // 缓存单行每个字符边界的 x 偏移（累积前缀宽度 → CJK/kerning 正确）。
+        let text = self.base.text.clone();
+        let n = text.chars().count();
+        let mut offs = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let pre: String = text.chars().take(i).collect();
+            offs.push(cv.measure_text(&pre, &self.base.font).width);
+        }
+        self.caret_offsets = offs;
+        self.cache_dirty = false;
     }
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         let content = layout::content_rect(&self.base);
@@ -175,6 +249,26 @@ impl Widget for Edit {
         match ev {
             Event::Char { ch } if !ch.is_control() => {
                 self.insert(*ch);
+                EventFlow::Consumed
+            }
+            // 鼠标按下：光标定位到点击处，并把锚点也置于此（拖动即从这里起选）。
+            Event::MouseDown { pos, button: MouseButton::Left } => {
+                let idx = self.hit_index(*pos);
+                self.base.cursor = idx;
+                self.base.sel_anchor = Some(idx);
+                EventFlow::Consumed
+            }
+            // 鼠标拖动（分发器仅在按住本控件时转发）：延伸选区到当前位置。
+            Event::MouseMove { pos } => {
+                self.base.cursor = self.hit_index(*pos);
+                EventFlow::Consumed
+            }
+            // 双击：选中光标处的词。
+            Event::DoubleClick { pos } => {
+                let idx = self.hit_index(*pos);
+                let (start, end) = self.word_range_at(idx);
+                self.base.sel_anchor = Some(start);
+                self.base.cursor = end;
                 EventFlow::Consumed
             }
             Event::KeyDown { key, mods } => match *key {

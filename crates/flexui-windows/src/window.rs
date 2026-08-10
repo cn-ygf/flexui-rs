@@ -162,11 +162,13 @@ unsafe fn app_state(hwnd: HWND) -> *mut AppState {
     GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState
 }
 
-/// 从 lparam 解析鼠标坐标（客户区，左上原点）。
-fn mouse_pos(lparam: LPARAM) -> flexui_core::Point {
+/// 鼠标消息 lparam（客户区物理像素）→ 逻辑像素坐标（按 DPI 缩放，与布局一致）。
+unsafe fn mouse_pos(hwnd: HWND, lparam: LPARAM) -> flexui_core::Point {
     let x = (lparam & 0xFFFF) as u16 as i16 as f32;
     let y = ((lparam >> 16) & 0xFFFF) as u16 as i16 as f32;
-    flexui_core::Point::new(x, y)
+    let dpi = GetDpiForWindow(hwnd);
+    let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+    flexui_core::Point::new(x / scale, y / scale)
 }
 
 /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
@@ -316,7 +318,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_MOUSEMOVE => {
-            dispatch(hwnd, state, Event::MouseMove { pos: mouse_pos(lparam) });
+            dispatch(hwnd, state, Event::MouseMove { pos: mouse_pos(hwnd, lparam) });
             0
         }
         WM_LBUTTONDOWN => {
@@ -324,7 +326,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 hwnd,
                 state,
                 Event::MouseDown {
-                    pos: mouse_pos(lparam),
+                    pos: mouse_pos(hwnd, lparam),
                     button: MouseButton::Left,
                 },
             );
@@ -335,7 +337,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 hwnd,
                 state,
                 Event::MouseUp {
-                    pos: mouse_pos(lparam),
+                    pos: mouse_pos(hwnd, lparam),
                     button: MouseButton::Left,
                 },
             );
@@ -360,12 +362,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             dispatch(
                 hwnd,
                 state,
-                Event::MouseUp { pos: mouse_pos(lparam), button: MouseButton::Right },
+                Event::MouseUp { pos: mouse_pos(hwnd, lparam), button: MouseButton::Right },
             );
             0
         }
         WM_LBUTTONDBLCLK => {
-            dispatch(hwnd, state, Event::DoubleClick { pos: mouse_pos(lparam) });
+            dispatch(hwnd, state, Event::DoubleClick { pos: mouse_pos(hwnd, lparam) });
             0
         }
         WM_CHAR => {
