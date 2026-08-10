@@ -508,12 +508,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_CHAR => {
-            // 退格→KeyDown(8)，Tab→KeyDown(9) 焦点遍历，其余作为 Char。
+            // 退格→KeyDown(8)、Tab→KeyDown(9) 焦点遍历、回车(13/\r)→ENTER（多行换行），
+            // 其余作为 Char。
             let code = wparam as u32;
             let ev = if code == 8 {
                 Event::KeyDown { key: 8, mods: Mods::default() }
             } else if code == 9 {
                 Event::KeyDown { key: 9, mods: Mods::default() }
+            } else if code == 13 {
+                Event::KeyDown { key: keys::ENTER, mods: Mods::default() }
             } else if let Some(ch) = char::from_u32(code) {
                 Event::Char { ch }
             } else {

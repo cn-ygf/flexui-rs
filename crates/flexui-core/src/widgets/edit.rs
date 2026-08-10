@@ -13,13 +13,22 @@ use crate::widget::{Base, TextControl, Widget, WidgetRole};
 /// 选区高亮色（半透明蓝）。
 const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
 
+/// 单行的字符边界缓存：start 为该行首字符在整段文本中的索引，offsets 为行内每个
+/// 字符边界的 x 偏移（累积前缀宽度，长度=行内字符数+1）。
+struct LineCache {
+    start: usize,
+    offsets: Vec<f32>,
+}
+
 /// 文本输入控件（选区 + 剪贴板 + IME；单行/多行）。
 pub struct Edit {
     base: Base,
-    /// 单行时每个字符边界的 x 偏移（累积前缀宽度，长度=字符数+1），在 arrange 用真实
-    /// 测量算出，供 on_event 里 x→字符索引映射（否则 on_event 拿不到 Canvas）。
-    caret_offsets: Vec<f32>,
-    /// 偏移缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
+    /// 按行的字符边界缓存，在 arrange 用真实测量算出，供 on_event 做 x/y→字符索引映射
+    /// （否则 on_event 拿不到 Canvas）。单行时只有一项。
+    lines: Vec<LineCache>,
+    /// 行高（measure("Ag").height），arrange 时算出，供多行光标/命中定位。
+    line_h: f32,
+    /// 缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
     cache_dirty: bool,
 }
 
@@ -27,7 +36,8 @@ impl Edit {
     pub fn new() -> Self {
         Self {
             base: Base::new(WidgetRole::Edit),
-            caret_offsets: Vec::new(),
+            lines: Vec::new(),
+            line_h: 0.0,
             cache_dirty: true,
         }
     }
@@ -121,16 +131,16 @@ impl Edit {
         self.delete_range(idx, idx + 1);
     }
 
-    /// 本地 x（相对内容区左边）→ 最近字符边界索引。缓存过期时回退等宽估算。
-    fn index_at_x(&self, local_x: f32) -> usize {
-        let n = self.char_count();
-        if self.cache_dirty || self.caret_offsets.len() != n + 1 {
-            let cw = (self.base.font.size * 0.6).max(1.0);
-            return ((local_x / cw).round().max(0.0) as usize).min(n);
+    /// 行内本地 x → 最近字符边界列号（0..=行长）。缓存过期回退等宽估算。
+    fn col_at(&self, li: usize, local_x: f32) -> usize {
+        let est = |x: f32| ((x / (self.base.font.size * 0.6).max(1.0)).round().max(0.0)) as usize;
+        if self.cache_dirty || li >= self.lines.len() {
+            return est(local_x);
         }
+        let offs = &self.lines[li].offsets;
         let mut best = 0;
         let mut best_d = f32::INFINITY;
-        for (i, &x) in self.caret_offsets.iter().enumerate() {
+        for (i, &x) in offs.iter().enumerate() {
             let d = (x - local_x).abs();
             if d < best_d {
                 best_d = d;
@@ -140,10 +150,57 @@ impl Edit {
         best
     }
 
-    /// 绝对坐标 → 字符索引（单行）。
+    /// 当前行高（未布局时回退字号）。
+    fn line_height(&self) -> f32 {
+        if self.line_h > 0.0 {
+            self.line_h
+        } else {
+            self.base.font.size
+        }
+    }
+
+    /// 绝对坐标 → 字符索引（多行按 y 定位行，再按 x 定位列）。
     fn hit_index(&self, pos: Point) -> usize {
         let content = layout::content_rect(&self.base);
-        self.index_at_x(pos.x - content.left())
+        let local_x = pos.x - content.left();
+        if self.lines.is_empty() {
+            let cw = (self.base.font.size * 0.6).max(1.0);
+            return ((local_x / cw).round().max(0.0) as usize).min(self.char_count());
+        }
+        let li = if self.base.multiline {
+            let rel = (pos.y - content.top()) / self.line_height();
+            (rel.floor().max(0.0) as usize).min(self.lines.len() - 1)
+        } else {
+            0
+        };
+        let col = self.col_at(li, local_x).min(self.lines[li].offsets.len().saturating_sub(1));
+        self.lines[li].start + col
+    }
+
+    /// 字符索引 → (行号, 列号)。缓存缺失时回退 (0, idx)。
+    fn pos_of(&self, idx: usize) -> (usize, usize) {
+        for (i, l) in self.lines.iter().enumerate() {
+            let len = l.offsets.len().saturating_sub(1);
+            if idx <= l.start + len {
+                return (i, idx - l.start);
+            }
+        }
+        match self.lines.last() {
+            Some(l) => (self.lines.len() - 1, l.offsets.len().saturating_sub(1)),
+            None => (0, idx),
+        }
+    }
+
+    /// 上/下移一行（dir=-1/1），列尽量保持；extend 为 Shift 扩选。
+    fn move_vertical(&mut self, dir: i32, extend: bool) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let (line, col) = self.pos_of(self.base.cursor);
+        let target = (line as i32 + dir).clamp(0, self.lines.len() as i32 - 1) as usize;
+        let tlen = self.lines[target].offsets.len().saturating_sub(1);
+        let nidx = self.lines[target].start + col.min(tlen);
+        self.set_cursor(nidx, extend);
     }
 
     /// idx 处的词范围 [start,end)（按字母数字/其它二分类扩展，供双击选词）。
@@ -172,6 +229,47 @@ impl Edit {
         }
         (start, end)
     }
+
+    /// 多行绘制：按 \n 分行逐行画文字，选区按行分段高亮，光标按行+列定位。
+    fn paint_multiline(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
+        let content = layout::content_rect(&self.base);
+        let color = style.fg_color.unwrap_or(Color::BLACK);
+        let line_h = self.line_height();
+        let caret_h = self.base.font.size;
+        let sel = self.base.sel_range();
+        let (cur_line, cur_col) = self.pos_of(self.base.cursor);
+
+        let mut y = content.top();
+        let mut base_idx = 0usize; // 行首字符索引
+        for (i, line) in self.base.text.split('\n').enumerate() {
+            let ll = line.chars().count();
+            // 选区在本行的交集 [s,e)。
+            if let Some((lo, hi)) = sel {
+                let (ls, le) = (base_idx, base_idx + ll);
+                let s = lo.max(ls);
+                let e = hi.min(le);
+                if s < e {
+                    let pre: String = line.chars().take(s - ls).collect();
+                    let mid: String = line.chars().skip(s - ls).take(e - s).collect();
+                    let x0 = content.left() + cv.measure_text(&pre, &self.base.font).width;
+                    let w = cv.measure_text(&mid, &self.base.font).width;
+                    cv.fill_rect(Rect::new(x0, y, w.max(1.0), line_h), SEL_COLOR);
+                }
+            }
+            // 文字。
+            let line_rect = Rect::new(content.left(), y, content.size.width, line_h);
+            draw_aligned_text(cv, line, line_rect, &self.base.font, color, TextAlign::Left);
+            // 光标（仅当前行）。
+            if self.base.focused && self.base.caret_on && i == cur_line {
+                let pre: String = line.chars().take(cur_col).collect();
+                let cx = content.left() + cv.measure_text(&pre, &self.base.font).width + 1.0;
+                let cyc = y + (line_h - caret_h) / 2.0;
+                cv.fill_rect(Rect::new(cx, cyc.max(y), 1.5, caret_h), color);
+            }
+            y += line_h;
+            base_idx += ll + 1;
+        }
+    }
 }
 
 impl Default for Edit {
@@ -189,22 +287,38 @@ impl Widget for Edit {
     }
     fn measure(&mut self, _avail: Size, cv: &dyn Canvas) -> Size {
         let s = cv.measure_text("Ag", &self.base.font);
-        layout::size_from_content(&self.base, 120.0, s.height + 8.0)
+        if self.base.multiline {
+            let rows = self.base.text.split('\n').count().max(1) as f32;
+            layout::size_from_content(&self.base, 120.0, rows * s.height + 8.0)
+        } else {
+            layout::size_from_content(&self.base, 120.0, s.height + 8.0)
+        }
     }
     fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
         layout::arrange_stack(&mut self.base, content, cv);
-        // 缓存单行每个字符边界的 x 偏移（累积前缀宽度 → CJK/kerning 正确）。
+        // 按行缓存字符边界 x 偏移（累积前缀 → CJK/kerning 正确），供 x/y→索引映射。
         let text = self.base.text.clone();
-        let n = text.chars().count();
-        let mut offs = Vec::with_capacity(n + 1);
-        for i in 0..=n {
-            let pre: String = text.chars().take(i).collect();
-            offs.push(cv.measure_text(&pre, &self.base.font).width);
+        let mut lines = Vec::new();
+        let mut start = 0usize;
+        for line in text.split('\n') {
+            let n = line.chars().count();
+            let mut offs = Vec::with_capacity(n + 1);
+            for i in 0..=n {
+                let pre: String = line.chars().take(i).collect();
+                offs.push(cv.measure_text(&pre, &self.base.font).width);
+            }
+            lines.push(LineCache { start, offsets: offs });
+            start += n + 1; // +1 跳过换行符
         }
-        self.caret_offsets = offs;
+        self.lines = lines;
+        self.line_h = cv.measure_text("Ag", &self.base.font).height;
         self.cache_dirty = false;
     }
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
+        if self.base.multiline {
+            self.paint_multiline(cv, style);
+            return;
+        }
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
         let caret_h = self.base.font.size;
@@ -308,12 +422,37 @@ impl Widget for Edit {
                     EventFlow::Consumed
                 }
                 keys::HOME => {
-                    self.set_cursor(0, mods.shift);
+                    // 多行：到本行行首；单行：到文本开头。
+                    let target = if self.base.multiline && !self.lines.is_empty() {
+                        let (line, _) = self.pos_of(self.base.cursor);
+                        self.lines[line].start
+                    } else {
+                        0
+                    };
+                    self.set_cursor(target, mods.shift);
                     EventFlow::Consumed
                 }
                 keys::END => {
-                    let n = self.char_count();
-                    self.set_cursor(n, mods.shift);
+                    let target = if self.base.multiline && !self.lines.is_empty() {
+                        let (line, _) = self.pos_of(self.base.cursor);
+                        let len = self.lines[line].offsets.len().saturating_sub(1);
+                        self.lines[line].start + len
+                    } else {
+                        self.char_count()
+                    };
+                    self.set_cursor(target, mods.shift);
+                    EventFlow::Consumed
+                }
+                keys::ENTER if self.base.multiline => {
+                    self.insert_str("\n");
+                    EventFlow::Consumed
+                }
+                keys::UP if self.base.multiline => {
+                    self.move_vertical(-1, mods.shift);
+                    EventFlow::Consumed
+                }
+                keys::DOWN if self.base.multiline => {
+                    self.move_vertical(1, mods.shift);
                     EventFlow::Consumed
                 }
                 _ => EventFlow::Ignored,
@@ -441,6 +580,48 @@ mod tests {
         assert!(e.delete_selection());
         assert_eq!(e.base().text, "");
         assert!(!e.delete_selection());
+    }
+
+    #[test]
+    fn 多行_enter插换行与上下移行() {
+        let cv = FakeCanvas;
+        let mut e = Edit::new().multiline(true).text("ab");
+        // 末尾回车 → "ab\n"，光标在第2行行首。
+        e.on_event(&kd(keys::ENTER, false));
+        assert_eq!(e.base().text, "ab\n");
+        e.on_event(&Event::Char { ch: 'c' });
+        e.on_event(&Event::Char { ch: 'd' }); // "ab\ncd"
+        assert_eq!(e.base().text, "ab\ncd");
+        // 布局以建立行缓存。
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 80.0), &cv);
+        // 光标此时在末尾(第2行 col2)。上移到第1行同列(col2 → "ab"末尾, 索引2)。
+        e.on_event(&kd(keys::UP, false));
+        assert_eq!(e.base().cursor, 2);
+        // 下移回第2行同列(col2 → 索引5)。
+        e.on_event(&kd(keys::DOWN, false));
+        assert_eq!(e.base().cursor, 5);
+    }
+
+    #[test]
+    fn 多行_measure高度随行数增长() {
+        let cv = FakeCanvas;
+        let mut one = Edit::new().multiline(true).text("a");
+        let mut three = Edit::new().multiline(true).text("a\nb\nc");
+        let h1 = one.measure(Size::new(200.0, 200.0), &cv).height;
+        let h3 = three.measure(Size::new(200.0, 200.0), &cv).height;
+        assert!(h3 > h1, "三行应比一行高: {h3} vs {h1}");
+    }
+
+    struct FakeCanvas;
+    impl Canvas for FakeCanvas {
+        fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+        fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+        fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+        fn draw_text(&mut self, _t: &str, _o: Point, _f: &Font, _c: Color) {}
+        fn measure_text(&self, t: &str, f: &Font) -> Size {
+            Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+        }
     }
 
     #[test]

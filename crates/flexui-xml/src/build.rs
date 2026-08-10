@@ -337,6 +337,7 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "justify" => base.justify = parse_justify(v),
             "align" => base.align = parse_align_items(v),
             "enabled" => base.enabled = parse_bool(v),
+            "multiline" => base.multiline = parse_bool(v),
             "mouse" => {
                 base.hit = if v.eq_ignore_ascii_case("transparent") {
                     HitPolicy::Transparent
