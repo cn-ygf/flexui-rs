@@ -31,4 +31,4 @@ pub use widgets::{Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, TabB
 
 // 几何/绘图类型透传，便于上层一次性引入。
 pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
-pub use flexui_gfx::{Canvas, Font, ImageSource, TextAlign};
+pub use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextAlign};

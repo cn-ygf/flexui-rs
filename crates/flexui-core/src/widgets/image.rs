@@ -37,8 +37,14 @@ impl Widget for Image {
         // 图片无内在尺寸信息时用显式尺寸，缺省给一个占位方块。
         layout::size_from_content(&self.base, 32.0, 32.0)
     }
-    fn paint_content(&self, cv: &mut dyn Canvas, _style: &StyleSpec) {
-        cv.draw_image(&self.source, layout::content_rect(&self.base));
+    fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
+        // Image 控件用前景图的 tint/fit（若样式里设了）。
+        cv.draw_image(
+            &self.source,
+            layout::content_rect(&self.base),
+            style.fg_tint,
+            style.fg_fit.clone().unwrap_or_default(),
+        );
     }
 }
 

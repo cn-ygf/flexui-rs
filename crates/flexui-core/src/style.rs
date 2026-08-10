@@ -4,8 +4,10 @@
 //! - focus 维度正交叠加：4×2 = 8 个样式槽。
 //! - 每个样式槽 `StyleSpec` 所有字段可缺省，解析时按「状态回退 + 字段级回退到 Normal」补全。
 
+use std::collections::HashMap;
+
 use flexui_geometry::{Color, Corners};
-use flexui_gfx::{ImageSource, TextAlign};
+use flexui_gfx::{ImageFit, ImageSource, TextAlign};
 
 /// 基础状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -17,16 +19,30 @@ pub enum BaseState {
     Disabled,
 }
 
-/// 完整视觉状态：基础状态 + 是否 focus。
+/// 完整视觉状态：基础状态 + 是否 focus + 是否 selected（勾选/单选选中）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct VisualState {
     pub base: BaseState,
     pub focused: bool,
+    pub selected: bool,
 }
 
 impl VisualState {
+    /// 构造（selected 默认 false）。
     pub fn new(base: BaseState, focused: bool) -> Self {
-        Self { base, focused }
+        Self {
+            base,
+            focused,
+            selected: false,
+        }
+    }
+    /// 带 selected 维度构造（用于 CheckBox/Radio 贴图）。
+    pub fn with_selected(base: BaseState, focused: bool, selected: bool) -> Self {
+        Self {
+            base,
+            focused,
+            selected,
+        }
     }
 }
 
@@ -36,7 +52,13 @@ pub struct StyleSpec {
     pub bg_color: Option<Color>,
     pub fg_color: Option<Color>,
     pub bg_image: Option<ImageSource>,
+    /// 背景图换色（None=原色）。
+    pub bg_tint: Option<Color>,
+    /// 背景图渲染方式。
+    pub bg_fit: Option<ImageFit>,
     pub fg_image: Option<ImageSource>,
+    pub fg_tint: Option<Color>,
+    pub fg_fit: Option<ImageFit>,
     pub border_color: Option<Color>,
     pub border_width: Option<f32>,
     pub corner_radius: Option<Corners>,
@@ -50,7 +72,11 @@ impl StyleSpec {
             bg_color: self.bg_color.or(base.bg_color),
             fg_color: self.fg_color.or(base.fg_color),
             bg_image: self.bg_image.clone().or_else(|| base.bg_image.clone()),
+            bg_tint: self.bg_tint.or(base.bg_tint),
+            bg_fit: self.bg_fit.clone().or_else(|| base.bg_fit.clone()),
             fg_image: self.fg_image.clone().or_else(|| base.fg_image.clone()),
+            fg_tint: self.fg_tint.or(base.fg_tint),
+            fg_fit: self.fg_fit.clone().or_else(|| base.fg_fit.clone()),
             border_color: self.border_color.or(base.border_color),
             border_width: self.border_width.or(base.border_width),
             corner_radius: self.corner_radius.or(base.corner_radius),
@@ -59,17 +85,12 @@ impl StyleSpec {
     }
 }
 
-/// 8 个状态槽的集合（稀疏，未设置的用 Normal 兜底）。
+/// 分状态样式集合：稀疏 map，键为 (base, focus, selected)；未命中按回退链取，
+/// 最终字段级回退到 Normal 槽。
 #[derive(Debug, Clone, Default)]
 pub struct StyleSet {
     normal: StyleSpec,
-    normal_focus: Option<StyleSpec>,
-    hot: Option<StyleSpec>,
-    hot_focus: Option<StyleSpec>,
-    pushed: Option<StyleSpec>,
-    pushed_focus: Option<StyleSpec>,
-    disabled: Option<StyleSpec>,
-    disabled_focus: Option<StyleSpec>,
+    slots: HashMap<VisualState, StyleSpec>,
 }
 
 impl StyleSet {
@@ -79,15 +100,10 @@ impl StyleSet {
 
     /// 设置某状态槽。
     pub fn set(&mut self, state: VisualState, spec: StyleSpec) {
-        match (state.base, state.focused) {
-            (BaseState::Normal, false) => self.normal = spec,
-            (BaseState::Normal, true) => self.normal_focus = Some(spec),
-            (BaseState::Hot, false) => self.hot = Some(spec),
-            (BaseState::Hot, true) => self.hot_focus = Some(spec),
-            (BaseState::Pushed, false) => self.pushed = Some(spec),
-            (BaseState::Pushed, true) => self.pushed_focus = Some(spec),
-            (BaseState::Disabled, false) => self.disabled = Some(spec),
-            (BaseState::Disabled, true) => self.disabled_focus = Some(spec),
+        if state == VisualState::default() {
+            self.normal = spec;
+        } else {
+            self.slots.insert(state, spec);
         }
     }
 
@@ -97,7 +113,7 @@ impl StyleSet {
         self
     }
 
-    /// 便捷：设置某基础状态（无 focus）槽。
+    /// 便捷：设置某基础状态（无 focus/selected）槽。
     pub fn with_state(mut self, base: BaseState, spec: StyleSpec) -> Self {
         self.set(VisualState::new(base, false), spec);
         self
@@ -105,36 +121,29 @@ impl StyleSet {
 
     /// 取某状态槽（不做回退）。
     fn slot(&self, state: VisualState) -> Option<&StyleSpec> {
-        match (state.base, state.focused) {
-            (BaseState::Normal, false) => Some(&self.normal),
-            (BaseState::Normal, true) => self.normal_focus.as_ref(),
-            (BaseState::Hot, false) => self.hot.as_ref(),
-            (BaseState::Hot, true) => self.hot_focus.as_ref(),
-            (BaseState::Pushed, false) => self.pushed.as_ref(),
-            (BaseState::Pushed, true) => self.pushed_focus.as_ref(),
-            (BaseState::Disabled, false) => self.disabled.as_ref(),
-            (BaseState::Disabled, true) => self.disabled_focus.as_ref(),
+        if state == VisualState::default() {
+            Some(&self.normal)
+        } else {
+            self.slots.get(&state)
         }
     }
 
-    /// 解析出生效样式：
-    /// 1. focus 槽缺省 → 退到同基础状态的非 focus 槽；
-    /// 2. 该基础状态槽仍缺省 → 退到 Normal 槽；
-    /// 3. 字段级：最终结果的每个缺省字段再由 Normal 兜底。
+    /// 解析出生效样式：按「specific→general」回退链找生效槽，再字段级回退到 Normal。
+    /// 回退链：全维度 → 去 focus → 去 selected → 仅 base。
     pub fn resolve(&self, state: VisualState) -> StyleSpec {
-        // 第一步：状态槽回退，找到「生效槽」。
-        let effective = self
-            .slot(state)
-            .or_else(|| {
-                if state.focused {
-                    self.slot(VisualState::new(state.base, false))
-                } else {
-                    None
-                }
-            })
-            .cloned()
-            .unwrap_or_default();
-        // 第二步：字段级回退到 Normal 槽。
+        let chain = [
+            state,
+            VisualState::with_selected(state.base, false, state.selected),
+            VisualState::with_selected(state.base, state.focused, false),
+            VisualState::new(state.base, false),
+        ];
+        let mut effective = StyleSpec::default();
+        for cand in chain {
+            if let Some(s) = self.slot(cand) {
+                effective = s.clone();
+                break;
+            }
+        }
         effective.fill_from(&self.normal)
     }
 }

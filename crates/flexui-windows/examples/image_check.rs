@@ -3,7 +3,7 @@
 
 #[cfg(windows)]
 fn main() {
-    use flexui_core::{Image, ImageSource, Panel, Widget};
+    use flexui_core::{Color, Image, ImageSource, Panel, StyleSet, StyleSpec, Widget};
 
     // —— 生成一张 8x8 纯绿 24 位 BMP 到临时文件 ——
     let path = std::env::temp_dir().join("flexui_green.bmp");
@@ -11,25 +11,34 @@ fn main() {
     let path_str = path.to_string_lossy().to_string();
     println!("bmp = {path_str}");
 
-    // 根：Panel 填充 Image（Panel 默认让子控件填满内容区）。
-    let mut root = Panel::new().push(Image::new(ImageSource::path(path_str)));
-
-    // 渲染 40x40，采样中心 (20,20)。
+    // 1) 原色绘制：期望绿色。
+    let mut root = Panel::new().push(Image::new(ImageSource::path(path_str.clone())));
     let pixel = flexui_windows::render_tree_argb(&mut root as &mut dyn Widget, 40, 40, (20, 20))
         .expect("离屏渲染失败");
-    println!("image pixel = {pixel:#010X} (期望绿色 0xFF00FF00 附近)");
+    println!("image pixel  = {pixel:#010X} (期望绿 0xFF00FF00)");
+    let (r, g, b) = ((pixel >> 16) & 0xFF, (pixel >> 8) & 0xFF, pixel & 0xFF);
+    let plain_ok = g > 180 && r < 80 && b < 80;
 
-    // 判定：绿分量高、红蓝分量低（允许缩放插值带来的少量误差）。
-    let r = (pixel >> 16) & 0xFF;
-    let g = (pixel >> 8) & 0xFF;
-    let b = pixel & 0xFF;
-    if g > 180 && r < 80 && b < 80 {
+    // 2) 换色 tint：把绿图 tint 成红，期望红色（验证「黑图/任意图动态换色」）。
+    let red = Color::from_u8(255, 0, 0, 255);
+    let tint_style = StyleSet::new().with_normal(StyleSpec {
+        fg_tint: Some(red),
+        ..Default::default()
+    });
+    let mut root2 = Panel::new().push(Image::new(ImageSource::path(path_str)).style(tint_style));
+    let px2 = flexui_windows::render_tree_argb(&mut root2 as &mut dyn Widget, 40, 40, (20, 20))
+        .expect("离屏渲染失败");
+    println!("tinted pixel = {px2:#010X} (期望红 0xFFFF0000)");
+    let (tr, tg, tb) = ((px2 >> 16) & 0xFF, (px2 >> 8) & 0xFF, px2 & 0xFF);
+    let tint_ok = tr > 180 && tg < 80 && tb < 80;
+
+    let _ = std::fs::remove_file(&path);
+    if plain_ok && tint_ok {
         println!("WIN-IMAGE-OK");
     } else {
-        println!("WIN-IMAGE-FAIL");
+        println!("WIN-IMAGE-FAIL (plain={plain_ok} tint={tint_ok})");
         std::process::exit(1);
     }
-    let _ = std::fs::remove_file(&path);
 }
 
 /// 写一张 width×height 的 24 位未压缩 BMP（纯色 BGR）。

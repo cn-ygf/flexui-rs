@@ -4,15 +4,15 @@
 //! 这些原语都属 AppKit（系统框架），在 `NSView::drawRect:` 期间当前已有锁定的
 //! 图形上下文，直接绘制即落到该视图上，符合「NSView 自绘」的要求。
 
-use flexui_geometry::{Color, Corners, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageSource};
+use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::AllocAnyThread;
 use objc2_app_kit::{
-    NSBezierPath, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
-    NSGraphicsContext, NSImage, NSStringDrawing,
+    NSBezierPath, NSColor, NSCompositingOperation, NSFont, NSFontAttributeName,
+    NSForegroundColorAttributeName, NSGraphicsContext, NSImage, NSStringDrawing,
 };
 use objc2_foundation::{NSData, NSDictionary, NSPoint, NSRect, NSSize, NSString};
 
@@ -37,6 +37,99 @@ fn to_nsrect(r: Rect) -> NSRect {
         NSPoint::new(r.origin.x as f64, r.origin.y as f64),
         NSSize::new(r.size.width as f64, r.size.height as f64),
     )
+}
+
+/// 生成 tint 换色后的 NSImage：原图 + SourceAtop 目标色填充（保留 alpha 形状）。
+#[allow(deprecated)] // lockFocus 已弃用但对位图 tint 足够可靠
+fn tinted_image(img: &NSImage, color: Color) -> Retained<NSImage> {
+    let size = img.size();
+    let bounds = NSRect::new(NSPoint::new(0.0, 0.0), size);
+    let out = NSImage::initWithSize(NSImage::alloc(), size);
+    out.lockFocus();
+    img.drawInRect_fromRect_operation_fraction(
+        bounds,
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+        NSCompositingOperation::SourceOver,
+        1.0,
+    );
+    if let Some(ctx) = NSGraphicsContext::currentContext() {
+        ctx.setCompositingOperation(NSCompositingOperation::SourceAtop);
+    }
+    to_nscolor(color).set();
+    NSBezierPath::fillRect(bounds);
+    out.unlockFocus();
+    out
+}
+
+/// 按 fit 绘制 NSImage 到目标矩形（坐标为 flipped 视图的左上原点）。
+fn draw_nsimage(img: &NSImage, rect: Rect, fit: &ImageFit) {
+    let size = img.size();
+    let (iw, ih) = (size.width as f32, size.height as f32);
+    let full_src = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
+    let op = NSCompositingOperation::SourceOver;
+    match fit {
+        ImageFit::Stretch => img.drawInRect(to_nsrect(rect)),
+        ImageFit::Center => {
+            let x = rect.left() + (rect.size.width - iw) / 2.0;
+            let y = rect.top() + (rect.size.height - ih) / 2.0;
+            img.drawInRect(to_nsrect(Rect::new(x, y, iw, ih)));
+        }
+        ImageFit::Tile => {
+            let mut y = rect.top();
+            while y < rect.bottom() {
+                let mut x = rect.left();
+                while x < rect.right() {
+                    img.drawInRect(to_nsrect(Rect::new(x, y, iw, ih)));
+                    x += iw;
+                }
+                y += ih;
+            }
+        }
+        ImageFit::NinePatch(ins) => {
+            draw_ninepatch(img, rect, *ins, iw, ih, full_src, op);
+        }
+    }
+}
+
+/// 九宫格绘制（源图坐标为 NSImage 左下原点，故行按底部映射）。
+#[allow(clippy::too_many_arguments)]
+fn draw_ninepatch(
+    img: &NSImage,
+    rect: Rect,
+    ins: Insets,
+    iw: f32,
+    ih: f32,
+    _full: NSRect,
+    op: NSCompositingOperation,
+) {
+    // 目标 3x3 边界（左上原点）。
+    let cd = [rect.left(), rect.left() + ins.left, rect.right() - ins.right, rect.right()];
+    let rd = [rect.top(), rect.top() + ins.top, rect.bottom() - ins.bottom, rect.bottom()];
+    // 源列边界（左→右）。
+    let cs = [0.0, ins.left, iw - ins.right, iw];
+    // 源行边界（NSImage 底部原点；视觉 top→bottom 对应源 y 从高到低）。
+    let rs_bottom = [ih, ih - ins.top, ins.bottom, 0.0]; // 每视觉行的顶边（源 y）
+    for r in 0..3usize {
+        for c in 0..3usize {
+            let dx = cd[c];
+            let dw = cd[c + 1] - cd[c];
+            let dy = rd[r];
+            let dh = rd[r + 1] - rd[r];
+            let sx = cs[c];
+            let sw = cs[c + 1] - cs[c];
+            let s_top = rs_bottom[r];
+            let s_h = s_top - rs_bottom[r + 1];
+            let s_y = s_top - s_h;
+            if dw > 0.0 && dh > 0.0 && sw > 0.0 && s_h > 0.0 {
+                img.drawInRect_fromRect_operation_fraction(
+                    to_nsrect(Rect::new(dx, dy, dw, dh)),
+                    NSRect::new(NSPoint::new(sx as f64, s_y as f64), NSSize::new(sw as f64, s_h as f64)),
+                    op,
+                    1.0,
+                );
+            }
+        }
+    }
 }
 
 /// 构造四角独立圆角的矩形路径（用 arcTo 逐角连接）。
@@ -142,20 +235,24 @@ impl Canvas for CgCanvas {
         Size::new(sz.width as f32, sz.height as f32)
     }
 
-    fn draw_image(&mut self, source: &ImageSource, rect: Rect) {
+    fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
         // 加载失败时静默跳过，避免影响其它绘制。
         let img = match source {
             ImageSource::Path(p) => {
                 NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(p))
             }
             ImageSource::Bytes(b) => {
-                let data = NSData::with_bytes(b);
-                NSImage::initWithData(NSImage::alloc(), &data)
+                NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(b))
             }
+            ImageSource::Svg(_) => None, // 见 SVG 支持（chunk 3）
         };
-        if let Some(img) = img {
-            img.drawInRect(to_nsrect(rect));
-        }
+        let Some(img) = img else { return };
+        // tint 换色（保留 alpha 形状）。
+        let img = match tint {
+            Some(c) => tinted_image(&img, c),
+            None => img,
+        };
+        draw_nsimage(&img, rect, &fit);
     }
 
     fn save(&mut self) {

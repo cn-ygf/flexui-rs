@@ -153,9 +153,9 @@ impl Base {
         }
     }
 
-    /// 当前完整视觉状态。
+    /// 当前完整视觉状态（含 selected 维度，供勾选/单选贴图）。
     pub fn visual_state(&self) -> VisualState {
-        VisualState::new(self.effective_base(), self.focused)
+        VisualState::with_selected(self.effective_base(), self.focused, self.selected)
     }
 
     /// 解析当前生效样式。

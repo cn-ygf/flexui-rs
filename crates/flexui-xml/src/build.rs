@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image,
+    Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, ImageFit,
     ImageSource, Insets, Justify, Label, Node, Panel, Radio, Sizing, StyleSet, StyleSpec, TabBox,
     TextAlign, VBox, VisualState, WidgetId,
 };
@@ -159,8 +159,8 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
 
 /// 把属性应用到 Base（通用属性 + 分状态样式）。
 fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Option<&ResourceManager>) {
-    // 分状态样式槽临时表。
-    let mut slots: HashMap<(BaseState, bool), StyleSpec> = HashMap::new();
+    // 分状态样式槽临时表（键含 base/focus/selected 维度）。
+    let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
 
     for (k, v) in attrs {
         let key = k.to_lowercase();
@@ -219,30 +219,36 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
     // 组装 StyleSet。
     if !slots.is_empty() {
         let mut set = StyleSet::new();
-        for ((st, foc), spec) in slots {
-            set.set(VisualState::new(st, foc), spec);
+        for (vs, spec) in slots {
+            set.set(vs, spec);
         }
         base.style = set;
     }
 }
 
-/// 解析形如 `[state-][focus-]prop` 的样式属性并写入对应槽。
+/// 解析形如 `[state-][focus-][selected-]prop` 的样式属性并写入对应槽。
 fn apply_style_attr(
-    slots: &mut HashMap<(BaseState, bool), StyleSpec>,
+    slots: &mut HashMap<VisualState, StyleSpec>,
     key: &str,
     val: &str,
     res: Option<&ResourceManager>,
 ) {
     let parts: Vec<&str> = key.split('-').collect();
+    // 消费前缀关键字（base/focus/selected，任意顺序）。
     let mut idx = 0;
     let mut state = BaseState::Normal;
-    if let Some(s) = parse_state(parts[0]) {
-        state = s;
-        idx = 1;
-    }
     let mut focused = false;
-    if parts.get(idx) == Some(&"focus") {
-        focused = true;
+    let mut selected = false;
+    while idx < parts.len() {
+        if let Some(s) = parse_state(parts[idx]) {
+            state = s;
+        } else if parts[idx] == "focus" {
+            focused = true;
+        } else if parts[idx] == "selected" {
+            selected = true;
+        } else {
+            break;
+        }
         idx += 1;
     }
     // 剩余部分即属性名；拼接以兼容带连字符的写法（如 border-width → borderwidth）。
@@ -251,7 +257,8 @@ fn apply_style_attr(
     }
     let prop = parts[idx..].join("");
 
-    let spec = slots.entry((state, focused)).or_default();
+    let vs = VisualState::with_selected(state, focused, selected);
+    let spec = slots.entry(vs).or_default();
     match prop.as_str() {
         "bgcolor" => spec.bg_color = parse_color(val),
         "fgcolor" => spec.fg_color = parse_color(val),
@@ -259,9 +266,40 @@ fn apply_style_attr(
         "borderwidth" => spec.border_width = val.parse().ok(),
         "cornerradius" => spec.corner_radius = val.parse().ok().map(Corners::all),
         "bgimage" => spec.bg_image = Some(resolve_image(res, val)),
+        "bgtint" => spec.bg_tint = parse_color(val),
+        "bgfit" => spec.bg_fit = parse_fit(val),
         "fgimage" => spec.fg_image = Some(resolve_image(res, val)),
+        "fgtint" => spec.fg_tint = parse_color(val),
+        "fgfit" => spec.fg_fit = parse_fit(val),
         "textalign" => spec.text_align = parse_align(val),
         _ => {} // 未知属性忽略
+    }
+}
+
+/// 解析渲染方式：stretch/center/tile/ninepatch(l,t,r,b)。
+fn parse_fit(v: &str) -> Option<ImageFit> {
+    let s = v.trim().to_lowercase();
+    if s == "stretch" {
+        Some(ImageFit::Stretch)
+    } else if s == "center" {
+        Some(ImageFit::Center)
+    } else if s == "tile" {
+        Some(ImageFit::Tile)
+    } else if let Some(inner) = s.strip_prefix("ninepatch") {
+        // ninepatch 或 ninepatch(l,t,r,b)
+        let nums: Vec<f32> = inner
+            .trim_matches(|c| c == '(' || c == ')')
+            .split(',')
+            .filter_map(|n| n.trim().parse().ok())
+            .collect();
+        let ins = match nums.len() {
+            4 => Insets::new(nums[0], nums[1], nums[2], nums[3]),
+            1 => Insets::all(nums[0]),
+            _ => Insets::all(0.0),
+        };
+        Some(ImageFit::NinePatch(ins))
+    } else {
+        None
     }
 }
 

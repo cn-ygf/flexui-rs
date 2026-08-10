@@ -28,15 +28,15 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
             cv.fill_rect(rect, bg);
         }
     }
-    // 2. 背景图
+    // 2. 背景图（支持换色 tint 与渲染方式 fit）
     if let Some(img) = &style.bg_image {
-        cv.draw_image(img, rect);
+        cv.draw_image(img, rect, style.bg_tint, style.bg_fit.clone().unwrap_or_default());
     }
     // 3. 控件内容（文字/图标）
     node.paint_content(cv, &style);
     // 4. 前景图
     if let Some(img) = &style.fg_image {
-        cv.draw_image(img, rect);
+        cv.draw_image(img, rect, style.fg_tint, style.fg_fit.clone().unwrap_or_default());
     }
     // 5. 边框
     if let (Some(bc), Some(bw)) = (style.border_color, style.border_width) {

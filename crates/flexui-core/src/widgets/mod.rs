@@ -143,6 +143,15 @@ pub(crate) fn paint_indicator_and_text(
     style: &StyleSpec,
     circular: bool,
 ) {
+    // 若该状态设了贴图（bg/fg image），则由统一管线绘制贴图，跳过默认指示器；
+    // 只画右侧文字。→ 支持 duilib 式各状态贴图替换。
+    if style.bg_image.is_some() || style.fg_image.is_some() {
+        let content = crate::layout::content_rect(base);
+        let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
+        draw_aligned_text(cv, &base.text, content, &base.font, color, TextAlign::Left);
+        return;
+    }
+
     let content = crate::layout::content_rect(base);
     let box_size = 16.0;
     let bx = content.left();

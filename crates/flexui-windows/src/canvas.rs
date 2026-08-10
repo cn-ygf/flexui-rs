@@ -3,7 +3,7 @@
 //! 与 macOS 的 CgCanvas 对位。坐标为逻辑像素、左上原点，与统一坐标系一致。
 
 use flexui_geometry::{Color, Corners, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageSource};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 
 use crate::gdiplus::{
@@ -53,6 +53,17 @@ fn ri(v: f32) -> i32 {
 /// 内嵌图片落临时文件的唯一名计数。
 static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// tint 颜色矩阵（行主 5x5）：输出 RGB=目标色、A=原 alpha（黑图/任意图 → 目标色形状）。
+fn tint_matrix(c: Color) -> gp::ColorMatrix {
+    let mut m = [0.0f32; 25];
+    m[3 * 5 + 3] = 1.0; // A = inA
+    m[4 * 5] = c.r.clamp(0.0, 1.0);
+    m[4 * 5 + 1] = c.g.clamp(0.0, 1.0);
+    m[4 * 5 + 2] = c.b.clamp(0.0, 1.0);
+    m[4 * 5 + 4] = 1.0;
+    gp::ColorMatrix { m }
+}
+
 /// UTF-8 → 以 NUL 结尾的 UTF-16。
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -89,22 +100,121 @@ impl GdiCanvas {
         path
     }
 
-    /// 从文件路径加载并绘制图片到 rect。
-    unsafe fn draw_image_file(&self, path: &str, rect: Rect) {
+    /// 从文件路径加载图片，绘制到 rect（支持 tint 换色 + fit 渲染方式）。
+    unsafe fn draw_image_file(&self, path: &str, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
         let wpath = wide(path);
         let mut img: *mut gp::GpImage = std::ptr::null_mut();
-        // 加载失败（文件不存在/格式不支持）时静默跳过。
         if gp::GdipLoadImageFromFile(wpath.as_ptr(), &mut img) == 0 && !img.is_null() {
-            gp::GdipDrawImageRectI(
-                self.g,
-                img,
-                ri(rect.left()),
-                ri(rect.top()),
-                ri(rect.size.width),
-                ri(rect.size.height),
-            );
+            self.draw_gpimage(img, rect, tint, fit);
             gp::GdipDisposeImage(img);
         }
+    }
+
+    /// 绘制一个已加载的 GpImage（tint 用 ColorMatrix 重着色；按 fit 布局）。
+    unsafe fn draw_gpimage(&self, img: *mut gp::GpImage, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
+        let mut iw = 0u32;
+        let mut ih = 0u32;
+        gp::GdipGetImageWidth(img, &mut iw);
+        gp::GdipGetImageHeight(img, &mut ih);
+        let (iw, ih) = (iw as i32, ih as i32);
+        if iw == 0 || ih == 0 {
+            return;
+        }
+        // tint：颜色矩阵把 RGB 置为目标色、保留 alpha（黑图/任意图 → 目标色形状）。
+        let mut attr: *mut gp::GpImageAttributes = std::ptr::null_mut();
+        if let Some(c) = tint {
+            gp::GdipCreateImageAttributes(&mut attr);
+            let m = tint_matrix(c);
+            gp::GdipSetImageAttributesColorMatrix(
+                attr,
+                gp::ColorAdjustTypeDefault,
+                1,
+                &m,
+                std::ptr::null(),
+                gp::ColorMatrixFlagsDefault,
+            );
+        }
+        let (dx, dy, dw, dh) = (
+            ri(rect.left()),
+            ri(rect.top()),
+            ri(rect.size.width),
+            ri(rect.size.height),
+        );
+        match fit {
+            ImageFit::Stretch => self.draw_piece(img, dx, dy, dw, dh, 0, 0, iw, ih, attr),
+            ImageFit::Center => {
+                let x = dx + (dw - iw) / 2;
+                let y = dy + (dh - ih) / 2;
+                self.draw_piece(img, x, y, iw, ih, 0, 0, iw, ih, attr);
+            }
+            ImageFit::Tile => {
+                let mut y = dy;
+                while y < dy + dh {
+                    let mut x = dx;
+                    while x < dx + dw {
+                        let tw = (dx + dw - x).min(iw);
+                        let th = (dy + dh - y).min(ih);
+                        self.draw_piece(img, x, y, tw, th, 0, 0, tw, th, attr);
+                        x += iw;
+                    }
+                    y += ih;
+                }
+            }
+            ImageFit::NinePatch(ins) => {
+                let (sl, sr, st, sb) = (ins.left as i32, ins.right as i32, ins.top as i32, ins.bottom as i32);
+                let cs = [0, sl, iw - sr, iw];
+                let cd = [dx, dx + sl, dx + dw - sr, dx + dw];
+                let rs = [0, st, ih - sb, ih];
+                let rd = [dy, dy + st, dy + dh - sb, dy + dh];
+                for r in 0..3 {
+                    for c in 0..3 {
+                        let (sx, sw) = (cs[c], cs[c + 1] - cs[c]);
+                        let (sy, sh) = (rs[r], rs[r + 1] - rs[r]);
+                        let (ox, ow) = (cd[c], cd[c + 1] - cd[c]);
+                        let (oy, oh) = (rd[r], rd[r + 1] - rd[r]);
+                        if sw > 0 && sh > 0 && ow > 0 && oh > 0 {
+                            self.draw_piece(img, ox, oy, ow, oh, sx, sy, sw, sh, attr);
+                        }
+                    }
+                }
+            }
+        }
+        if !attr.is_null() {
+            gp::GdipDisposeImageAttributes(attr);
+        }
+    }
+
+    /// 绘制源矩形→目标矩形（带可选颜色属性）。
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn draw_piece(
+        &self,
+        img: *mut gp::GpImage,
+        dx: i32,
+        dy: i32,
+        dw: i32,
+        dh: i32,
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        attr: *mut gp::GpImageAttributes,
+    ) {
+        gp::GdipDrawImageRectRectI(
+            self.g,
+            img,
+            dx,
+            dy,
+            dw,
+            dh,
+            sx,
+            sy,
+            sw,
+            sh,
+            UNIT_PIXEL,
+            attr,
+            0,
+            std::ptr::null_mut(),
+        );
     }
 
     /// 用给定字族名/系统字体创建字体；返回 (font, family)，调用方负责释放。
@@ -256,9 +366,9 @@ impl Canvas for GdiCanvas {
         }
     }
 
-    fn draw_image(&mut self, source: &ImageSource, rect: Rect) {
+    fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
         match source {
-            ImageSource::Path(p) => unsafe { self.draw_image_file(p, rect) },
+            ImageSource::Path(p) => unsafe { self.draw_image_file(p, rect, tint, &fit) },
             ImageSource::Bytes(b) => {
                 // GDI+ 从内存需 IStream，成本高；这里落临时文件再加载（简单可靠）。
                 // 注：每次绘制解码，后续可加 LRU 解码缓存优化。
@@ -271,11 +381,12 @@ impl Canvas for GdiCanvas {
                     .is_ok()
                 {
                     if let Some(s) = tmp.to_str() {
-                        unsafe { self.draw_image_file(s, rect) };
+                        unsafe { self.draw_image_file(s, rect, tint, &fit) };
                     }
                     let _ = std::fs::remove_file(&tmp);
                 }
             }
+            ImageSource::Svg(_) => { /* 见 SVG 支持（chunk 3） */ }
         }
     }
 
