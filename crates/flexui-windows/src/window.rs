@@ -143,8 +143,9 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
 
         ShowWindow(hwnd, SW_SHOW);
 
-        // 光标闪烁定时器（530ms）。
+        // 光标闪烁定时器（530ms）+ 帧定时器（~60fps 驱动动画）。
         SetTimer(hwnd, 1, 530, None);
+        SetTimer(hwnd, 2, 16, None);
 
         // 窗口就绪后触发 on_init（≈ InitWindow）。
         {
@@ -152,6 +153,14 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
             let mut handle = WinWindowHandle { hwnd };
             let mut ctx = WindowCtx::new(st.root.as_mut(), &mut handle);
             st.delegate.on_init(&mut ctx);
+            let overlays = ctx.take_overlay_requests();
+            let anims = ctx.take_anim_requests();
+            for r in overlays {
+                st.disp.open_menu(r.anchor, r.items);
+            }
+            for a in anims {
+                st.disp.animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+            }
             InvalidateRect(hwnd, null(), 0);
         }
 
@@ -192,6 +201,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     let contexts = st.disp.take_context_clicks();
 
     let mut reqs = Vec::new();
+    let mut anim_reqs = Vec::new();
     if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
         let mut handle = WinWindowHandle { hwnd };
         let root = &mut st.root;
@@ -207,11 +217,15 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
             delegate.on_context(name, pos.x, pos.y, &mut ctx);
         }
         reqs = ctx.take_overlay_requests();
+        anim_reqs = ctx.take_anim_requests();
     }
-    // 委托里请求的上下文菜单 → 交分发器打开。
+    // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
         st.disp.open_menu(r.anchor, r.items);
+    }
+    for a in anim_reqs {
+        st.disp.animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
     if need || opened || !acts.is_empty() || !doubles.is_empty() {
@@ -585,17 +599,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             InvalidateRect(hwnd, null(), 0);
             0
         }
-        // 光标闪烁定时器：切换焦点控件 caret 相位；顺带驱动 Tooltip 延时显示。
+        // 定时器：id=1 光标闪烁 + Tooltip 延时；id=2 帧定时器驱动动画。
         WM_TIMER => {
             if !state.is_null() {
                 let st = &mut *state;
-                let blink = st.disp.blink(st.root.as_mut());
-                st.disp.tooltip_tick(st.root.as_mut());
-                if st.disp.take_redraw() {
-                    InvalidateRect(hwnd, null(), 0);
-                } else if let Some(r) = blink {
-                    let rc = to_physical_rect(hwnd, r);
-                    InvalidateRect(hwnd, &rc, 0);
+                if wparam == 2 {
+                    let changed = st.disp.tick_anims(st.root.as_mut(), 0.016);
+                    if changed {
+                        InvalidateRect(hwnd, null(), 0);
+                    }
+                } else {
+                    let blink = st.disp.blink(st.root.as_mut());
+                    st.disp.tooltip_tick(st.root.as_mut());
+                    if st.disp.take_redraw() {
+                        InvalidateRect(hwnd, null(), 0);
+                    } else if let Some(r) = blink {
+                        let rc = to_physical_rect(hwnd, r);
+                        InvalidateRect(hwnd, &rc, 0);
+                    }
                 }
             }
             0

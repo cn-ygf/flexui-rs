@@ -78,17 +78,32 @@ pub struct OverlayRequest {
     pub items: Vec<(String, String)>,
 }
 
+/// 属性动画请求（由 WindowCtx 收集，后端排空后交分发器）。
+pub struct AnimRequest {
+    pub name: String,
+    pub prop: crate::anim::AnimProp,
+    pub to: f32,
+    pub dur_secs: f32,
+    pub easing: crate::anim::Easing,
+}
+
 /// 传给窗口钩子的上下文：既能按 name 访问控件树，也能控制窗口、弹出菜单。
 /// ≈ duilib 里 InitWindow/Notify 内 `FindControl(...)` + `pWnd->Close()` 的能力。
 pub struct WindowCtx<'a> {
     root: &'a mut dyn Widget,
     win: &'a mut dyn WindowHandle,
     overlay_requests: Vec<OverlayRequest>,
+    anim_requests: Vec<AnimRequest>,
 }
 
 impl<'a> WindowCtx<'a> {
     pub fn new(root: &'a mut dyn Widget, win: &'a mut dyn WindowHandle) -> Self {
-        Self { root, win, overlay_requests: Vec::new() }
+        Self {
+            root,
+            win,
+            overlay_requests: Vec::new(),
+            anim_requests: Vec::new(),
+        }
     }
 
     /// 在 anchor 处弹出上下文菜单；items 为 (标签, name)。选中项经 on_activate 上报。
@@ -99,6 +114,23 @@ impl<'a> WindowCtx<'a> {
     /// 后端取走本轮浮层请求（随后交给分发器 open_menu）。
     pub fn take_overlay_requests(&mut self) -> Vec<OverlayRequest> {
         std::mem::take(&mut self.overlay_requests)
+    }
+
+    /// 对名为 name 的控件的 prop 属性启动补间动画（过渡到 to）。
+    pub fn animate(
+        &mut self,
+        name: impl Into<String>,
+        prop: crate::anim::AnimProp,
+        to: f32,
+        dur_secs: f32,
+        easing: crate::anim::Easing,
+    ) {
+        self.anim_requests.push(AnimRequest { name: name.into(), prop, to, dur_secs, easing });
+    }
+
+    /// 后端取走本轮动画请求（随后交给分发器 animate）。
+    pub fn take_anim_requests(&mut self) -> Vec<AnimRequest> {
+        std::mem::take(&mut self.anim_requests)
     }
 
     // —— 控件访问（复用 EventCtx 能力）——

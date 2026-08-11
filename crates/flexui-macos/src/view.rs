@@ -174,6 +174,12 @@ define_class!(
             self.fire_blink();
         }
 
+        // 帧定时器回调（驱动动画）。
+        #[unsafe(method(frameTimer:))]
+        fn frame_timer(&self, _timer: &AnyObject) {
+            self.fire_frame();
+        }
+
         // 背板属性（缩放）变化 → 发 ScaleChanged 并重绘。
         #[unsafe(method(viewDidChangeBackingProperties))]
         fn backing_changed(&self) {
@@ -410,11 +416,30 @@ impl FlexView {
     pub fn fire_init(&self, window: &Retained<NSWindow>) {
         let mut handle = MacWindowHandle { window: window.clone() };
         let mut st = self.ivars().state.borrow_mut();
-        let AppState { root, delegate, .. } = &mut *st;
+        let AppState { root, disp, delegate } = &mut *st;
         let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
         delegate.on_init(&mut ctx);
+        let overlays = ctx.take_overlay_requests();
+        let anims = ctx.take_anim_requests();
+        for r in overlays {
+            disp.open_menu(r.anchor, r.items);
+        }
+        for a in anims {
+            disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        }
         drop(st);
         self.setNeedsDisplay(true);
+    }
+
+    /// 帧定时回调：推进动画并按需重绘。
+    fn fire_frame(&self) {
+        let mut st = self.ivars().state.borrow_mut();
+        let AppState { root, disp, .. } = &mut *st;
+        let changed = disp.tick_anims(root.as_mut(), 0.016);
+        drop(st);
+        if changed {
+            self.setNeedsDisplay(true);
+        }
     }
 
     fn point(&self, event: &NSEvent) -> flexui_core::Point {
@@ -449,6 +474,7 @@ impl FlexView {
         let contexts = disp.take_context_clicks();
 
         let mut reqs = Vec::new();
+        let mut anim_reqs = Vec::new();
         if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
             if let Some(win) = window {
                 let mut handle = MacWindowHandle { window: win };
@@ -463,12 +489,16 @@ impl FlexView {
                     delegate.on_context(name, pos.x, pos.y, &mut ctx);
                 }
                 reqs = ctx.take_overlay_requests();
+                anim_reqs = ctx.take_anim_requests();
             }
         }
-        // 委托里请求的上下文菜单 → 交分发器打开。
+        // 委托里请求的上下文菜单 / 动画 → 交分发器。
         let opened = !reqs.is_empty();
         for r in reqs {
             disp.open_menu(r.anchor, r.items);
+        }
+        for a in anim_reqs {
+            disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
         }
         drop(st);
         // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。

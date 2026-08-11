@@ -4,7 +4,10 @@
 //! 用法：定义 `MainWindow` 实现 `WindowImpl`（≈ 继承 WindowImplBase），重写 config/skin
 //! 与 on_click（≈ Notify）；`Window::new(MainWindow{..}).center().run()`（≈ Window）。
 
-use flexui::{DirProvider, Rect, ResourceManager, Skin, Window, WindowConfig, WindowCtx, WindowImpl};
+use flexui::{
+    AnimProp, DirProvider, Easing, Rect, ResourceManager, Skin, Window, WindowConfig, WindowCtx,
+    WindowImpl,
+};
 
 /// 主窗口：持有自己的状态（点击计数、主按钮启用态），重写窗口钩子。
 struct MainWindow {
@@ -40,8 +43,13 @@ impl WindowImpl for MainWindow {
             "btnPrimary" => {
                 self.clicks += 1;
                 ctx.set_text("status", format!("状态：点击『主要按钮』，共 {} 次", self.clicks));
+                // 动画：进度条平滑补间到满。
+                ctx.animate("prog", AnimProp::Value, 1.0, 0.8, Easing::EaseInOut);
             }
-            "btnGhost" => ctx.set_text("status", "状态：点击了『次要按钮』"),
+            "btnGhost" => {
+                ctx.set_text("status", "状态：点击了『次要按钮』（进度回落）");
+                ctx.animate("prog", AnimProp::Value, 0.15, 0.6, Easing::EaseOut);
+            }
             "btnToggle" => {
                 self.primary_enabled = !self.primary_enabled;
                 ctx.set_enabled("btnPrimary", self.primary_enabled);

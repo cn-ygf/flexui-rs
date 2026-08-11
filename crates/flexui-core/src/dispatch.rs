@@ -6,6 +6,7 @@
 use flexui_geometry::{Point, Rect, Size};
 use flexui_gfx::Canvas;
 
+use crate::anim::{Anim, AnimProp, Easing};
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
@@ -105,6 +106,8 @@ pub struct Dispatcher {
     tooltip: Option<Tooltip>,
     /// hover 停留在带 tooltip 控件上累计的定时 tick 数（用于延时显示）。
     tip_ticks: u32,
+    /// 进行中的补间动画。
+    anims: Vec<Anim>,
 }
 
 impl Dispatcher {
@@ -124,7 +127,59 @@ impl Dispatcher {
             overlay_pressed: None,
             tooltip: None,
             tip_ticks: 0,
+            anims: Vec::new(),
         }
+    }
+
+    /// 是否有进行中的动画（后端据此决定是否驱动帧定时器）。
+    pub fn has_anims(&self) -> bool {
+        !self.anims.is_empty()
+    }
+
+    /// 启动一条属性补间动画：把名为 name 的控件的 prop 从当前值过渡到 to。
+    /// 同一控件同一属性的旧动画会被替换。返回是否找到该控件。
+    pub fn animate(
+        &mut self,
+        root: &mut dyn Widget,
+        name: &str,
+        prop: AnimProp,
+        to: f32,
+        dur_secs: f32,
+        easing: Easing,
+    ) -> bool {
+        let Some(id) = find_by_name(root, name) else { return false };
+        let mut from = 0.0;
+        visit_mut(root, id, &mut |w| from = read_prop(w.base(), prop));
+        self.anims.retain(|a| !(a.target == id && a.prop == prop));
+        self.anims.push(Anim {
+            target: id,
+            prop,
+            from,
+            to,
+            dur: dur_secs.max(0.001),
+            elapsed: 0.0,
+            easing,
+        });
+        true
+    }
+
+    /// 按帧推进所有动画 dt 秒；应用插值到目标控件，移除结束的。返回是否有变化（需重绘）。
+    pub fn tick_anims(&mut self, root: &mut dyn Widget, dt: f32) -> bool {
+        if self.anims.is_empty() {
+            return false;
+        }
+        for a in &mut self.anims {
+            a.elapsed += dt;
+        }
+        // 快照 (target, prop, value) 后应用，避免与 self 的可变借用冲突。
+        let apply: Vec<(WidgetId, AnimProp, f32)> =
+            self.anims.iter().map(|a| (a.target, a.prop, a.value_at())).collect();
+        for (id, prop, v) in apply {
+            visit_mut(root, id, &mut |w| write_prop(w.base_mut(), prop, v));
+        }
+        self.anims.retain(|a| !a.done());
+        self.needs_redraw = true;
+        true
     }
 
     /// 是否有活动模态浮层。
@@ -767,6 +822,22 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
     }
 }
 
+/// 读取控件的可动画属性值。
+fn read_prop(b: &crate::widget::Base, prop: AnimProp) -> f32 {
+    match prop {
+        AnimProp::Value => b.value,
+        AnimProp::ScrollY => b.scroll_y,
+    }
+}
+
+/// 写入控件的可动画属性值（带各自的取值约束）。
+fn write_prop(b: &mut crate::widget::Base, prop: AnimProp, v: f32) {
+    match prop {
+        AnimProp::Value => b.value = v.clamp(0.0, 1.0),
+        AnimProp::ScrollY => b.scroll_y = v.max(0.0),
+    }
+}
+
 /// 计算浮层摆放矩形：优先锚点下方、放不下则上翻；X 夹到窗内；至少 min_width 宽。
 fn place_overlay(anchor: Rect, desired: Size, window: Size, min_width: f32) -> Rect {
     let w = desired.width.max(min_width).min(window.width);
@@ -880,7 +951,8 @@ mod tests {
     use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
     use crate::widgets::{
-        Button, ComboBox, Edit, Label, ListView, Panel, Radio, ScrollView, Slider, TabBox, VBox,
+        Button, ComboBox, Edit, Label, ListView, Panel, Progress, Radio, ScrollView, Slider,
+        TabBox, VBox,
     };
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
@@ -1110,6 +1182,26 @@ mod tests {
         assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
         assert_eq!(root.base().children[0].base().selected_index, 2);
         assert!(root.base().children[0].base().selected);
+    }
+
+    #[test]
+    fn 动画_value线性补间() {
+        let mut root = VBox::new().push(Progress::new().name("p").value(0.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+        assert!(disp.animate(&mut root, "p", AnimProp::Value, 1.0, 1.0, Easing::Linear));
+        assert!(disp.has_anims());
+        // 0.5s → 0.5
+        assert!(disp.tick_anims(&mut root, 0.5));
+        let v = root.base().children[0].base().value;
+        assert!((v - 0.5).abs() < 1e-3, "got {v}");
+        // 再 0.5s → 1.0 且结束
+        disp.tick_anims(&mut root, 0.5);
+        assert!((root.base().children[0].base().value - 1.0).abs() < 1e-3);
+        assert!(!disp.has_anims());
+        // 结束后无变化
+        assert!(!disp.tick_anims(&mut root, 0.5));
     }
 
     #[test]

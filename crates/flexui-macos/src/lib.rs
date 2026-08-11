@@ -94,6 +94,18 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         )
     };
 
+    // 帧定时器（~60fps 驱动动画；无动画时回调开销极小，仅在有变化时重绘）。
+    #[allow(non_snake_case)]
+    let _frame = unsafe {
+        NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
+            0.016,
+            &view,
+            objc2::sel!(frameTimer:),
+            None,
+            true,
+        )
+    };
+
     window.center();
     window.makeKeyAndOrderFront(None);
 

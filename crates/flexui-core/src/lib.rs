@@ -3,6 +3,7 @@
 //! 提供事件模型、控件状态机与分状态样式、控件树、Flex 布局、统一绘制管线、
 //! 事件分发。不含任何平台代码，可脱离窗口做单元测试。
 
+pub mod anim;
 pub mod dispatch;
 pub mod event;
 pub mod layout;
@@ -15,6 +16,7 @@ pub mod window;
 
 // 常用类型再导出，方便上层与后端使用。
 pub use dispatch::{hit_test, Dispatcher, EventCtx};
+pub use anim::{AnimProp, Easing};
 pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};
 pub use paint::paint_tree;
@@ -25,8 +27,8 @@ pub use widget::{
     HitPolicy, Node, TextControl, Widget, WidgetId, WidgetRole,
 };
 pub use window::{
-    NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
-    WindowHandle,
+    AnimRequest, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
+    WindowDelegate, WindowHandle,
 };
 pub use widgets::{
     build_menu, build_menu_labels, build_tooltip, Button, CheckBox, ComboBox, Edit, HBox, Image,
