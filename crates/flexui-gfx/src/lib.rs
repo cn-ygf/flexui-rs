@@ -12,13 +12,23 @@ pub enum ImageSource {
     Path(String),
     /// 内存位图字节（PNG/JPG/... 经资源解析，OS 解码）。
     Bytes(std::sync::Arc<Vec<u8>>),
+    /// 带像素密度的磁盘位图；density=2 表示 2 个物理像素对应 1 个逻辑像素。
+    ScaledPath(String, f32),
+    /// 带像素密度的内存位图。
+    ScaledBytes(std::sync::Arc<Vec<u8>>, f32),
     /// SVG 字节（按目标尺寸光栅化）。
     Svg(std::sync::Arc<Vec<u8>>),
 }
 
 impl ImageSource {
     pub fn path(p: impl Into<String>) -> Self {
-        ImageSource::Path(p.into())
+        let path = p.into();
+        let density = image_density_from_path(&path);
+        if density == 1.0 {
+            ImageSource::Path(path)
+        } else {
+            ImageSource::ScaledPath(path, density)
+        }
     }
     pub fn bytes(b: impl Into<Vec<u8>>) -> Self {
         ImageSource::Bytes(std::sync::Arc::new(b.into()))
@@ -26,9 +36,46 @@ impl ImageSource {
     pub fn svg(b: impl Into<Vec<u8>>) -> Self {
         ImageSource::Svg(std::sync::Arc::new(b.into()))
     }
+    pub fn path_scaled(p: impl Into<String>, density: f32) -> Self {
+        ImageSource::ScaledPath(p.into(), valid_density(density))
+    }
+    pub fn bytes_scaled(b: impl Into<Vec<u8>>, density: f32) -> Self {
+        ImageSource::ScaledBytes(std::sync::Arc::new(b.into()), valid_density(density))
+    }
+    pub fn density(&self) -> f32 {
+        match self {
+            ImageSource::ScaledPath(_, density) | ImageSource::ScaledBytes(_, density) => {
+                valid_density(*density)
+            }
+            _ => 1.0,
+        }
+    }
     pub fn is_svg(&self) -> bool {
         matches!(self, ImageSource::Svg(_))
     }
+}
+
+fn valid_density(density: f32) -> f32 {
+    if density.is_finite() && density > 0.0 {
+        density
+    } else {
+        1.0
+    }
+}
+
+/// 从 `icon@2.00x.png` 一类文件名解析像素密度；无倍率后缀时返回 1。
+pub fn image_density_from_path(path: &str) -> f32 {
+    let stem = path.rsplit_once('.').map_or(path, |(stem, _)| stem);
+    let Some((_, suffix)) = stem.rsplit_once('@') else {
+        return 1.0;
+    };
+    let Some(number) = suffix
+        .strip_suffix('x')
+        .or_else(|| suffix.strip_suffix('X'))
+    else {
+        return 1.0;
+    };
+    number.parse::<f32>().map_or(1.0, valid_density)
 }
 
 /// 图片渲染方式（I4）。
@@ -144,7 +191,14 @@ pub trait Canvas {
 
     /// 在矩形内绘制图片，支持换色 tint 与渲染方式 fit（缺省为空，后端覆写）。
     /// tint 为 Some 时按目标色重着色（保留 alpha 形状），用于「黑图动态换色」。
-    fn draw_image(&mut self, _source: &ImageSource, _rect: Rect, _tint: Option<Color>, _fit: ImageFit) {}
+    fn draw_image(
+        &mut self,
+        _source: &ImageSource,
+        _rect: Rect,
+        _tint: Option<Color>,
+        _fit: ImageFit,
+    ) {
+    }
 
     /// 保存绘图状态（配合 clip 使用）。
     fn save(&mut self) {}
@@ -158,16 +212,29 @@ pub trait Canvas {
 
 #[cfg(test)]
 mod tests {
-    use super::Font;
+    use super::{image_density_from_path, Font, ImageSource};
 
     #[test]
     fn font_样式构建() {
-        let f = Font::system(16.0).bold(true).italic(true).underline(true).family("Menlo");
+        let f = Font::system(16.0)
+            .bold(true)
+            .italic(true)
+            .underline(true)
+            .family("Menlo");
         assert_eq!(f.size, 16.0);
         assert!(f.bold && f.italic && f.underline);
         assert_eq!(f.family.as_deref(), Some("Menlo"));
         // 默认无样式
         let d = Font::default();
         assert!(!d.bold && !d.italic && !d.underline);
+    }
+
+    #[test]
+    fn 图片文件名_解析像素密度() {
+        assert_eq!(image_density_from_path("button/close@2.00x.png"), 2.0);
+        assert_eq!(image_density_from_path("icon@1.25x.PNG"), 1.25);
+        assert_eq!(image_density_from_path("icon.png"), 1.0);
+        assert_eq!(image_density_from_path("icon@badx.png"), 1.0);
+        assert_eq!(ImageSource::path("icon@2.00x.png").density(), 2.0);
     }
 }

@@ -2,32 +2,54 @@
 //!
 //! 与 macOS 的 CgCanvas 对位。坐标为逻辑像素、左上原点，与统一坐标系一致。
 
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::sync::Arc;
+
 use flexui_geometry::{Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
+use windows_sys::Win32::UI::Shell::SHCreateMemStream;
 
 use crate::gdiplus::{
-    COMBINE_INTERSECT, FILLMODE_ALTERNATE, MATRIX_ORDER_PREPEND, SMOOTHING_ANTIALIAS,
-    TEXT_HINT_CLEARTYPE, UNIT_PIXEL,
+    COMBINE_INTERSECT, FILLMODE_ALTERNATE, INTERPOLATION_HIGH_QUALITY_BICUBIC,
+    MATRIX_ORDER_PREPEND, PIXEL_OFFSET_HIGH_QUALITY, SMOOTHING_ANTIALIAS, TEXT_HINT_CLEARTYPE,
+    UNIT_PIXEL,
 };
 
 /// Windows 默认 UI 字体的英文字族名（微软雅黑）。
 const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
 
 /// GDI+ 画布，持有一个 Graphics 指针（来自窗口 HDC 或离屏位图）。
-pub struct GdiCanvas {
+pub struct GdiCanvas<'a> {
     g: *mut gp::GpGraphics,
     saved: Vec<u32>,
+    dpi_scale: f32,
+    image_cache: Option<&'a mut ImageCache>,
 }
 
-impl GdiCanvas {
+impl GdiCanvas<'_> {
     /// 用给定 Graphics 构造，并开启抗锯齿与清晰文字。
     pub fn new(g: *mut gp::GpGraphics) -> Self {
         unsafe {
             gp::GdipSetSmoothingMode(g, SMOOTHING_ANTIALIAS);
+            gp::GdipSetInterpolationMode(g, INTERPOLATION_HIGH_QUALITY_BICUBIC);
+            gp::GdipSetPixelOffsetMode(g, PIXEL_OFFSET_HIGH_QUALITY);
             gp::GdipSetTextRenderingHint(g, TEXT_HINT_CLEARTYPE);
         }
-        Self { g, saved: Vec::new() }
+        Self {
+            g,
+            saved: Vec::new(),
+            dpi_scale: 1.0,
+            image_cache: None,
+        }
+    }
+
+    /// 使用窗口级图片缓存，避免每帧重新解码或光栅化。
+    pub fn with_cache(g: *mut gp::GpGraphics, cache: &mut ImageCache) -> GdiCanvas<'_> {
+        let mut canvas = GdiCanvas::new(g);
+        canvas.image_cache = Some(cache);
+        canvas
     }
 
     /// 用不透明底色清屏（保证 ClearType 文字有实底、blit 无残留）。
@@ -37,8 +59,20 @@ impl GdiCanvas {
 
     /// 施加 DPI 缩放：之后所有逻辑坐标按 scale 放大到物理像素（HiDPI 清晰）。
     pub fn set_dpi_scale(&mut self, scale: f32) {
-        if scale != 1.0 {
-            unsafe { gp::GdipScaleWorldTransform(self.g, scale, scale, MATRIX_ORDER_PREPEND) };
+        self.dpi_scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        if self.dpi_scale != 1.0 {
+            unsafe {
+                gp::GdipScaleWorldTransform(
+                    self.g,
+                    self.dpi_scale,
+                    self.dpi_scale,
+                    MATRIX_ORDER_PREPEND,
+                )
+            };
         }
     }
 }
@@ -53,8 +87,135 @@ fn ri(v: f32) -> i32 {
     v.round() as i32
 }
 
-/// 内嵌图片落临时文件的唯一名计数。
-static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ImageKey {
+    Path(String),
+    Bytes(usize),
+    Svg(usize, u32, u32),
+}
+
+struct CachedImage {
+    image: *mut gp::GpImage,
+    stream: *mut c_void,
+    _bytes: Option<Arc<Vec<u8>>>,
+    _pixels: Option<Vec<u8>>,
+}
+
+impl CachedImage {
+    unsafe fn from_path(path: &str) -> Option<Self> {
+        let mut image: *mut gp::GpImage = std::ptr::null_mut();
+        let path = wide(path);
+        if gp::GdipLoadImageFromFile(path.as_ptr(), &mut image) != 0 || image.is_null() {
+            return None;
+        }
+        Some(Self {
+            image,
+            stream: std::ptr::null_mut(),
+            _bytes: None,
+            _pixels: None,
+        })
+    }
+
+    unsafe fn from_bytes(bytes: Arc<Vec<u8>>) -> Option<Self> {
+        let len = u32::try_from(bytes.len()).ok()?;
+        let stream = SHCreateMemStream(bytes.as_ptr(), len);
+        if stream.is_null() {
+            return None;
+        }
+        let mut image: *mut gp::GpImage = std::ptr::null_mut();
+        if gp::GdipLoadImageFromStream(stream, &mut image) != 0 || image.is_null() {
+            release_stream(stream);
+            return None;
+        }
+        Some(Self {
+            image,
+            stream,
+            _bytes: Some(bytes),
+            _pixels: None,
+        })
+    }
+
+    unsafe fn from_rgba(rgba: &[u8], width: u32, height: u32) -> Option<Self> {
+        let mut pixels = rgba.to_vec();
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        let mut bitmap: *mut gp::GpBitmap = std::ptr::null_mut();
+        if gp::GdipCreateBitmapFromScan0(
+            width as i32,
+            height as i32,
+            (width * 4) as i32,
+            crate::gdiplus::PIXEL_FORMAT_32BPP_PARGB,
+            pixels.as_ptr(),
+            &mut bitmap,
+        ) != 0
+            || bitmap.is_null()
+        {
+            return None;
+        }
+        Some(Self {
+            image: bitmap as *mut gp::GpImage,
+            stream: std::ptr::null_mut(),
+            _bytes: None,
+            _pixels: Some(pixels),
+        })
+    }
+}
+
+impl Drop for CachedImage {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.image.is_null() {
+                gp::GdipDisposeImage(self.image);
+            }
+            if !self.stream.is_null() {
+                release_stream(self.stream);
+            }
+        }
+    }
+}
+
+unsafe fn release_stream(stream: *mut c_void) {
+    let vtable = *(stream as *mut *mut windows_sys::core::IUnknown_Vtbl);
+    ((*vtable).Release)(stream);
+}
+
+/// 每窗口图片缓存；随窗口状态释放，保证原生图片先于 GDI+ shutdown 销毁。
+#[derive(Default)]
+pub struct ImageCache {
+    images: HashMap<ImageKey, CachedImage>,
+}
+
+impl ImageCache {
+    fn path(&mut self, path: &str) -> Option<*mut gp::GpImage> {
+        let key = ImageKey::Path(path.to_string());
+        if !self.images.contains_key(&key) {
+            let image = unsafe { CachedImage::from_path(path) }?;
+            self.images.insert(key.clone(), image);
+        }
+        self.images.get(&key).map(|entry| entry.image)
+    }
+
+    fn bytes(&mut self, bytes: &Arc<Vec<u8>>) -> Option<*mut gp::GpImage> {
+        let key = ImageKey::Bytes(Arc::as_ptr(bytes) as usize);
+        if !self.images.contains_key(&key) {
+            let image = unsafe { CachedImage::from_bytes(Arc::clone(bytes)) }?;
+            self.images.insert(key.clone(), image);
+        }
+        self.images.get(&key).map(|entry| entry.image)
+    }
+
+    fn svg(&mut self, bytes: &Arc<Vec<u8>>, width: u32, height: u32) -> Option<*mut gp::GpImage> {
+        let key = ImageKey::Svg(Arc::as_ptr(bytes) as usize, width, height);
+        if !self.images.contains_key(&key) {
+            let rgba = flexui_svg::rasterize(bytes, width, height)?;
+            let mut image = unsafe { CachedImage::from_rgba(&rgba, width, height) }?;
+            image._bytes = Some(Arc::clone(bytes));
+            self.images.insert(key.clone(), image);
+        }
+        self.images.get(&key).map(|entry| entry.image)
+    }
+}
 
 /// tint 颜色矩阵（行主 5x5）：输出 RGB=目标色、A=原 alpha（黑图/任意图 → 目标色形状）。
 fn tint_matrix(c: Color) -> gp::ColorMatrix {
@@ -72,7 +233,7 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-impl GdiCanvas {
+impl GdiCanvas<'_> {
     /// 生成四角独立圆角的矩形路径（各角半径 <=0 时该角为直角）。
     /// 使用浮点路径接口，精度更好，且能触发 GDI+ 的抗锯齿路径。
     unsafe fn build_round_path(&self, r: Rect, radius: Corners) -> *mut gp::GpPath {
@@ -97,56 +258,38 @@ impl GdiCanvas {
         // 每角一段 90° 弧（半径 0 时 AddPathArc 的 0 尺寸椭圆退化为该角点，即直角）+ 自动连线。
         gp::GdipAddPathArc(path, x, y, tl * 2.0, tl * 2.0, 180.0, 90.0);
         gp::GdipAddPathArc(path, x + w - tr * 2.0, y, tr * 2.0, tr * 2.0, 270.0, 90.0);
-        gp::GdipAddPathArc(path, x + w - br * 2.0, y + h - br * 2.0, br * 2.0, br * 2.0, 0.0, 90.0);
+        gp::GdipAddPathArc(
+            path,
+            x + w - br * 2.0,
+            y + h - br * 2.0,
+            br * 2.0,
+            br * 2.0,
+            0.0,
+            90.0,
+        );
         gp::GdipAddPathArc(path, x, y + h - bl * 2.0, bl * 2.0, bl * 2.0, 90.0, 90.0);
         gp::GdipClosePathFigure(path);
         path
     }
 
-    /// 从文件路径加载图片，绘制到 rect（支持 tint 换色 + fit 渲染方式）。
-    unsafe fn draw_image_file(&self, path: &str, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
-        let wpath = wide(path);
-        let mut img: *mut gp::GpImage = std::ptr::null_mut();
-        if gp::GdipLoadImageFromFile(wpath.as_ptr(), &mut img) == 0 && !img.is_null() {
-            self.draw_gpimage(img, rect, tint, fit);
-            gp::GdipDisposeImage(img);
-        }
-    }
-
-    /// 从 RGBA(premultiplied) 字节建 GDI+ 位图并绘制（供 SVG 光栅化结果用）。
-    unsafe fn draw_rgba(&self, rgba: &[u8], w: u32, h: u32, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
-        // tiny_skia RGBA(premult) → GDI+ 期望 BGRA 字节序（小端 PARGB）。
-        let mut bgra = rgba.to_vec();
-        for px in bgra.chunks_exact_mut(4) {
-            px.swap(0, 2);
-        }
-        let mut img: *mut gp::GpBitmap = std::ptr::null_mut();
-        let stride = (w * 4) as i32;
-        if gp::GdipCreateBitmapFromScan0(
-            w as i32,
-            h as i32,
-            stride,
-            crate::gdiplus::PIXEL_FORMAT_32BPP_PARGB,
-            bgra.as_ptr(),
-            &mut img,
-        ) == 0
-            && !img.is_null()
-        {
-            self.draw_gpimage(img as *mut gp::GpImage, rect, tint, fit);
-            gp::GdipDisposeImage(img as *mut gp::GpImage);
-        }
-    }
-
     /// 绘制一个已加载的 GpImage（tint 用 ColorMatrix 重着色；按 fit 布局）。
-    unsafe fn draw_gpimage(&self, img: *mut gp::GpImage, rect: Rect, tint: Option<Color>, fit: &ImageFit) {
+    unsafe fn draw_gpimage(
+        &self,
+        img: *mut gp::GpImage,
+        rect: Rect,
+        tint: Option<Color>,
+        fit: &ImageFit,
+        density: f32,
+    ) {
         let mut iw = 0u32;
         let mut ih = 0u32;
         gp::GdipGetImageWidth(img, &mut iw);
         gp::GdipGetImageHeight(img, &mut ih);
-        let (iw, ih) = (iw as i32, ih as i32);
-        if iw == 0 || ih == 0 {
+        if iw == 0 || ih == 0 || density <= 0.0 {
             return;
         }
+        let (iw, ih) = (iw as f32, ih as f32);
+        let (logical_iw, logical_ih) = (iw / density, ih / density);
         // tint：颜色矩阵把 RGB 置为目标色、保留 alpha（黑图/任意图 → 目标色形状）。
         let mut attr: *mut gp::GpImageAttributes = std::ptr::null_mut();
         if let Some(c) = tint {
@@ -161,45 +304,56 @@ impl GdiCanvas {
                 gp::ColorMatrixFlagsDefault,
             );
         }
-        let (dx, dy, dw, dh) = (
-            ri(rect.left()),
-            ri(rect.top()),
-            ri(rect.size.width),
-            ri(rect.size.height),
-        );
+        let (dx, dy, dw, dh) = (rect.left(), rect.top(), rect.size.width, rect.size.height);
         match fit {
-            ImageFit::Stretch => self.draw_piece(img, dx, dy, dw, dh, 0, 0, iw, ih, attr),
+            ImageFit::Stretch => self.draw_piece(img, dx, dy, dw, dh, 0.0, 0.0, iw, ih, attr),
             ImageFit::Center => {
-                let x = dx + (dw - iw) / 2;
-                let y = dy + (dh - ih) / 2;
-                self.draw_piece(img, x, y, iw, ih, 0, 0, iw, ih, attr);
+                let x = dx + (dw - logical_iw) / 2.0;
+                let y = dy + (dh - logical_ih) / 2.0;
+                self.draw_piece(img, x, y, logical_iw, logical_ih, 0.0, 0.0, iw, ih, attr);
             }
             ImageFit::Tile => {
                 let mut y = dy;
                 while y < dy + dh {
                     let mut x = dx;
                     while x < dx + dw {
-                        let tw = (dx + dw - x).min(iw);
-                        let th = (dy + dh - y).min(ih);
-                        self.draw_piece(img, x, y, tw, th, 0, 0, tw, th, attr);
-                        x += iw;
+                        let tw = (dx + dw - x).min(logical_iw);
+                        let th = (dy + dh - y).min(logical_ih);
+                        self.draw_piece(
+                            img,
+                            x,
+                            y,
+                            tw,
+                            th,
+                            0.0,
+                            0.0,
+                            tw * density,
+                            th * density,
+                            attr,
+                        );
+                        x += logical_iw;
                     }
-                    y += ih;
+                    y += logical_ih;
                 }
             }
             ImageFit::NinePatch(ins) => {
-                let (sl, sr, st, sb) = (ins.left as i32, ins.right as i32, ins.top as i32, ins.bottom as i32);
-                let cs = [0, sl, iw - sr, iw];
-                let cd = [dx, dx + sl, dx + dw - sr, dx + dw];
-                let rs = [0, st, ih - sb, ih];
-                let rd = [dy, dy + st, dy + dh - sb, dy + dh];
+                let (sl, sr, st, sb) = (
+                    ins.left * density,
+                    ins.right * density,
+                    ins.top * density,
+                    ins.bottom * density,
+                );
+                let cs = [0.0, sl, iw - sr, iw];
+                let cd = [dx, dx + ins.left, dx + dw - ins.right, dx + dw];
+                let rs = [0.0, st, ih - sb, ih];
+                let rd = [dy, dy + ins.top, dy + dh - ins.bottom, dy + dh];
                 for r in 0..3 {
                     for c in 0..3 {
                         let (sx, sw) = (cs[c], cs[c + 1] - cs[c]);
                         let (sy, sh) = (rs[r], rs[r + 1] - rs[r]);
                         let (ox, ow) = (cd[c], cd[c + 1] - cd[c]);
                         let (oy, oh) = (rd[r], rd[r + 1] - rd[r]);
-                        if sw > 0 && sh > 0 && ow > 0 && oh > 0 {
+                        if sw > 0.0 && sh > 0.0 && ow > 0.0 && oh > 0.0 {
                             self.draw_piece(img, ox, oy, ow, oh, sx, sy, sw, sh, attr);
                         }
                     }
@@ -216,17 +370,17 @@ impl GdiCanvas {
     unsafe fn draw_piece(
         &self,
         img: *mut gp::GpImage,
-        dx: i32,
-        dy: i32,
-        dw: i32,
-        dh: i32,
-        sx: i32,
-        sy: i32,
-        sw: i32,
-        sh: i32,
+        dx: f32,
+        dy: f32,
+        dw: f32,
+        dh: f32,
+        sx: f32,
+        sy: f32,
+        sw: f32,
+        sh: f32,
         attr: *mut gp::GpImageAttributes,
     ) {
-        gp::GdipDrawImageRectRectI(
+        gp::GdipDrawImageRectRect(
             self.g,
             img,
             dx,
@@ -244,6 +398,71 @@ impl GdiCanvas {
         );
     }
 
+    fn draw_path_source(
+        &mut self,
+        path: &str,
+        density: f32,
+        rect: Rect,
+        tint: Option<Color>,
+        fit: &ImageFit,
+    ) {
+        if let Some(cache) = self.image_cache.as_deref_mut() {
+            if let Some(image) = cache.path(path) {
+                unsafe { self.draw_gpimage(image, rect, tint, fit, density) };
+            }
+            return;
+        }
+        if let Some(image) = unsafe { CachedImage::from_path(path) } {
+            unsafe { self.draw_gpimage(image.image, rect, tint, fit, density) };
+        }
+    }
+
+    fn draw_bytes_source(
+        &mut self,
+        bytes: &Arc<Vec<u8>>,
+        density: f32,
+        rect: Rect,
+        tint: Option<Color>,
+        fit: &ImageFit,
+    ) {
+        if let Some(cache) = self.image_cache.as_deref_mut() {
+            if let Some(image) = cache.bytes(bytes) {
+                unsafe { self.draw_gpimage(image, rect, tint, fit, density) };
+            }
+            return;
+        }
+        if let Some(image) = unsafe { CachedImage::from_bytes(Arc::clone(bytes)) } {
+            unsafe { self.draw_gpimage(image.image, rect, tint, fit, density) };
+        }
+    }
+
+    fn draw_svg_source(
+        &mut self,
+        bytes: &Arc<Vec<u8>>,
+        rect: Rect,
+        tint: Option<Color>,
+        fit: &ImageFit,
+    ) {
+        let logical = match fit {
+            ImageFit::Stretch => (rect.size.width, rect.size.height),
+            _ => flexui_svg::intrinsic_size(bytes).unwrap_or((rect.size.width, rect.size.height)),
+        };
+        let width = ((logical.0 * self.dpi_scale).round() as u32).max(1);
+        let height = ((logical.1 * self.dpi_scale).round() as u32).max(1);
+        if let Some(cache) = self.image_cache.as_deref_mut() {
+            if let Some(image) = cache.svg(bytes, width, height) {
+                unsafe { self.draw_gpimage(image, rect, tint, fit, self.dpi_scale) };
+            }
+            return;
+        }
+        let Some(rgba) = flexui_svg::rasterize(bytes, width, height) else {
+            return;
+        };
+        if let Some(image) = unsafe { CachedImage::from_rgba(&rgba, width, height) } {
+            unsafe { self.draw_gpimage(image.image, rect, tint, fit, self.dpi_scale) };
+        }
+    }
+
     /// 用给定字族名/系统字体创建字体；返回 (font, family)，调用方负责释放。
     unsafe fn make_font(&self, font: &Font) -> (*mut gp::GpFont, *mut gp::GpFontFamily) {
         let mut family: *mut gp::GpFontFamily = std::ptr::null_mut();
@@ -255,7 +474,8 @@ impl GdiCanvas {
             gp::GdipGetGenericFontFamilySansSerif(&mut family);
         }
         // GDI+ FontStyle 位标志：Bold=1 Italic=2 Underline=4。
-        let style = (font.bold as i32) | ((font.italic as i32) << 1) | ((font.underline as i32) << 2);
+        let style =
+            (font.bold as i32) | ((font.italic as i32) << 1) | ((font.underline as i32) << 2);
         let mut f: *mut gp::GpFont = std::ptr::null_mut();
         if !family.is_null() {
             gp::GdipCreateFont(family, font.size, style, UNIT_PIXEL, &mut f);
@@ -264,7 +484,7 @@ impl GdiCanvas {
     }
 }
 
-impl Canvas for GdiCanvas {
+impl Canvas for GdiCanvas<'_> {
     fn fill_rect(&mut self, rect: Rect, color: Color) {
         unsafe {
             let mut brush: *mut gp::GpSolidFill = std::ptr::null_mut();
@@ -320,13 +540,25 @@ impl Canvas for GdiCanvas {
             let path = self.build_round_path(rect, radius);
             let (p1, p2) = if vertical {
                 (
-                    gp::PointF { X: rect.left(), Y: rect.top() },
-                    gp::PointF { X: rect.left(), Y: rect.bottom() },
+                    gp::PointF {
+                        X: rect.left(),
+                        Y: rect.top(),
+                    },
+                    gp::PointF {
+                        X: rect.left(),
+                        Y: rect.bottom(),
+                    },
                 )
             } else {
                 (
-                    gp::PointF { X: rect.left(), Y: rect.top() },
-                    gp::PointF { X: rect.right(), Y: rect.top() },
+                    gp::PointF {
+                        X: rect.left(),
+                        Y: rect.top(),
+                    },
+                    gp::PointF {
+                        X: rect.right(),
+                        Y: rect.top(),
+                    },
                 )
             };
             let mut brush: *mut gp::GpLineGradient = std::ptr::null_mut();
@@ -433,32 +665,15 @@ impl Canvas for GdiCanvas {
 
     fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
         match source {
-            ImageSource::Path(p) => unsafe { self.draw_image_file(p, rect, tint, &fit) },
-            ImageSource::Bytes(b) => {
-                // GDI+ 从内存需 IStream，成本高；这里落临时文件再加载（简单可靠）。
-                // 注：每次绘制解码，后续可加 LRU 解码缓存优化。
-                use std::io::Write;
-                let n = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let mut tmp = std::env::temp_dir();
-                tmp.push(format!("flexui_img_{}_{}.dat", std::process::id(), n));
-                if std::fs::File::create(&tmp)
-                    .and_then(|mut f| f.write_all(b))
-                    .is_ok()
-                {
-                    if let Some(s) = tmp.to_str() {
-                        unsafe { self.draw_image_file(s, rect, tint, &fit) };
-                    }
-                    let _ = std::fs::remove_file(&tmp);
-                }
+            ImageSource::Path(path) => self.draw_path_source(path, 1.0, rect, tint, &fit),
+            ImageSource::Bytes(bytes) => self.draw_bytes_source(bytes, 1.0, rect, tint, &fit),
+            ImageSource::ScaledPath(path, density) => {
+                self.draw_path_source(path, *density, rect, tint, &fit)
             }
-            ImageSource::Svg(b) => {
-                // 按目标尺寸 2× 超采样光栅化（配合窗口 DPI world transform，高分屏清晰）。
-                let pw = ((rect.size.width * 2.0).round() as u32).max(1);
-                let ph = ((rect.size.height * 2.0).round() as u32).max(1);
-                if let Some(rgba) = flexui_svg::rasterize(b, pw, ph) {
-                    unsafe { self.draw_rgba(&rgba, pw, ph, rect, tint, &fit) };
-                }
+            ImageSource::ScaledBytes(bytes, density) => {
+                self.draw_bytes_source(bytes, *density, rect, tint, &fit)
             }
+            ImageSource::Svg(bytes) => self.draw_svg_source(bytes, rect, tint, &fit),
         }
     }
 

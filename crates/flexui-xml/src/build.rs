@@ -202,10 +202,13 @@ fn parse_window_config(el: &Element) -> WindowConfig {
 /// `.svg` 走矢量光栅化路径。
 fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
     let is_svg = path.to_lowercase().ends_with(".svg");
+    let density = flexui_core::image_density_from_path(path);
     if let Some(rm) = res {
         if let Ok(bytes) = rm.read(path) {
             return if is_svg {
                 ImageSource::svg(bytes)
+            } else if density != 1.0 {
+                ImageSource::bytes_scaled(bytes, density)
             } else {
                 ImageSource::bytes(bytes)
             };
@@ -825,6 +828,25 @@ mod tests {
         let mut rm = ResourceManager::new();
         rm.mount(DirProvider::new(&dir));
         assert!(load_res(&rm, "a.xml", &Context::new()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 图片资源名_保留像素密度() {
+        assert!(matches!(
+            resolve_image(None, "icon@2.00x.png"),
+            ImageSource::ScaledPath(_, density) if density == 2.0
+        ));
+
+        let dir = std::env::temp_dir().join(format!("flexui_density_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("icon@2.00x.png"), [1, 2, 3]).unwrap();
+        let mut rm = ResourceManager::new();
+        rm.mount(DirProvider::new(&dir));
+        assert!(matches!(
+            resolve_image(Some(&rm), "icon@2.00x.png"),
+            ImageSource::ScaledBytes(_, density) if density == 2.0
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

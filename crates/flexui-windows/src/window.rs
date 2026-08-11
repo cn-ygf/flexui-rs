@@ -28,7 +28,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, V
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use crate::canvas::GdiCanvas;
+use crate::canvas::{GdiCanvas, ImageCache};
 use crate::gdiplus::{Gdiplus, OffscreenBitmap};
 
 /// 顶部可拖动条高度（逻辑像素）。
@@ -39,6 +39,7 @@ struct AppState {
     root: Node,
     disp: Dispatcher,
     delegate: Box<dyn WindowDelegate>,
+    image_cache: ImageCache,
     /// 无边框（自绘标题栏）模式：启用自定义拖动/命中。
     frameless: bool,
 }
@@ -184,6 +185,7 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         root,
         disp,
         delegate,
+        image_cache: ImageCache::default(),
         frameless,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
@@ -840,18 +842,22 @@ unsafe fn paint_window(hwnd: HWND, hdc: HDC, state: &mut AppState) {
     let Some(off) = OffscreenBitmap::new(w, h) else {
         return;
     };
-    let mut cv = GdiCanvas::new(off.graphics());
+    let AppState {
+        root,
+        disp,
+        image_cache,
+        ..
+    } = state;
+    let mut cv = GdiCanvas::with_cache(off.graphics(), image_cache);
     cv.clear(Color::WHITE); // 不透明底，供未覆盖区域与 ClearType 使用
     cv.set_dpi_scale(scale);
 
     // 布局用逻辑像素（= 物理 / scale）。
     let lw = w as f32 / scale;
     let lh = h as f32 / scale;
-    layout_node(state.root.as_mut(), Rect::new(0.0, 0.0, lw, lh), &cv);
-    paint_tree(state.root.as_ref(), &mut cv);
-    state
-        .disp
-        .paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
+    layout_node(root.as_mut(), Rect::new(0.0, 0.0, lw, lh), &cv);
+    paint_tree(root.as_ref(), &mut cv);
+    disp.paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
 
     // 整块 blit 到窗口（1:1 物理像素）。
     let mut gw: *mut gp::GpGraphics = null_mut();

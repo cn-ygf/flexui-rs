@@ -39,4 +39,4 @@ pub use window::{
 
 // 几何/绘图类型透传，便于上层一次性引入。
 pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
-pub use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextAlign};
+pub use flexui_gfx::{image_density_from_path, Canvas, Font, ImageFit, ImageSource, TextAlign};

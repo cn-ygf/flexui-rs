@@ -3,7 +3,9 @@
 
 #[cfg(windows)]
 fn main() {
-    use flexui_core::{Color, Image, ImageSource, Panel, StyleSet, StyleSpec, Widget};
+    use flexui_core::{
+        Canvas, Color, Image, ImageFit, ImageSource, Panel, Rect, StyleSet, StyleSpec, Widget,
+    };
 
     // —— 生成一张 8x8 纯绿 24 位 BMP 到临时文件 ——
     let path = std::env::temp_dir().join("flexui_green.bmp");
@@ -43,10 +45,43 @@ fn main() {
     let (sr, sg, sb) = ((px3 >> 16) & 0xFF, (px3 >> 8) & 0xFF, px3 & 0xFF);
     let svg_ok = sb > 180 && sr < 80 && sg < 80;
 
-    if plain_ok && tint_ok && svg_ok {
+    // 4) 单份 2x 位图在常用 Windows DPI 下都保持 14×14 逻辑尺寸。
+    let scaled_path = std::env::temp_dir().join("flexui_green@2.00x.bmp");
+    write_solid_bmp(&scaled_path, 28, 28, [0, 255, 0]).expect("写 2x BMP 失败");
+    let scaled_source = ImageSource::path(scaled_path.to_string_lossy().to_string());
+    let _gp = flexui_windows::Gdiplus::startup().expect("GDI+ 初始化失败");
+    let mut density_ok = true;
+    for scale in [1.0_f32, 1.25, 1.5, 2.0] {
+        let physical = (40.0 * scale).round() as i32;
+        let off =
+            flexui_windows::OffscreenBitmap::new(physical, physical).expect("离屏位图创建失败");
+        let mut canvas = flexui_windows::GdiCanvas::new(off.graphics());
+        canvas.clear(Color::WHITE);
+        canvas.set_dpi_scale(scale);
+        canvas.draw_image(
+            &scaled_source,
+            Rect::new(0.0, 0.0, 40.0, 40.0),
+            None,
+            ImageFit::Center,
+        );
+        drop(canvas);
+        let center = off.get_pixel((20.0 * scale) as i32, (20.0 * scale) as i32);
+        let outside = off.get_pixel((10.0 * scale) as i32, (20.0 * scale) as i32);
+        let center_green = ((center >> 8) & 0xFF) > 180;
+        let outside_white = ((outside >> 16) & 0xFF) > 220
+            && ((outside >> 8) & 0xFF) > 220
+            && (outside & 0xFF) > 220;
+        density_ok &= center_green && outside_white;
+        println!("scaled {scale:.2}x = center {center:#010X}, outside {outside:#010X}");
+    }
+    let _ = std::fs::remove_file(&scaled_path);
+
+    if plain_ok && tint_ok && svg_ok && density_ok {
         println!("WIN-IMAGE-OK");
     } else {
-        println!("WIN-IMAGE-FAIL (plain={plain_ok} tint={tint_ok} svg={svg_ok})");
+        println!(
+            "WIN-IMAGE-FAIL (plain={plain_ok} tint={tint_ok} svg={svg_ok} density={density_ok})"
+        );
         std::process::exit(1);
     }
 }
@@ -65,7 +100,7 @@ fn write_solid_bmp(path: &std::path::Path, w: i32, h: i32, rgb: [u8; 3]) -> std:
     buf.extend_from_slice(&file_size.to_le_bytes());
     buf.extend_from_slice(&0u32.to_le_bytes()); // reserved
     buf.extend_from_slice(&54u32.to_le_bytes()); // 像素数据偏移
-    // BITMAPINFOHEADER
+                                                 // BITMAPINFOHEADER
     buf.extend_from_slice(&40u32.to_le_bytes());
     buf.extend_from_slice(&w.to_le_bytes());
     buf.extend_from_slice(&h.to_le_bytes());
@@ -77,7 +112,7 @@ fn write_solid_bmp(path: &std::path::Path, w: i32, h: i32, rgb: [u8; 3]) -> std:
     buf.extend_from_slice(&2835u32.to_le_bytes()); // y ppm
     buf.extend_from_slice(&0u32.to_le_bytes()); // colors
     buf.extend_from_slice(&0u32.to_le_bytes()); // important
-                                                 // 像素（BGR，行末补零对齐）
+                                                // 像素（BGR，行末补零对齐）
     let [red, green, blue] = rgb;
     for _ in 0..h {
         for _ in 0..w {

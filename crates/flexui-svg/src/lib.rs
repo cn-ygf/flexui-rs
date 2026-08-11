@@ -4,6 +4,17 @@
 use resvg::tiny_skia;
 use resvg::usvg;
 
+/// 读取 SVG 的固有逻辑尺寸（width/height 或 viewBox 解析后的尺寸）。
+pub fn intrinsic_size(svg: &[u8]) -> Option<(f32, f32)> {
+    let tree = usvg::Tree::from_data(svg, &usvg::Options::default()).ok()?;
+    let size = tree.size();
+    if size.width() <= 0.0 || size.height() <= 0.0 {
+        None
+    } else {
+        Some((size.width(), size.height()))
+    }
+}
+
 /// 把 SVG 光栅化成 w×h 的 RGBA(premultiplied) 字节（每像素 4 字节，行优先）。失败返回 None。
 pub fn rasterize(svg: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
     if w == 0 || h == 0 {
@@ -36,5 +47,6 @@ mod tests {
         assert!(rgba[i] > 200, "R={}", rgba[i]);
         assert!(rgba[i + 1] < 60);
         assert!(rgba[i + 2] < 60);
+        assert_eq!(intrinsic_size(svg), Some((10.0, 10.0)));
     }
 }

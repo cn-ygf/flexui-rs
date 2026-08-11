@@ -5,6 +5,7 @@
 //! - `isFlipped=true`：左上原点、y 向下。
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
@@ -24,7 +25,7 @@ use flexui_core::{
     Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowHandle,
 };
 
-use crate::canvas::CgCanvas;
+use crate::canvas::{CgCanvas, ImageCache, SharedImageCache};
 
 /// 逻辑矩形 → NSRect（视图为 flipped，坐标一致）。
 fn to_nsrect(r: Rect) -> NSRect {
@@ -66,6 +67,8 @@ pub struct AppState {
     pub delegate: Box<dyn WindowDelegate>,
     /// 回调中动态打开的子窗口保活句柄。
     pub child_windows: Vec<Retained<NSWindow>>,
+    /// 每窗口独立图片缓存，随窗口释放原生 NSImage。
+    pub image_cache: SharedImageCache,
 }
 
 pub struct FlexViewIvars {
@@ -83,11 +86,16 @@ define_class!(
         fn draw_rect(&self, _dirty: NSRect) {
             let b = self.bounds();
             let size = Size::new(b.size.width as f32, b.size.height as f32);
+            let scale = self
+                .window()
+                .map(|window| window.backingScaleFactor() as f32)
+                .unwrap_or(1.0);
             let mut st = self.ivars().state.borrow_mut();
+            let image_cache = st.image_cache.clone();
             let AppState { root, disp, .. } = &mut *st;
-            let cv_measure = CgCanvas::new();
+            let cv_measure = CgCanvas::with_image_cache(scale, image_cache.clone());
             layout_node(root.as_mut(), Rect::new(0.0, 0.0, size.width, size.height), &cv_measure);
-            let mut cv = CgCanvas::new();
+            let mut cv = CgCanvas::with_image_cache(scale, image_cache);
             paint_tree(root.as_ref(), &mut cv);
             disp.paint_overlays(&mut cv, size);
         }
@@ -422,6 +430,7 @@ impl FlexView {
                 disp,
                 delegate,
                 child_windows: Vec::new(),
+                image_cache: Rc::new(RefCell::new(ImageCache::default())),
             }),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);

@@ -9,16 +9,16 @@
                 normal-bgimage="button/menu_normal.svg" hot-bgimage="button/menu_hover.svg"
                 pushed-bgimage="button/menu_pushed.svg" normal-bgfit="stretch"/>
         <Button name="minimize" tooltip="最小化" width="28" height="26"
-                normal-bgimage="button/mini_normal.png" hot-bgimage="button/mini_hover.png"
-                pushed-bgimage="button/mini_pushed.png" normal-bgfit="center"/>
+                normal-bgimage="button/mini_normal.svg" hot-bgimage="button/mini_hover.svg"
+                pushed-bgimage="button/mini_pushed.svg" normal-bgfit="center"/>
         <Button name="close_window" tooltip="关闭" width="28" height="26"
-                normal-bgimage="button/close_normal.png" hot-bgimage="button/close_hover.png"
-                pushed-bgimage="button/close_pushed.png" normal-bgfit="center"/>
+                normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
+                pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
       </HBox>
       <HBox height="64" padding="2 38" spacing="18" align="center">
-        <Image src="label/uu_logo.png" width="40" height="46"/>
-        <Button tooltip="返回" width="28" height="34" normal-bgimage="button/back_normal.png"
-                hot-bgimage="button/back_hover.png" normal-bgfit="center"/>
+        <Image src="label/uu_logo@2.00x.png" width="40" height="46"/>
+        <Button tooltip="返回" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
+                hot-bgimage="button/back_hover@2.00x.png" normal-bgfit="center"/>
         <Button text="首页" width="72" height="42" normal-bgcolor="#181D42" normal-fgcolor="#FFFFFF"
                 font-size="18" bold="true" normal-textalign="center"/>
         <Button text="游戏" width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
@@ -40,32 +40,32 @@
       <HBox height="356" spacing="16">
         <VBox width="218" height="356" spacing="8">
           <Button name="btn_start" width="218" height="320"
-                  normal-bgimage="common/steam_card.png" hot-bgimage="common/steam_card_hot.png"
-                  pushed-bgimage="common/steam_card_hot.png" normal-bgfit="stretch"/>
+                  normal-bgimage="common/steam_card@2.00x.png" hot-bgimage="common/steam_card_hot@2.00x.png"
+                  pushed-bgimage="common/steam_card_hot@2.00x.png" normal-bgfit="stretch"/>
           <Label text="Steam 商店" height="28" normal-fgcolor="#FFFFFF" font-size="17"
                  normal-textalign="center"/>
         </VBox>
         <VBox width="218" height="356" spacing="8">
           <Button width="218" height="320"
-                  normal-bgimage="common/empty_card.png" hot-bgimage="common/empty_card_hot.png"
-                  pushed-bgimage="common/empty_card_hot.png" normal-bgfit="stretch"/>
+                  normal-bgimage="common/empty_card@2.00x.png" hot-bgimage="common/empty_card_hot@2.00x.png"
+                  pushed-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
           <Panel height="28" mouse="transparent"/>
         </VBox>
         <VBox width="218" height="356" spacing="8">
           <Button width="218" height="320"
-                  normal-bgimage="common/empty_card.png" hot-bgimage="common/empty_card_hot.png"
-                  pushed-bgimage="common/empty_card_hot.png" normal-bgfit="stretch"/>
+                  normal-bgimage="common/empty_card@2.00x.png" hot-bgimage="common/empty_card_hot@2.00x.png"
+                  pushed-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
           <Panel height="28" mouse="transparent"/>
         </VBox>
         <VBox width="218" height="356" spacing="8">
           <Button width="218" height="320"
-                  normal-bgimage="common/empty_card.png" hot-bgimage="common/empty_card_hot.png"
-                  pushed-bgimage="common/empty_card_hot.png" normal-bgfit="stretch"/>
+                  normal-bgimage="common/empty_card@2.00x.png" hot-bgimage="common/empty_card_hot@2.00x.png"
+                  pushed-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
           <Panel height="28" mouse="transparent"/>
         </VBox>
       </HBox>
       <HBox height="136" spacing="16">
-        <Image src="button/default_banner.png" width="452" height="136"/>
+        <Image src="button/default_banner@2.00x.png" width="452" height="136"/>
         <VBox flex="1" spacing="16">
           <HBox height="60" spacing="16">
             <Button text="会员充值" width="218" height="60" normal-bgimage="button/membership_recharge.svg"
@@ -74,7 +74,7 @@
                     hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
           </HBox>
           <HBox height="60" spacing="16">
-            <Image src="button/college_student_discount.png" width="218" height="60"/>
+            <Image src="button/college_student_discount@2.00x.png" width="218" height="60"/>
             <Button text="我的卡券" width="218" height="60" normal-bgcolor="#30386F"
                     hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
           </HBox>
@@ -93,14 +93,14 @@
       <HBox height="36" padding="4 8">
         <Panel flex="1" mouse="transparent"/>
         <Button name="close_login" tooltip="关闭登录" width="28" height="28"
-                normal-bgimage="button/close_normal.png" hot-bgimage="button/close_hover.png"
-                pushed-bgimage="button/close_pushed.png" normal-bgfit="center"/>
+                normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
+                pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
       </HBox>
       <HBox flex="1" spacing="18" padding="12 24" align="center">
         <VBox width="252" spacing="16" align="center">
           <Label text="扫码登录" height="28" normal-fgcolor="#FFFFFF" font-size="19" bold="true"
                  normal-textalign="center"/>
-          <Image src="label/uu_qrcode.png" width="160" height="160"/>
+          <Image src="label/uu_qrcode@2.00x.png" width="160" height="160"/>
           <HBox height="26" spacing="6" align="center" justify="center">
             <Label text="使用" width="42" normal-fgcolor="#B7BBD9" font-size="14"/>
             <Image src="label/wechat_logo.svg" width="24" height="24"/>
@@ -139,8 +139,8 @@
       <HBox height="42" padding="5 10" normal-bgcolor="#343C78">
         <Label text="设置" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="18"/>
         <Button name="close_settings" tooltip="关闭设置" width="28" height="28"
-                normal-bgimage="button/close_normal.png" hot-bgimage="button/close_hover.png"
-                pushed-bgimage="button/close_pushed.png" normal-bgfit="center"/>
+                normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
+                pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
       </HBox>
       <HBox flex="1">
         <VBox width="180" spacing="0" normal-bgcolor="#343C78">
