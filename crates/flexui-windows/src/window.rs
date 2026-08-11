@@ -28,7 +28,7 @@ use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW,
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::GdiCanvas;
-use crate::gdiplus::OffscreenBitmap;
+use crate::gdiplus::{Gdiplus, OffscreenBitmap};
 
 /// 顶部可拖动条高度（逻辑像素）。
 const DRAG_STRIP: f32 = 40.0;
@@ -82,6 +82,12 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
 
 /// 启动应用（多窗口）：一次性建多个窗口，共享同一消息循环。
 pub fn run_multi(windows: Vec<NewWindow>) {
+    // GDI+ 必须在任何窗口绘制前初始化，并保持到消息循环结束。
+    let Some(_gdi) = Gdiplus::startup() else {
+        eprintln!("[flexui] GDI+ 初始化失败，无法创建窗口");
+        return;
+    };
+
     unsafe {
         // 开启 Per-Monitor V2 DPI 感知（清单已声明；此调用作为兜底，二者一致）。
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
