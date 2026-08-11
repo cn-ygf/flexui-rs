@@ -27,6 +27,11 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
         let sr = Rect::new(rect.left() + sh.dx, rect.top() + sh.dy, rect.size.width, rect.size.height);
         cv.fill_round_rect(sr, radius, dim(sh.color, op));
     }
+    // 圆角控件的图片、内容和子树必须使用同一裁剪区；阴影保留在裁剪外。
+    if rounded {
+        cv.save();
+        cv.clip_round_rect(rect, radius);
+    }
     // 1. 背景：渐变优先于纯色。
     if let Some(g) = style.gradient {
         cv.fill_gradient_rect(rect, radius, dim(g.from, op), dim(g.to, op), g.vertical);
@@ -72,6 +77,9 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
         for child in b.children.iter() {
             paint_tree(child.as_ref(), cv);
         }
+        cv.restore();
+    }
+    if rounded {
         cv.restore();
     }
 }
@@ -168,6 +176,7 @@ mod tests {
     struct Recorder {
         fills: Vec<(Rect, Color)>,
         texts: Vec<String>,
+        round_clips: Vec<(Rect, flexui_geometry::Corners)>,
     }
     impl Canvas for Recorder {
         fn fill_rect(&mut self, r: Rect, c: Color) {
@@ -183,6 +192,9 @@ mod tests {
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+        }
+        fn clip_round_rect(&mut self, rect: Rect, radius: flexui_geometry::Corners) {
+            self.round_clips.push((rect, radius));
         }
     }
 
@@ -236,6 +248,23 @@ mod tests {
             rec.fills.iter().any(|(_, c)| c.r == 1.0 && (c.a - 0.5).abs() < 1e-6),
             "透明度应把红色 alpha 降到 0.5"
         );
+    }
+
+    #[test]
+    fn 圆角控件_裁剪图片内容与子树() {
+        let radius = flexui_geometry::Corners::all(8.0);
+        let panel = Panel::new()
+            .style(StyleSet::new().with_normal(StyleSpec {
+                corner_radius: Some(radius),
+                ..Default::default()
+            }))
+            .size(40.0, 30.0);
+        let mut root = VBox::new().push(panel);
+        let mut rec = Recorder::default();
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &rec);
+        paint_tree(&root, &mut rec);
+        assert_eq!(rec.round_clips.len(), 1);
+        assert_eq!(rec.round_clips[0].1, radius);
     }
 
     #[test]

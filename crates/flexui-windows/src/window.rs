@@ -11,6 +11,10 @@ use flexui_core::{
     Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Graphics::Dwm::{
+    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMNCRP_ENABLED,
+    DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, InvalidateRect, ScreenToClient, HDC, PAINTSTRUCT,
 };
@@ -25,6 +29,7 @@ use windows_sys::Win32::UI::Input::Ime::{
     COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -42,6 +47,8 @@ struct AppState {
     image_cache: ImageCache,
     /// 无边框（自绘标题栏）模式：启用自定义拖动/命中。
     frameless: bool,
+    /// 固定尺寸窗口仍保留 WS_THICKFRAME 供 DWM 生成阴影，此字段用于禁止实际缩放。
+    resizable: bool,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -126,6 +133,34 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 /// 存活窗口计数（最后一个关闭时退出消息循环）。
 static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// 让 DWM 管理无边框窗口的圆角与阴影；旧系统会忽略不支持的圆角属性。
+unsafe fn enable_frameless_dwm(hwnd: HWND) {
+    let policy = DWMNCRP_ENABLED;
+    DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_NCRENDERING_POLICY as u32,
+        &policy as *const _ as *const std::ffi::c_void,
+        std::mem::size_of_val(&policy) as u32,
+    );
+
+    let corner = DWMWCP_ROUND;
+    DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+        &corner as *const _ as *const std::ffi::c_void,
+        std::mem::size_of_val(&corner) as u32,
+    );
+
+    // 1px 原生框架足以让 DWM 为 WS_POPUP 窗口生成系统阴影。
+    let margins = MARGINS {
+        cxLeftWidth: 1,
+        cxRightWidth: 1,
+        cyTopHeight: 1,
+        cyBottomHeight: 1,
+    };
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
+}
+
 /// 创建一个原生窗口并接入共享事件循环（窗口类须已注册）。
 unsafe fn create_window(spec: NewWindow) -> HWND {
     let NewWindow {
@@ -144,7 +179,10 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         WS_OVERLAPPEDWINDOW | WS_VISIBLE
     };
     if !config.resizable {
-        style &= !(WS_THICKFRAME | WS_MAXIMIZEBOX);
+        style &= !WS_MAXIMIZEBOX;
+        if !frameless {
+            style &= !WS_THICKFRAME;
+        }
     }
 
     // `WindowConfig` 使用逻辑像素；Per-Monitor V2 下 CreateWindowExW 接收物理像素。
@@ -157,7 +195,9 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         right: (config.width.max(1.0) * scale).round() as i32,
         bottom: (config.height.max(1.0) * scale).round() as i32,
     };
-    AdjustWindowRectExForDpi(&mut outer, style, 0, 0, dpi);
+    if !frameless {
+        AdjustWindowRectExForDpi(&mut outer, style, 0, 0, dpi);
+    }
     let outer_width = (outer.right - outer.left).max(1);
     let outer_height = (outer.bottom - outer.top).max(1);
 
@@ -187,9 +227,14 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         delegate,
         image_cache: ImageCache::default(),
         frameless,
+        resizable: config.resizable,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    if frameless {
+        enable_frameless_dwm(hwnd);
+    }
 
     DragAcceptFiles(hwnd, 1);
     ShowWindow(hwnd, SW_SHOW);
@@ -483,6 +528,12 @@ unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
     match msg {
+        // 自绘标题栏占满整个窗口，同时保留 WS_THICKFRAME 供 DWM 生成圆角、阴影和 Snap。
+        WM_NCCALCSIZE
+            if GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & WS_POPUP != 0 =>
+        {
+            0
+        }
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
             let hdc = BeginPaint(hwnd, &mut ps);
@@ -748,6 +799,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 背景擦除由我们的双缓冲全覆盖，拦截以消除闪烁。
         WM_ERASEBKGND => 1,
+        WM_SYSCOMMAND
+            if !state.is_null()
+                && !(*state).resizable
+                && (wparam & 0xFFF0) == SC_SIZE as usize =>
+        {
+            0
+        }
         // 关闭请求 → 窗口委托 on_close；返回 false 阻止关闭。
         WM_CLOSE => {
             let allow = if state.is_null() {
@@ -769,6 +827,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_NCHITTEST if !state.is_null() && (*state).frameless => {
             let default = DefWindowProcW(hwnd, msg, wparam, lparam);
             if default != HTCLIENT as isize {
+                let resize_edge = matches!(
+                    default as u32,
+                    HTLEFT
+                        | HTRIGHT
+                        | HTTOP
+                        | HTBOTTOM
+                        | HTTOPLEFT
+                        | HTTOPRIGHT
+                        | HTBOTTOMLEFT
+                        | HTBOTTOMRIGHT
+                );
+                if !(*state).resizable && resize_edge {
+                    return HTBORDER as isize;
+                }
                 return default; // 边缘缩放命中交给系统（保留 Snap/缩放）
             }
             // 客户区内：换算成逻辑坐标，判断是否在顶部拖动条且非实体控件之上。

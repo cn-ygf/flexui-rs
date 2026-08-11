@@ -542,6 +542,10 @@ impl Canvas for CgCanvas {
         // 追加矩形裁剪区（配合 save/restore 使用）。
         NSBezierPath::bezierPathWithRect(to_nsrect(rect)).addClip();
     }
+
+    fn clip_round_rect(&mut self, rect: Rect, radius: Corners) {
+        round_rect_path(rect, radius).addClip();
+    }
 }
 
 /// 度量文字时颜色不影响尺寸，用黑色占位。

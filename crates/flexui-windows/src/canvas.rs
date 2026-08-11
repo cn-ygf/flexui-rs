@@ -701,4 +701,12 @@ impl Canvas for GdiCanvas<'_> {
             );
         }
     }
+
+    fn clip_round_rect(&mut self, rect: Rect, radius: Corners) {
+        unsafe {
+            let path = self.build_round_path(rect, radius);
+            gp::GdipSetClipPath(self.g, path, COMBINE_INTERSECT);
+            gp::GdipDeletePath(path);
+        }
+    }
 }

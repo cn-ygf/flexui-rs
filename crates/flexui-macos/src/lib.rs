@@ -17,8 +17,8 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::MainThreadOnly;
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSWindow, NSWindowStyleMask,
-    NSWindowTitleVisibility,
+    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSWindow, NSWindowButton,
+    NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
@@ -67,8 +67,13 @@ pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NS
     );
     // 按标题栏模式确定样式。
     let mut style = match config.titlebar {
-        // 无边框：无系统标题栏/交通灯。
-        TitlebarMode::None => NSWindowStyleMask::Borderless,
+        // 完全自绘标题栏仍保留透明的原生窗口框架，以获得系统圆角与阴影。
+        TitlebarMode::None => {
+            NSWindowStyleMask::Titled
+                | NSWindowStyleMask::Closable
+                | NSWindowStyleMask::Miniaturizable
+                | NSWindowStyleMask::FullSizeContentView
+        }
         // 系统 或 隐藏留交通灯：都保留标题/关闭/最小化按钮。
         _ => {
             NSWindowStyleMask::Titled
@@ -97,10 +102,22 @@ pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NS
     window.setTitle(&NSString::from_str(&config.title));
     window.setAcceptsMouseMovedEvents(true);
 
-    // 隐藏留控件：标题栏透明 + 隐藏标题文字（交通灯保留）。
-    if config.titlebar == TitlebarMode::HiddenKeepControls {
+    // 自绘/隐藏模式：标题栏透明且内容铺满窗口。
+    if config.titlebar != TitlebarMode::System {
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        window.setHasShadow(true);
+    }
+    if config.titlebar == TitlebarMode::None {
+        for button in [
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
+        ] {
+            if let Some(control) = window.standardWindowButton(button) {
+                control.setHidden(true);
+            }
+        }
     }
     // 无边框/隐藏模式允许拖动窗口背景移动窗口。
     if config.titlebar != TitlebarMode::System {

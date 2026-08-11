@@ -208,6 +208,11 @@ pub trait Canvas {
 
     /// 追加矩形裁剪区（缺省为空，后端可覆写）。
     fn clip_rect(&mut self, _rect: Rect) {}
+
+    /// 追加圆角矩形裁剪区；不支持路径裁剪的后端回退为矩形裁剪。
+    fn clip_round_rect(&mut self, rect: Rect, _radius: Corners) {
+        self.clip_rect(rect);
+    }
 }
 
 #[cfg(test)]
