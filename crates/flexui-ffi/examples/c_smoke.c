@@ -16,8 +16,25 @@ int main(void) {
     int n = flex_load_check(xml);
     printf("flex_load_check = %d\n", n);
 
+    /* 链接性检查：引用新导出的符号地址（不调用阻塞入口）。 */
+    void *syms[] = {
+        (void *)flex_run,
+        (void *)flex_ctx_set_text,
+        (void *)flex_ctx_get_text,
+        (void *)flex_ctx_is_selected,
+        (void *)flex_ctx_set_enabled,
+        (void *)flex_ctx_set_title,
+        (void *)flex_ctx_close,
+        (void *)flex_dialog_open_file,
+        (void *)flex_dialog_open_directory,
+        (void *)flex_dialog_save_file,
+        (void *)flex_dialog_save_directory,
+    };
+    int nsyms = (int)(sizeof(syms) / sizeof(syms[0]));
+    printf("linked %d extra symbols\n", nsyms);
+
     /* macOS 上 v-if=!platform.macos 为假 → HBox 被裁剪，顶层应为 2 个子节点。 */
-    if (v == 1 && n == 2) {
+    if (v == 1 && n == 2 && nsyms == 11) {
         printf("C-ABI-OK\n");
         return 0;
     }

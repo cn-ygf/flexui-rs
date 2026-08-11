@@ -10,8 +10,11 @@ use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use flexui_core::{visit_all_mut, WidgetRole};
+use flexui_core::{visit_all_mut, WidgetRole, WindowCtx, WindowDelegate};
 use flexui_xml::{load_str, Context};
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use flexui_core::dialog::{DialogKind, FileDialog};
 
 // 按平台选择后端（编译期二选一）。
 #[cfg(target_os = "macos")]
@@ -76,6 +79,284 @@ fn fire_click(name: &str) {
             }
         });
     }
+}
+
+// —— 窗口上下文（FlexCtx）操作：在回调里通过不透明指针访问/控制控件与窗口 ——
+
+/// 把 C 侧不透明指针还原为 &mut WindowCtx（仅在回调期间有效）。
+unsafe fn ctx_from<'a>(p: *mut c_void) -> Option<&'a mut WindowCtx<'a>> {
+    if p.is_null() {
+        None
+    } else {
+        Some(&mut *(p as *mut WindowCtx))
+    }
+}
+
+/// 把字符串写入调用方缓冲（含 NUL）；返回写入的字节数（不含 NUL），缓冲不足或出错返回 -1。
+fn write_str(s: &str, out: *mut c_char, out_len: c_int) -> c_int {
+    if out.is_null() || out_len <= 0 {
+        return -1;
+    }
+    let bytes = s.as_bytes();
+    let cap = out_len as usize;
+    if bytes.len() + 1 > cap {
+        return -1;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out as *mut u8, bytes.len());
+        *out.add(bytes.len()) = 0;
+    }
+    bytes.len() as c_int
+}
+
+/// 设置某具名控件的文本。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_text(ctx: *mut c_void, name: *const c_char, text: *const c_char) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n), Some(t)) = (ctx_from(ctx), cstr(name), cstr(text)) {
+            ctx.set_text(n, t);
+        }
+    }));
+}
+
+/// 读取某具名控件的文本到 out 缓冲；返回长度，未找到/出错返回 -1。
+#[no_mangle]
+pub extern "C" fn flex_ctx_get_text(
+    ctx: *mut c_void,
+    name: *const c_char,
+    out: *mut c_char,
+    out_len: c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return -1;
+        };
+        match ctx.with(n, |w| w.base().text.clone()) {
+            Some(text) => write_str(&text, out, out_len),
+            None => -1,
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// 读取某具名控件的 selected（CheckBox/Radio）：1=选中，0=未选，-1=未找到。
+#[no_mangle]
+pub extern "C" fn flex_ctx_is_selected(ctx: *mut c_void, name: *const c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return -1;
+        };
+        match ctx.is_selected(n) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// 设置某具名控件是否可用。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_enabled(ctx: *mut c_void, name: *const c_char, enabled: c_int) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) {
+            ctx.set_enabled(n, enabled != 0);
+        }
+    }));
+}
+
+/// 设置窗口标题。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_title(ctx: *mut c_void, title: *const c_char) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(t)) = (ctx_from(ctx), cstr(title)) {
+            ctx.set_title(t);
+        }
+    }));
+}
+
+/// 请求关闭窗口。
+#[no_mangle]
+pub extern "C" fn flex_ctx_close(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.close();
+        }
+    }));
+}
+
+// —— 窗口委托桥接：C 侧函数指针集 ——
+
+/// C 侧窗口委托：各钩子为可空函数指针，第一个参数为不透明 FlexCtx*。
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FlexDelegate {
+    pub on_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
+    pub on_click: Option<extern "C" fn(name: *const c_char, ctx: *mut c_void, user: *mut c_void)>,
+    pub on_context:
+        Option<extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void)>,
+    /// 返回非 0 允许关闭，0 阻止关闭。
+    pub on_close: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void) -> c_int>,
+}
+
+/// 把 C 委托适配成 WindowDelegate。
+struct CDelegate {
+    d: FlexDelegate,
+    user: usize,
+}
+
+impl CDelegate {
+    fn user_ptr(&self) -> *mut c_void {
+        self.user as *mut c_void
+    }
+}
+
+impl WindowDelegate for CDelegate {
+    fn on_init(&mut self, ctx: &mut WindowCtx) {
+        if let Some(f) = self.d.on_init {
+            f(ctx as *mut _ as *mut c_void, self.user_ptr());
+        }
+    }
+    fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if let Some(f) = self.d.on_click {
+            if let Ok(cn) = CString::new(name) {
+                f(cn.as_ptr(), ctx as *mut _ as *mut c_void, self.user_ptr());
+            }
+        }
+    }
+    fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
+        if let Some(f) = self.d.on_context {
+            if let Ok(cn) = CString::new(name) {
+                f(cn.as_ptr(), x, y, ctx as *mut _ as *mut c_void, self.user_ptr());
+            }
+        }
+    }
+    fn on_close(&mut self, ctx: &mut WindowCtx) -> bool {
+        match self.d.on_close {
+            Some(f) => f(ctx as *mut _ as *mut c_void, self.user_ptr()) != 0,
+            None => true,
+        }
+    }
+}
+
+/// 用 XML + C 委托启动应用（阻塞）。delegate 为 NULL 时等价于 flex_run_xml。
+/// 0 成功，负数错误码（-1 参数错、-2 XML 失败、-3 panic、-100 无后端）。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_run(
+    title: *const c_char,
+    width: c_int,
+    height: c_int,
+    xml: *const c_char,
+    delegate: *const FlexDelegate,
+    user: *mut c_void,
+) -> c_int {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let (Some(title), Some(xml)) = (unsafe { cstr(title) }, unsafe { cstr(xml) }) else {
+            return -1;
+        };
+        let ctx = Context::new();
+        let res = match load_str(xml, &ctx) {
+            Ok(r) => r,
+            Err(_) => return -2,
+        };
+        let mut disp = flexui_core::Dispatcher::new();
+        for (group, tabbox) in res.bindings {
+            disp.bind_tab(group, tabbox);
+        }
+        let deleg: Box<dyn WindowDelegate> = if delegate.is_null() {
+            Box::new(flexui_core::NoopDelegate)
+        } else {
+            Box::new(CDelegate { d: unsafe { *delegate }, user: user as usize })
+        };
+        backend::run(
+            flexui_core::WindowConfig::new(title, width as f32, height as f32),
+            res.root,
+            disp,
+            deleg,
+        );
+        0
+    }));
+    result.unwrap_or(-3)
+}
+
+// —— 文件对话框 ——
+
+/// C 侧文件对话框配置。filter_exts 为逗号分隔扩展名（如 "png,jpg"），可空。
+#[repr(C)]
+pub struct FlexFileDialog {
+    pub title: *const c_char,
+    pub default_dir: *const c_char,
+    pub default_name: *const c_char,
+    pub filter_name: *const c_char,
+    pub filter_exts: *const c_char,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn build_fd(opts: *const FlexFileDialog) -> FileDialog {
+    let mut fd = FileDialog::new();
+    if opts.is_null() {
+        return fd;
+    }
+    unsafe {
+        let o = &*opts;
+        if let Some(t) = cstr(o.title) {
+            fd = fd.title(t);
+        }
+        if let Some(d) = cstr(o.default_dir) {
+            fd = fd.default_dir(d);
+        }
+        if let Some(n) = cstr(o.default_name) {
+            fd = fd.default_name(n);
+        }
+        if let Some(exts) = cstr(o.filter_exts) {
+            let e: Vec<&str> = exts.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            if !e.is_empty() {
+                fd = fd.filter(cstr(o.filter_name).unwrap_or("文件"), &e);
+            }
+        }
+    }
+    fd
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn dialog_out(kind: DialogKind, opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| {
+        let fd = build_fd(opts);
+        match backend::show_dialog(kind, &fd) {
+            Some(p) => write_str(&p.to_string_lossy(), out, out_len),
+            None => -1,
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// 打开文件对话框，路径写入 out；返回长度，取消/出错 -1。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_dialog_open_file(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+    dialog_out(DialogKind::OpenFile, opts, out, out_len)
+}
+
+/// 打开目录对话框。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_dialog_open_directory(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+    dialog_out(DialogKind::OpenDirectory, opts, out, out_len)
+}
+
+/// 保存文件对话框。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_dialog_save_file(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+    dialog_out(DialogKind::SaveFile, opts, out, out_len)
+}
+
+/// 保存到目录对话框。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_dialog_save_directory(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+    dialog_out(DialogKind::SaveDirectory, opts, out, out_len)
 }
 
 /// 用 XML 描述启动应用并进入主事件循环（阻塞）。0 成功，负数见错误码。
