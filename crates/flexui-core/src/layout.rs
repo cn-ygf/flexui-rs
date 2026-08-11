@@ -350,6 +350,29 @@ mod tests {
         assert_eq!(root.base().children[0].base().rect, Rect::new(10.0, 10.0, 80.0, 80.0));
     }
 
+    #[test]
+    fn padding_每边不同_收缩内容区() {
+        let mut root = Panel::new();
+        // 左5 上10 右15 下20
+        root.base_mut().padding = flexui_geometry::Insets::new(5.0, 10.0, 15.0, 20.0);
+        root.base_mut().children.push(Box::new(Panel::new()));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+        // 内容区：x=5,y=10,w=100-5-15=80,h=100-10-20=70
+        assert_eq!(root.base().children[0].base().rect, Rect::new(5.0, 10.0, 80.0, 70.0));
+    }
+
+    #[test]
+    fn margin_每边不同_影响排布() {
+        let mut root = VBox::new().push(Panel::new().size(50.0, 30.0).margin_ltrb(5.0, 10.0, 15.0, 20.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 200.0), &cv);
+        let c = root.base().children[0].base().rect;
+        assert_eq!(c.top(), 10.0); // 上 margin
+        assert_eq!(c.left(), 5.0); // 左 margin
+        assert_eq!(c.size.width, 80.0); // 100 - 左5 - 右15（Stretch）
+    }
+
     // —— 阶段2 新增：Sizing / 对齐 / margin / 绝对定位 ——
     use crate::sizing::{Align, Justify, Sizing};
 

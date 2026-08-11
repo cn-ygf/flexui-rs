@@ -315,13 +315,13 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "width" => base.width = parse_sizing(v),
             "height" => base.height = parse_sizing(v),
             "padding" => {
-                if let Ok(p) = v.parse::<f32>() {
-                    base.padding = Insets::all(p);
+                if let Some(p) = parse_insets(v) {
+                    base.padding = p;
                 }
             }
             "margin" => {
-                if let Ok(p) = v.parse::<f32>() {
-                    base.margin = Insets::all(p);
+                if let Some(m) = parse_insets(v) {
+                    base.margin = m;
                 }
             }
             "spacing" => base.spacing = v.parse().unwrap_or(0.0),
@@ -464,6 +464,28 @@ fn parse_sizing(v: &str) -> Sizing {
         "fill" | "stretch" => Sizing::Fill,
         _ => v.parse::<f32>().map(Sizing::Fixed).unwrap_or(Sizing::Content),
     }
+}
+
+/// 解析 CSS 风格的边距简写（空格或逗号分隔的 1/2/3/4 个数值）。
+///
+/// - `10`          四边都是 10
+/// - `10 20`       纵(上下)=10，横(左右)=20
+/// - `10 20 30`    上=10，横(左右)=20，下=30
+/// - `10 20 30 40` 上=10，右=20，下=30，左=40（CSS 顺序 top right bottom left）
+fn parse_insets(s: &str) -> Option<Insets> {
+    let vals: Vec<f32> = s
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|t| !t.is_empty())
+        .map(|t| t.parse::<f32>())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    Some(match vals.as_slice() {
+        [a] => Insets::all(*a),
+        [v, h] => Insets::new(*h, *v, *h, *v),
+        [t, h, b] => Insets::new(*h, *t, *h, *b),
+        [t, r, b, l] => Insets::new(*l, *t, *r, *b),
+        _ => return None,
+    })
 }
 
 /// 解析主轴对齐。
@@ -725,6 +747,33 @@ mod tests {
         assert_eq!(parse_color("#FFFFFF"), Some(Color::from_u8(255, 255, 255, 255)));
         assert_eq!(parse_color("#F00"), Some(Color::from_u8(255, 0, 0, 255)));
         assert_eq!(parse_color("#80000000"), Some(Color::from_u8(0, 0, 0, 128)));
+    }
+
+    #[test]
+    fn 边距简写解析() {
+        // 1 值：四边
+        assert_eq!(parse_insets("10"), Some(Insets::all(10.0)));
+        // 2 值：纵 横 → new(left=h, top=v, right=h, bottom=v)
+        assert_eq!(parse_insets("10 20"), Some(Insets::new(20.0, 10.0, 20.0, 10.0)));
+        // 3 值：上 横 下
+        assert_eq!(parse_insets("10 20 30"), Some(Insets::new(20.0, 10.0, 20.0, 30.0)));
+        // 4 值：上 右 下 左（CSS 顺序）→ new(left, top, right, bottom)
+        assert_eq!(parse_insets("10 20 30 40"), Some(Insets::new(40.0, 10.0, 20.0, 30.0)));
+        // 逗号分隔亦可
+        assert_eq!(parse_insets("5,5"), Some(Insets::new(5.0, 5.0, 5.0, 5.0)));
+        // 非法
+        assert_eq!(parse_insets("a b"), None);
+        assert_eq!(parse_insets(""), None);
+    }
+
+    #[test]
+    fn xml_padding_margin_简写() {
+        let ctx = Context::new();
+        let xml = r##"<Box padding="4 8" margin="1 2 3 4"/>"##;
+        let res = load_str(xml, &ctx).unwrap();
+        let b = res.root.base();
+        assert_eq!(b.padding, Insets::new(8.0, 4.0, 8.0, 4.0));
+        assert_eq!(b.margin, Insets::new(4.0, 1.0, 2.0, 3.0));
     }
 
     #[test]

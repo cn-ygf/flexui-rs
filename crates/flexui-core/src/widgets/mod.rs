@@ -85,14 +85,36 @@ macro_rules! common_builders {
                 self.base.height = $crate::sizing::Sizing::Fill;
                 self
             }
-            /// 四边内边距。
+            /// 四边内边距（统一）。
             pub fn padding(mut self, p: f32) -> Self {
                 self.base.padding = flexui_geometry::Insets::all(p);
                 self
             }
-            /// 四边外边距。
+            /// 内边距：水平(左右) + 垂直(上下)。
+            pub fn padding_xy(mut self, horizontal: f32, vertical: f32) -> Self {
+                self.base.padding =
+                    flexui_geometry::Insets::new(horizontal, vertical, horizontal, vertical);
+                self
+            }
+            /// 内边距：分别指定 左/上/右/下。
+            pub fn padding_ltrb(mut self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
+                self.base.padding = flexui_geometry::Insets::new(left, top, right, bottom);
+                self
+            }
+            /// 四边外边距（统一）。
             pub fn margin(mut self, m: f32) -> Self {
                 self.base.margin = flexui_geometry::Insets::all(m);
+                self
+            }
+            /// 外边距：水平(左右) + 垂直(上下)。
+            pub fn margin_xy(mut self, horizontal: f32, vertical: f32) -> Self {
+                self.base.margin =
+                    flexui_geometry::Insets::new(horizontal, vertical, horizontal, vertical);
+                self
+            }
+            /// 外边距：分别指定 左/上/右/下。
+            pub fn margin_ltrb(mut self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
+                self.base.margin = flexui_geometry::Insets::new(left, top, right, bottom);
                 self
             }
             /// 绝对定位（相对父内容区左上角；用于 Box 容器内）。

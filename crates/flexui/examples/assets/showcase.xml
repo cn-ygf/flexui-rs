@@ -41,8 +41,9 @@
 
   <!-- 多页容器：与 group=1 的 radio 绑定 -->
   <TabBox bindgroup="1" flex="1">
-    <Box normal-bgcolor="#2C3E5A" corner-radius="10">
-      <Label text="第一页 · Box 叠放容器（单一子控件填充）"
+    <!-- padding 简写：纵 20 / 横 40（内容区四周非对称留白）；margin 简写：上 8 其余 0 -->
+    <Box normal-bgcolor="#2C3E5A" corner-radius="10" padding="20 40" margin="8 0 0 0">
+      <Label text="第一页 · Box 叠放容器（padding=纵20/横40 简写演示）"
              normal-fgcolor="#FFFFFF" normal-textalign="center"/>
     </Box>
 
