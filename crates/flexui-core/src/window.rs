@@ -70,16 +70,35 @@ pub trait WindowHandle {
     fn restore(&mut self);
 }
 
-/// 传给窗口钩子的上下文：既能按 name 访问控件树，也能控制窗口。
+/// 上下文菜单等浮层的打开请求（由 WindowCtx 收集，后端排空后交分发器）。
+pub struct OverlayRequest {
+    /// 锚点矩形（右键点位可用 0 尺寸 rect）。
+    pub anchor: flexui_geometry::Rect,
+    /// 菜单项 (标签, name)；选中后按 name 经 on_activate 上报。
+    pub items: Vec<(String, String)>,
+}
+
+/// 传给窗口钩子的上下文：既能按 name 访问控件树，也能控制窗口、弹出菜单。
 /// ≈ duilib 里 InitWindow/Notify 内 `FindControl(...)` + `pWnd->Close()` 的能力。
 pub struct WindowCtx<'a> {
     root: &'a mut dyn Widget,
     win: &'a mut dyn WindowHandle,
+    overlay_requests: Vec<OverlayRequest>,
 }
 
 impl<'a> WindowCtx<'a> {
     pub fn new(root: &'a mut dyn Widget, win: &'a mut dyn WindowHandle) -> Self {
-        Self { root, win }
+        Self { root, win, overlay_requests: Vec::new() }
+    }
+
+    /// 在 anchor 处弹出上下文菜单；items 为 (标签, name)。选中项经 on_activate 上报。
+    pub fn open_menu(&mut self, anchor: flexui_geometry::Rect, items: Vec<(String, String)>) {
+        self.overlay_requests.push(OverlayRequest { anchor, items });
+    }
+
+    /// 后端取走本轮浮层请求（随后交给分发器 open_menu）。
+    pub fn take_overlay_requests(&mut self) -> Vec<OverlayRequest> {
+        std::mem::take(&mut self.overlay_requests)
     }
 
     // —— 控件访问（复用 EventCtx 能力）——

@@ -191,6 +191,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     let doubles = st.disp.take_double_clicks();
     let contexts = st.disp.take_context_clicks();
 
+    let mut reqs = Vec::new();
     if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
         let mut handle = WinWindowHandle { hwnd };
         let root = &mut st.root;
@@ -205,9 +206,15 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
         for (name, pos) in &contexts {
             delegate.on_context(name, pos.x, pos.y, &mut ctx);
         }
+        reqs = ctx.take_overlay_requests();
+    }
+    // 委托里请求的上下文菜单 → 交分发器打开。
+    let opened = !reqs.is_empty();
+    for r in reqs {
+        st.disp.open_menu(r.anchor, r.items);
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
-    if need || !acts.is_empty() || !doubles.is_empty() {
+    if need || opened || !acts.is_empty() || !doubles.is_empty() {
         InvalidateRect(hwnd, null(), 0);
     } else if let Some(r) = dirty {
         let rc = to_physical_rect(hwnd, r);

@@ -144,6 +144,16 @@ impl Dispatcher {
         self.overlays.last().and_then(|o| o.owner)
     }
 
+    /// 打开一个上下文菜单（owner=None，选中项按其 name 上报激活）。
+    pub fn open_menu(&mut self, anchor: Rect, items: Vec<(String, String)>) {
+        if items.is_empty() {
+            return;
+        }
+        let menu = crate::widgets::build_menu(&items, None);
+        self.overlays.push(Overlay { root: menu, anchor, owner: None, dismiss_outside: true });
+        self.needs_redraw = true;
+    }
+
     /// 绘制所有浮层（模态菜单 + 被动 Tooltip）到最上层（不受主树裁剪）。
     /// 后端在 `paint_tree(root)` 之后调用；`window` 为窗口逻辑尺寸。
     pub fn paint_overlays(&mut self, cv: &mut dyn Canvas, window: Size) {
@@ -1011,6 +1021,26 @@ mod tests {
         assert!(disp.has_overlays());
         disp.handle(&mut root, &kd(crate::event::keys::ESCAPE));
         assert!(!disp.has_overlays(), "ESC 关闭");
+    }
+
+    #[test]
+    fn 右键菜单_选项按项名上报() {
+        let mut root = VBox::new().push(Panel::new().size(100.0, 100.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
+        let mut disp = Dispatcher::new();
+        disp.open_menu(
+            Rect::new(10.0, 10.0, 0.0, 0.0),
+            vec![("复制".to_string(), "copy".to_string()), ("粘贴".to_string(), "paste".to_string())],
+        );
+        assert!(disp.has_overlays());
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+        // 点第 2 项 "粘贴"。
+        let c = disp.top_overlay_item_center(1).unwrap();
+        disp.handle(&mut root, &Event::MouseDown { pos: c, button: MouseButton::Left });
+        disp.handle(&mut root, &Event::MouseUp { pos: c, button: MouseButton::Left });
+        assert!(!disp.has_overlays());
+        assert_eq!(disp.take_activations(), vec!["paste".to_string()]);
     }
 
     #[test]

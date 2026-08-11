@@ -448,6 +448,7 @@ impl FlexView {
         let doubles = disp.take_double_clicks();
         let contexts = disp.take_context_clicks();
 
+        let mut reqs = Vec::new();
         if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
             if let Some(win) = window {
                 let mut handle = MacWindowHandle { window: win };
@@ -461,11 +462,17 @@ impl FlexView {
                 for (name, pos) in &contexts {
                     delegate.on_context(name, pos.x, pos.y, &mut ctx);
                 }
+                reqs = ctx.take_overlay_requests();
             }
+        }
+        // 委托里请求的上下文菜单 → 交分发器打开。
+        let opened = !reqs.is_empty();
+        for r in reqs {
+            disp.open_menu(r.anchor, r.items);
         }
         drop(st);
         // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。
-        if need || !acts.is_empty() || !doubles.is_empty() {
+        if need || opened || !acts.is_empty() || !doubles.is_empty() {
             self.setNeedsDisplay(true);
         } else if let Some(r) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(r));

@@ -25,7 +25,8 @@ pub use widget::{
     HitPolicy, Node, TextControl, Widget, WidgetId, WidgetRole,
 };
 pub use window::{
-    NoopDelegate, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
+    NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
+    WindowHandle,
 };
 pub use widgets::{
     build_menu, build_menu_labels, Button, CheckBox, ComboBox, Edit, HBox, Image, Label, MenuItem,
