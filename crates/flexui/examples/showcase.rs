@@ -62,6 +62,16 @@ impl WindowImpl for MainWindow {
                 ctx.set_text("status", "状态：点击了『次要按钮』（进度回落）");
                 ctx.animate("prog", AnimProp::Value, 0.15, 0.6, Easing::EaseOut);
             }
+            // 系统文件对话框：选择一个文件，显示路径。
+            "btnOpen" => {
+                let opts = flexui::dialog::FileDialog::new()
+                    .title("选择一个图片")
+                    .filter("图片", &["png", "jpg", "jpeg", "bmp"]);
+                match flexui::dialog::open_file(&opts) {
+                    Some(p) => ctx.set_text("status", format!("状态：选择了 {}", p.display())),
+                    None => ctx.set_text("status", "状态：已取消选择文件"),
+                }
+            }
             "btnToggle" => {
                 self.primary_enabled = !self.primary_enabled;
                 ctx.set_enabled("btnPrimary", self.primary_enabled);

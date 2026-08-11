@@ -4,6 +4,7 @@
 //! 事件分发。不含任何平台代码，可脱离窗口做单元测试。
 
 pub mod anim;
+pub mod dialog;
 pub mod dispatch;
 pub mod event;
 pub mod layout;
@@ -17,6 +18,7 @@ pub mod window;
 // 常用类型再导出，方便上层与后端使用。
 pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
 pub use anim::{AnimProp, Easing};
+pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};
 pub use paint::paint_tree;

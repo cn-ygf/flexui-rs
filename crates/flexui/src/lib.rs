@@ -23,6 +23,52 @@ use flexui_macos::run as backend_run;
 #[cfg(target_os = "windows")]
 use flexui_windows::run as backend_run;
 
+/// 系统文件对话框（封装各平台原生弹窗：macOS NSOpenPanel/NSSavePanel、
+/// Windows GetOpenFileName/SHBrowseForFolder）。支持标题、默认路径、扩展名筛选。
+///
+/// 用法（在窗口回调里调用，模态阻塞直到用户选择/取消）：
+/// ```ignore
+/// let f = flexui::dialog::open_file(&FileDialog::new().title("选图片").filter("图片", &["png","jpg"]));
+/// ```
+pub mod dialog {
+    use std::path::PathBuf;
+
+    pub use flexui_core::dialog::{DialogKind, FileDialog, FileFilter};
+
+    #[allow(unused_variables)]
+    fn show(kind: DialogKind, opts: &FileDialog) -> Option<PathBuf> {
+        #[cfg(target_os = "macos")]
+        {
+            flexui_macos::show_dialog(kind, opts)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            flexui_windows::show_dialog(kind, opts)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            None
+        }
+    }
+
+    /// 打开文件。
+    pub fn open_file(opts: &FileDialog) -> Option<PathBuf> {
+        show(DialogKind::OpenFile, opts)
+    }
+    /// 打开目录。
+    pub fn open_directory(opts: &FileDialog) -> Option<PathBuf> {
+        show(DialogKind::OpenDirectory, opts)
+    }
+    /// 保存文件。
+    pub fn save_file(opts: &FileDialog) -> Option<PathBuf> {
+        show(DialogKind::SaveFile, opts)
+    }
+    /// 保存到目录（选择一个目录）。
+    pub fn save_directory(opts: &FileDialog) -> Option<PathBuf> {
+        show(DialogKind::SaveDirectory, opts)
+    }
+}
+
 /// 皮肤来源：XML 字符串、资源逻辑路径、或代码构建的控件树。
 pub enum Skin {
     /// XML 字符串（图片按文件路径解析）。

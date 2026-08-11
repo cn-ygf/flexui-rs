@@ -4,9 +4,11 @@
 //! `run` 由上层 Window 驱动调用，传入控件树、分发器与窗口委托。
 
 mod canvas;
+mod dialog;
 mod view;
 
 pub use canvas::CgCanvas;
+pub use dialog::show_dialog;
 pub use view::{FlexView, MacWindowHandle};
 
 use objc2::rc::Retained;

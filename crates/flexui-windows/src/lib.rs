@@ -8,10 +8,12 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 mod canvas;
+mod dialog;
 mod gdiplus;
 mod window;
 
 pub use canvas::GdiCanvas;
+pub use dialog::show_dialog;
 pub use gdiplus::{Gdiplus, OffscreenBitmap};
 pub use window::run;
 

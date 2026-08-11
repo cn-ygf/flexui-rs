@@ -32,6 +32,9 @@
     <Button name="btnToggle" text="禁用/启用主要按钮" width="170" height="40"
             normal-bgcolor="#7A5AF0" hot-bgcolor="#8B6BFF" pushed-bgcolor="#5F45C8"
             normal-fgcolor="#FFFFFF" corner-radius="8"/>
+    <Button name="btnOpen" text="选择文件…" width="110" height="40" tooltip="打开系统文件对话框"
+            normal-bgcolor="#2A6E4F" hot-bgcolor="#348060" pushed-bgcolor="#20563E"
+            normal-fgcolor="#FFFFFF" corner-radius="8"/>
   </HBox>
 
   <!-- 下拉框（ComboBox）：点击弹出选项菜单，选中回填 -->
