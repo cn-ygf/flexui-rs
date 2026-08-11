@@ -29,12 +29,14 @@ int main(void) {
         (void *)flex_dialog_open_directory,
         (void *)flex_dialog_save_file,
         (void *)flex_dialog_save_directory,
+        (void *)flex_clipboard_get_text,
+        (void *)flex_clipboard_set_text,
     };
     int nsyms = (int)(sizeof(syms) / sizeof(syms[0]));
     printf("linked %d extra symbols\n", nsyms);
 
     /* macOS 上 v-if=!platform.macos 为假 → HBox 被裁剪，顶层应为 2 个子节点。 */
-    if (v == 1 && n == 2 && nsyms == 11) {
+    if (v == 1 && n == 2 && nsyms == 13) {
         printf("C-ABI-OK\n");
         return 0;
     }

@@ -23,6 +23,38 @@ use flexui_macos::run as backend_run;
 #[cfg(target_os = "windows")]
 use flexui_windows::run as backend_run;
 
+/// 系统剪贴板文本读写（macOS NSPasteboard / Windows CF_UNICODETEXT）。
+pub mod clipboard {
+    /// 读取系统剪贴板文本（无则 None）。
+    pub fn get_text() -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            flexui_macos::clipboard_get_text()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            flexui_windows::clipboard_get_text()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            None
+        }
+    }
+
+    /// 写入系统剪贴板文本。
+    #[allow(unused_variables)]
+    pub fn set_text(text: &str) {
+        #[cfg(target_os = "macos")]
+        {
+            flexui_macos::clipboard_set_text(text);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            flexui_windows::clipboard_set_text(text);
+        }
+    }
+}
+
 /// 系统文件对话框（封装各平台原生弹窗：macOS NSOpenPanel/NSSavePanel、
 /// Windows GetOpenFileName/SHBrowseForFolder）。支持标题、默认路径、扩展名筛选。
 ///

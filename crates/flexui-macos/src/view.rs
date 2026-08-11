@@ -10,8 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSCursor, NSEvent, NSEventModifierFlags, NSPasteboard, NSPasteboardTypeString,
-    NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
+    NSCursor, NSEvent, NSEventModifierFlags, NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound,
@@ -368,20 +367,6 @@ fn command_to_key(name: &[u8]) -> Option<(u32, bool)> {
     })
 }
 
-/// 写系统剪贴板（NSPasteboard 通用板）。
-fn pasteboard_set(s: &str) {
-    let pb = NSPasteboard::generalPasteboard();
-    pb.clearContents();
-    let ns = NSString::from_str(s);
-    unsafe { pb.setString_forType(&ns, NSPasteboardTypeString) };
-}
-
-/// 读系统剪贴板文本（无文本返回 None）。
-fn pasteboard_get() -> Option<String> {
-    let pb = NSPasteboard::generalPasteboard();
-    let s = unsafe { pb.stringForType(NSPasteboardTypeString) }?;
-    Some(s.to_string())
-}
 
 impl FlexView {
     pub fn new(
@@ -609,7 +594,7 @@ impl FlexView {
             disp.copy_selection(root.as_mut())
         };
         if let Some(t) = text {
-            pasteboard_set(&t);
+            crate::clipboard::set_text(&t);
         }
     }
 
@@ -622,7 +607,7 @@ impl FlexView {
             (t, disp.take_dirty())
         };
         if let Some(t) = &text {
-            pasteboard_set(t);
+            crate::clipboard::set_text(t);
         }
         if let Some(r) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(r));
@@ -631,7 +616,7 @@ impl FlexView {
 
     /// 粘贴：读剪贴板文本插入到焦点控件。
     fn ime_paste(&self) {
-        let Some(text) = pasteboard_get() else { return };
+        let Some(text) = crate::clipboard::get_text() else { return };
         let dirty = {
             let mut st = self.ivars().state.borrow_mut();
             let AppState { root, disp, .. } = &mut *st;

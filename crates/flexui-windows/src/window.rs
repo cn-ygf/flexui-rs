@@ -19,12 +19,6 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use windows_sys::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
-};
-use windows_sys::Win32::Foundation::GlobalFree;
-use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::UI::Input::Ime::{
     ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow,
     COMPOSITIONFORM, CFS_POINT, GCS_COMPSTR, GCS_RESULTSTR,
@@ -332,56 +326,6 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     ImmReleaseContext(hwnd, himc);
 }
 
-/// 写系统剪贴板（CF_UNICODETEXT，UTF-16LE）。
-unsafe fn clip_set(hwnd: HWND, s: &str) {
-    let utf16: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-    let bytes = utf16.len() * 2;
-    let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if hmem.is_null() {
-        return;
-    }
-    let dst = GlobalLock(hmem) as *mut u16;
-    if !dst.is_null() {
-        std::ptr::copy_nonoverlapping(utf16.as_ptr(), dst, utf16.len());
-        GlobalUnlock(hmem);
-    }
-    if OpenClipboard(hwnd) != 0 {
-        EmptyClipboard();
-        // 成功后剪贴板接管 hmem，不能再释放。
-        SetClipboardData(CF_UNICODETEXT as u32, hmem);
-        CloseClipboard();
-    } else {
-        GlobalFree(hmem);
-    }
-}
-
-/// 读系统剪贴板文本（无则 None）。
-unsafe fn clip_get(hwnd: HWND) -> Option<String> {
-    if OpenClipboard(hwnd) == 0 {
-        return None;
-    }
-    let h = GetClipboardData(CF_UNICODETEXT as u32);
-    let result = if !h.is_null() {
-        let ptr = GlobalLock(h) as *const u16;
-        if ptr.is_null() {
-            None
-        } else {
-            let mut len = 0;
-            while *ptr.add(len) != 0 {
-                len += 1;
-            }
-            let slice = std::slice::from_raw_parts(ptr, len);
-            let s = String::from_utf16_lossy(slice);
-            GlobalUnlock(h);
-            Some(s)
-        }
-    } else {
-        None
-    };
-    CloseClipboard();
-    result
-}
-
 /// 失效焦点控件被标脏的区域（剪贴板操作后重绘）。
 unsafe fn invalidate_dirty(hwnd: HWND, st: &mut AppState) {
     if let Some(r) = st.disp.take_dirty() {
@@ -390,14 +334,14 @@ unsafe fn invalidate_dirty(hwnd: HWND, st: &mut AppState) {
     }
 }
 
-/// Ctrl+C：复制焦点控件选中文本到剪贴板。
-unsafe fn clipboard_copy(hwnd: HWND, state: *mut AppState) {
+/// Ctrl+C：复制焦点控件选中文本到剪贴板（复制不改界面，无需 hwnd 重绘）。
+unsafe fn clipboard_copy(_hwnd: HWND, state: *mut AppState) {
     if state.is_null() {
         return;
     }
     let st = &mut *state;
     if let Some(s) = st.disp.copy_selection(st.root.as_mut()) {
-        clip_set(hwnd, &s);
+        crate::clipboard::set_text(&s);
     }
 }
 
@@ -408,7 +352,7 @@ unsafe fn clipboard_cut(hwnd: HWND, state: *mut AppState) {
     }
     let st = &mut *state;
     if let Some(s) = st.disp.cut_selection(st.root.as_mut()) {
-        clip_set(hwnd, &s);
+        crate::clipboard::set_text(&s);
     }
     invalidate_dirty(hwnd, st);
 }
@@ -418,7 +362,7 @@ unsafe fn clipboard_paste(hwnd: HWND, state: *mut AppState) {
     if state.is_null() {
         return;
     }
-    if let Some(s) = clip_get(hwnd) {
+    if let Some(s) = crate::clipboard::get_text() {
         let st = &mut *state;
         st.disp.paste(st.root.as_mut(), &s);
         invalidate_dirty(hwnd, st);

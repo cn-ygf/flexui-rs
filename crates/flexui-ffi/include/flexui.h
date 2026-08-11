@@ -50,6 +50,13 @@ void flex_ctx_set_enabled(void *ctx, const char *name, int enabled);
 void flex_ctx_set_title(void *ctx, const char *title);
 void flex_ctx_close(void *ctx);
 
+/* ===== 系统剪贴板 ===== */
+
+/* 读剪贴板文本到 out（含 NUL）；返回长度，空/出错 -1。 */
+int flex_clipboard_get_text(char *out, int out_len);
+/* 写剪贴板文本。 */
+void flex_clipboard_set_text(const char *text);
+
 /* ===== 文件对话框 ===== */
 
 /* filter_exts 为逗号分隔扩展名（如 "png,jpg"），各字段可为 NULL。 */

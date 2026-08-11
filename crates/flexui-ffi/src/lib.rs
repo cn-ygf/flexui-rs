@@ -280,6 +280,30 @@ pub extern "C" fn flex_run(
     result.unwrap_or(-3)
 }
 
+// —— 系统剪贴板 ——
+
+/// 读系统剪贴板文本到 out（含 NUL）；返回长度，空/出错返回 -1。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_clipboard_get_text(out: *mut c_char, out_len: c_int) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| match backend::clipboard_get_text() {
+        Some(s) => write_str(&s, out, out_len),
+        None => -1,
+    }))
+    .unwrap_or(-1)
+}
+
+/// 写系统剪贴板文本。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_clipboard_set_text(text: *const c_char) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(t) = cstr(text) {
+            backend::clipboard_set_text(t);
+        }
+    }));
+}
+
 // —— 文件对话框 ——
 
 /// C 侧文件对话框配置。filter_exts 为逗号分隔扩展名（如 "png,jpg"），可空。

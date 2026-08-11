@@ -8,11 +8,13 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 mod canvas;
+mod clipboard;
 mod dialog;
 mod gdiplus;
 mod window;
 
 pub use canvas::GdiCanvas;
+pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_text};
 pub use dialog::show_dialog;
 pub use gdiplus::{Gdiplus, OffscreenBitmap};
 pub use window::run;
