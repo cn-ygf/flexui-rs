@@ -10,8 +10,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSEvent, NSPasteboard, NSPasteboardTypeString, NSTextInputClient, NSView, NSWindow,
-    NSWindowDelegate,
+    NSCursor, NSEvent, NSEventModifierFlags, NSPasteboard, NSPasteboardTypeString,
+    NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound,
@@ -21,7 +21,7 @@ use objc2_foundation::{
 use flexui_core::event::keys;
 use flexui_core::{
     find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, Mods, MouseButton, Node,
-    Rect, Size, WindowCtx, WindowDelegate, WindowHandle,
+    Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowHandle,
 };
 
 use crate::canvas::CgCanvas;
@@ -91,12 +91,16 @@ define_class!(
 
         #[unsafe(method(mouseMoved:))]
         fn mouse_moved(&self, event: &NSEvent) {
-            self.dispatch(Event::MouseMove { pos: self.point(event) });
+            let p = self.point(event);
+            self.dispatch(Event::MouseMove { pos: p });
+            self.update_cursor(p);
         }
 
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, event: &NSEvent) {
-            self.dispatch(Event::MouseMove { pos: self.point(event) });
+            let p = self.point(event);
+            self.dispatch(Event::MouseMove { pos: p });
+            self.update_cursor(p);
         }
 
         #[unsafe(method(mouseDown:))]
@@ -128,6 +132,33 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
+            // Cmd 快捷键（复制/剪切/粘贴/全选）：无菜单栏时不会经 interpretKeyEvents
+            // 派发为 copy:/selectAll: 等，需在此直接拦截。
+            if event.modifierFlags().contains(NSEventModifierFlags::Command) {
+                if let Some(s) = event.charactersIgnoringModifiers() {
+                    if let Some(ch) = s.to_string().chars().next() {
+                        match ch.to_ascii_lowercase() {
+                            'a' => {
+                                self.ime_select_all();
+                                return;
+                            }
+                            'c' => {
+                                self.ime_copy();
+                                return;
+                            }
+                            'x' => {
+                                self.ime_cut();
+                                return;
+                            }
+                            'v' => {
+                                self.ime_paste();
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             // 交给文本输入系统解释：IME 组合/提交经 NSTextInputClient 回调（insertText/
             // setMarkedText/doCommandBySelector），普通键与功能键同样在其中翻译。
             let arr = NSArray::from_slice(&[event]);
@@ -271,6 +302,23 @@ define_class!(
     }
 );
 
+/// 命中测试：光标下最上层控件是否为文本输入（Edit）。用于切换 I-beam 光标。
+fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
+    fn topmost(node: &dyn Widget, p: Point) -> Option<WidgetRole> {
+        let b = node.base();
+        if !b.visible || !b.rect.contains(p) {
+            return None;
+        }
+        for c in b.children.iter().rev() {
+            if let Some(r) = topmost(c.as_ref(), p) {
+                return Some(r);
+            }
+        }
+        Some(b.role)
+    }
+    topmost(root, p) == Some(WidgetRole::Edit)
+}
+
 /// 把 NSString / NSAttributedString 参数转成 Rust String。
 fn ns_to_string(obj: &AnyObject) -> String {
     if let Some(s) = obj.downcast_ref::<NSString>() {
@@ -372,6 +420,19 @@ impl FlexView {
         let win = event.locationInWindow();
         let p = self.convertPoint_fromView(win, None);
         flexui_core::Point::new(p.x as f32, p.y as f32)
+    }
+
+    /// 悬停在文本控件上时切换为 I-beam 光标，否则箭头。
+    fn update_cursor(&self, p: Point) {
+        let over = {
+            let st = self.ivars().state.borrow();
+            point_over_edit(st.root.as_ref(), p)
+        };
+        if over {
+            NSCursor::IBeamCursor().set();
+        } else {
+            NSCursor::arrowCursor().set();
+        }
     }
 
     /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
