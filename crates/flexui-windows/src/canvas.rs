@@ -11,6 +11,9 @@ use crate::gdiplus::{
     TEXT_HINT_CLEARTYPE, UNIT_PIXEL,
 };
 
+/// Windows 默认 UI 字体的英文字族名（微软雅黑）。
+const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
+
 /// GDI+ 画布，持有一个 Graphics 指针（来自窗口 HDC 或离屏位图）。
 pub struct GdiCanvas {
     g: *mut gp::GpGraphics,
@@ -244,12 +247,11 @@ impl GdiCanvas {
     /// 用给定字族名/系统字体创建字体；返回 (font, family)，调用方负责释放。
     unsafe fn make_font(&self, font: &Font) -> (*mut gp::GpFont, *mut gp::GpFontFamily) {
         let mut family: *mut gp::GpFontFamily = std::ptr::null_mut();
-        if let Some(name) = &font.family {
-            let wname = wide(name);
-            gp::GdipCreateFontFamilyFromName(wname.as_ptr(), std::ptr::null_mut(), &mut family);
-        }
+        let family_name = font.family.as_deref().unwrap_or(DEFAULT_FONT_FAMILY);
+        let wname = wide(family_name);
+        gp::GdipCreateFontFamilyFromName(wname.as_ptr(), std::ptr::null_mut(), &mut family);
         if family.is_null() {
-            // 回退到系统通用 sans-serif（wine/windows 均可用）。
+            // 字体缺失时回退到系统通用 sans-serif（wine/windows 均可用）。
             gp::GdipGetGenericFontFamilySansSerif(&mut family);
         }
         // GDI+ FontStyle 位标志：Bold=1 Italic=2 Underline=4。
