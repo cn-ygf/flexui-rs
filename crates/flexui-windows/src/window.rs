@@ -163,7 +163,17 @@ unsafe fn configure_frameless_dwm(hwnd: HWND, corners: bool, shadow: bool) {
         std::mem::size_of_val(&corner) as u32,
     );
 
-    // Windows 11 会为 WS_THICKFRAME 额外绘制激活边框；隐藏它可避免局部重绘后露出白边。
+    // 阴影由 WS_THICKFRAME + DWM 非客户区渲染提供；客户区内不扩展 glass frame，
+    // 否则这圈像素会随窗口激活状态在灰色与白色之间切换。
+    let margins = MARGINS {
+        cxLeftWidth: 0,
+        cxRightWidth: 0,
+        cyTopHeight: 0,
+        cyBottomHeight: 0,
+    };
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+    // Windows 11 会为 WS_THICKFRAME 额外绘制激活边框；无边框窗口不需要该描边。
     let border_color = DWMWA_COLOR_NONE;
     DwmSetWindowAttribute(
         hwnd,
@@ -171,16 +181,6 @@ unsafe fn configure_frameless_dwm(hwnd: HWND, corners: bool, shadow: bool) {
         &border_color as *const _ as *const std::ffi::c_void,
         std::mem::size_of_val(&border_color) as u32,
     );
-
-    // 1px 原生框架足以让 DWM 为 WS_POPUP 窗口生成系统阴影；全零表示不扩展。
-    let margin = if shadow { 1 } else { 0 };
-    let margins = MARGINS {
-        cxLeftWidth: margin,
-        cxRightWidth: margin,
-        cyTopHeight: margin,
-        cyBottomHeight: margin,
-    };
-    DwmExtendFrameIntoClientArea(hwnd, &margins);
 }
 
 /// 创建一个原生窗口并接入共享事件循环（窗口类须已注册）。
@@ -556,6 +556,8 @@ unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
     match msg {
+        // 无边框窗口没有需要随激活状态重绘的非客户区；避免 WS_THICKFRAME 失焦时刷出白边。
+        WM_NCACTIVATE if !state.is_null() && (*state).frameless => 1,
         // 自绘标题栏占满整个窗口，同时保留 WS_THICKFRAME 供 DWM 生成圆角、阴影和 Snap。
         WM_NCCALCSIZE
             if GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & WS_POPUP != 0 =>
