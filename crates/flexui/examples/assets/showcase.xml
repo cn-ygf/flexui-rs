@@ -60,6 +60,13 @@
       <Edit name="edit_multi" multiline="true" height="90"
             normal-bgcolor="#20242C" normal-fgcolor="#FFFFFF"
             border-width="1" normal-bordercolor="#4A5064" corner-radius="6"/>
+      <!-- P1 新控件：分隔条 / 滑块 / 进度条 -->
+      <Separator normal-bgcolor="#4A5064"/>
+      <Label text="Slider（拖动）与 Progress" height="20" normal-fgcolor="#C8D0E0"/>
+      <Slider name="vol" value="0.4" height="24"
+              normal-bgcolor="#20242C" normal-fgcolor="#3478F6"/>
+      <Progress name="prog" value="0.65" height="8"
+                normal-bgcolor="#20242C" normal-fgcolor="#8FE3A0"/>
     </VBox>
 
     <Box normal-bgcolor="#2C4A3E" corner-radius="10">

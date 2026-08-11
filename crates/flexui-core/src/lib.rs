@@ -28,7 +28,8 @@ pub use window::{
     NoopDelegate, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
 pub use widgets::{
-    Button, CheckBox, Edit, HBox, Image, Label, Panel, Radio, ScrollView, TabBox, VBox,
+    Button, CheckBox, Edit, HBox, Image, Label, Panel, Progress, Radio, ScrollView, Separator,
+    Slider, TabBox, VBox,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。

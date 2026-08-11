@@ -14,8 +14,11 @@ mod hbox;
 mod image;
 mod label;
 mod panel;
+mod progress;
 mod radio;
 mod scroll;
+mod separator;
+mod slider;
 mod tabbox;
 mod vbox;
 
@@ -26,8 +29,11 @@ pub use hbox::HBox;
 pub use image::Image;
 pub use label::Label;
 pub use panel::Panel;
+pub use progress::Progress;
 pub use radio::Radio;
 pub use scroll::ScrollView;
+pub use separator::Separator;
+pub use slider::Slider;
 pub use tabbox::TabBox;
 pub use vbox::VBox;
 

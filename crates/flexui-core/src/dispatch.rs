@@ -215,9 +215,9 @@ impl Dispatcher {
             Event::MouseMove { pos } => {
                 let hit = hit_test(root, *pos);
                 self.set_hover(root, hit);
-                // 若正按住某文本控件：这是一次拖动 → 转发给它延伸选区。
+                // 若正按住某指针型控件（Edit/Slider）：这是一次拖动 → 转发给它。
                 if let Some(id) = self.pressed {
-                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                    if is_pointer_target(role_of(root, id)) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -228,9 +228,9 @@ impl Dispatcher {
             } => {
                 let hit = hit_test(root, *pos);
                 self.press(root, hit);
-                // 命中文本控件：转发按下事件，让其按 x 定位光标/起始锚点。
-                if let Some(id) = self.focus {
-                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                // 命中指针型控件（Edit/Slider）：转发按下，让其按坐标定位光标/取值。
+                if let Some(id) = self.pressed {
+                    if is_pointer_target(role_of(root, id)) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -514,6 +514,11 @@ fn name_of(node: &dyn Widget, id: WidgetId) -> Option<String> {
     None
 }
 
+/// 该角色是否接收指针（按下/拖动）事件转发：文本框与滑块。
+fn is_pointer_target(role: Option<WidgetRole>) -> bool {
+    matches!(role, Some(WidgetRole::Edit) | Some(WidgetRole::Slider))
+}
+
 /// 按 id 找控件的角色（用于判断是否文本控件）。
 fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
     if node.base().id == id {
@@ -569,7 +574,7 @@ mod tests {
     use super::*;
     use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
-    use crate::widgets::{Button, Edit, Label, Panel, Radio, ScrollView, TabBox, VBox};
+    use crate::widgets::{Button, Edit, Label, Panel, Radio, ScrollView, Slider, TabBox, VBox};
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
@@ -679,6 +684,26 @@ mod tests {
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(8.0, 20.0) });
         assert_eq!(root.base().sel_range(), Some((1, 3)));
         assert_eq!(root.selected_text().as_deref(), Some("el"));
+    }
+
+    #[test]
+    fn slider_按下拖动改变值() {
+        let mut root = Slider::new().width(100.0).height(20.0);
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 20.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 按下 x=50 → value≈0.5
+        disp.handle(
+            &mut root,
+            &Event::MouseDown { pos: Point::new(50.0, 10.0), button: MouseButton::Left },
+        );
+        assert!((root.base().value - 0.5).abs() < 1e-3, "got {}", root.base().value);
+        // 拖到 x=80 → 0.8
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(80.0, 10.0) });
+        assert!((root.base().value - 0.8).abs() < 1e-3);
+        // 越界夹取
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(200.0, 10.0) });
+        assert_eq!(root.base().value, 1.0);
     }
 
     #[test]

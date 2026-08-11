@@ -47,6 +47,8 @@ pub enum WidgetRole {
     TabBox,
     /// 文本输入。
     Edit,
+    /// 滑块（拖动改变 value）。
+    Slider,
 }
 
 /// 节点类型：装箱的 trait 对象。
@@ -87,6 +89,8 @@ pub struct Base {
     pub group: Option<u32>,
     pub tab_index: Option<usize>,
     pub selected_index: usize,
+    /// 归一化数值 0.0~1.0（Progress/Slider 用）。
+    pub value: f32,
 
     // —— 布局 ——
     /// 布局后的绝对矩形（窗口逻辑坐标）。
@@ -148,6 +152,7 @@ impl Base {
             group: None,
             tab_index: None,
             selected_index: 0,
+            value: 0.0,
             rect: Rect::default(),
             padding: Insets::default(),
             margin: Insets::default(),

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use flexui_core::{
     Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, ImageFit,
-    ImageSource, Insets, Justify, Label, Node, Panel, Radio, Sizing, StyleSet, StyleSpec, TabBox,
-    TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig,
+    ImageSource, Insets, Justify, Label, Node, Panel, Progress, Radio, Separator, Sizing, Slider,
+    StyleSet, StyleSpec, TabBox, TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig,
 };
 use flexui_resource::ResourceManager;
 
@@ -295,6 +295,19 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
         "scroll" | "scrollview" => Box::new(flexui_core::ScrollView::new()),
         "edit" => Box::new(Edit::new()),
         "image" => Box::new(Image::new(resolve_image(res, el.attr("src").unwrap_or("")))),
+        "progress" => Box::new(Progress::new()),
+        "slider" => Box::new(Slider::new()),
+        "separator" | "hr" => {
+            let vertical = el
+                .attr("orientation")
+                .map(|o| o.eq_ignore_ascii_case("vertical"))
+                .unwrap_or(false);
+            let mut s = Separator::new().vertical(vertical);
+            if let Some(t) = el.attr("thickness").and_then(|t| t.parse::<f32>().ok()) {
+                s = s.thickness(t);
+            }
+            Box::new(s)
+        }
         other => return Err(LoadError(format!("未知标签 <{other}>"))),
     };
     Ok(node)
@@ -308,9 +321,10 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
     for (k, v) in attrs {
         let key = k.to_lowercase();
         match key.as_str() {
-            // 已在别处处理的属性。
-            "v-if" | "src" | "bindgroup" => {}
+            // 已在别处处理的属性（含 Separator 的 orientation/thickness、Image 的 src）。
+            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" => {}
             "name" => base.name = Some(v.clone()),
+            "value" => base.value = v.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
             "text" => base.text = v.clone(),
             "width" => base.width = parse_sizing(v),
             "height" => base.height = parse_sizing(v),
@@ -764,6 +778,23 @@ mod tests {
         // 非法
         assert_eq!(parse_insets("a b"), None);
         assert_eq!(parse_insets(""), None);
+    }
+
+    #[test]
+    fn xml_新控件_progress_slider_separator() {
+        let ctx = Context::new();
+        let xml = r##"<VBox>
+            <Progress value="0.6"/>
+            <Slider value="0.25"/>
+            <Separator orientation="vertical" thickness="2"/>
+        </VBox>"##;
+        let res = load_str(xml, &ctx).unwrap();
+        let ch = &res.root.base().children;
+        assert_eq!(ch.len(), 3);
+        assert!((ch[0].base().value - 0.6).abs() < 1e-3);
+        assert!((ch[1].base().value - 0.25).abs() < 1e-3);
+        // 纵向分隔条：宽固定 2。
+        assert_eq!(ch[2].base().width, Sizing::Fixed(2.0));
     }
 
     #[test]
