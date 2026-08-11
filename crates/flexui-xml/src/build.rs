@@ -409,6 +409,8 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "justify" => base.justify = parse_justify(v),
             "align" => base.align = parse_align_items(v),
             "enabled" => base.enabled = parse_bool(v),
+            "visible" => base.visible = parse_bool(v),
+            "switch" => base.switch_style = tag == "checkbox" && parse_bool(v),
             "multiline" => base.multiline = parse_bool(v),
             "mouse" => {
                 base.hit = if v.eq_ignore_ascii_case("transparent") {
@@ -882,6 +884,29 @@ mod tests {
         let res2 = load_str(r##"<select><item text="X"/><item label="Y"/></select>"##, &ctx).unwrap();
         assert_eq!(res2.root.base().text, "X");
         assert_eq!(res2.root.base().children.len(), 0);
+    }
+
+    #[test]
+    fn xml_visible_属性控制初始可见性() {
+        let mut res = load_str(
+            r#"<Panel><VBox name="overlay" visible="false"><Label text="modal"/></VBox></Panel>"#,
+            &Context::new(),
+        )
+        .unwrap();
+        let overlay = find_by_name(res.root.as_ref(), "overlay").unwrap();
+        let mut visible = true;
+        flexui_core::visit_all_mut(res.root.as_mut(), &mut |w| {
+            if w.base().id == overlay {
+                visible = w.base().visible;
+            }
+        });
+        assert!(!visible);
+    }
+
+    #[test]
+    fn xml_checkbox_switch_显式启用开关外观() {
+        let res = load_str(r#"<CheckBox switch="true"/>"#, &Context::new()).unwrap();
+        assert!(res.root.base().switch_style);
     }
 
     #[test]

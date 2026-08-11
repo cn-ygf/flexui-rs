@@ -48,15 +48,32 @@ impl Widget for TabBox {
         &mut self.base
     }
     fn measure(&mut self, avail: Size, cv: &dyn Canvas) -> Size {
-        // 取各页最大尺寸，保证切换时容器尺寸稳定。
-        layout::measure_stack(&mut self.base, avail, cv)
+        // 隐藏页也参与度量，保证切换页面时容器尺寸稳定。
+        let inner = Size::new(
+            (avail.width - self.base.padding.horizontal()).max(0.0),
+            (avail.height - self.base.padding.vertical()).max(0.0),
+        );
+        let mut width = 0.0f32;
+        let mut height = 0.0f32;
+        for child in self.base.children.iter_mut() {
+            let was_visible = child.base().visible;
+            child.base_mut().visible = true;
+            let size = layout::measure_node(child.as_mut(), inner, cv);
+            child.base_mut().visible = was_visible;
+            let margin = child.base().margin;
+            width = width.max(size.width + margin.horizontal());
+            height = height.max(size.height + margin.vertical());
+        }
+        layout::size_from_content(&self.base, width, height)
     }
     fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
         let sel = self.base.selected_index;
         for (i, child) in self.base.children.iter_mut().enumerate() {
             // 只让当前页可见，其余页隐藏（隐藏页跳过绘制与命中）。
             child.base_mut().visible = i == sel;
-            layout::layout_node(child.as_mut(), content, cv);
+            if i == sel {
+                layout::layout_node(child.as_mut(), content, cv);
+            }
         }
     }
 }

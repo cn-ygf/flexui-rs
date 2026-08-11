@@ -94,6 +94,8 @@ pub struct Base {
 
     // —— 选择 / 分组（Radio/CheckBox/TabBox 用）——
     pub selected: bool,
+    /// CheckBox 是否使用开关外观；其它角色忽略。
+    pub switch_style: bool,
     pub group: Option<u32>,
     pub tab_index: Option<usize>,
     pub selected_index: usize,
@@ -165,6 +167,7 @@ impl Base {
             visible: true,
             hit: HitPolicy::Solid,
             selected: false,
+            switch_style: false,
             group: None,
             tab_index: None,
             selected_index: 0,

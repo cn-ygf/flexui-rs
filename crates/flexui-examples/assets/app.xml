@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Panel normal-bgcolor="#181D42" mouse="transparent" font-family="Microsoft YaHei">
+  <!-- 主窗口。根容器与标题栏空白区域可穿透命中，用于 Windows 无边框拖动。 -->
+  <VBox spacing="0" normal-bgcolor="#181D42" mouse="transparent">
+    <VBox height="94" spacing="0" mouse="transparent">
+      <HBox height="30" padding="2 8" spacing="2" mouse="transparent">
+        <Panel flex="1" mouse="transparent"/>
+        <Button name="open_settings" tooltip="设置" width="28" height="26"
+                normal-bgimage="button/menu_normal.svg" hot-bgimage="button/menu_hover.svg"
+                pushed-bgimage="button/menu_pushed.svg" normal-bgfit="stretch"/>
+        <Button name="minimize" tooltip="最小化" width="28" height="26"
+                normal-bgimage="button/mini_normal.png" hot-bgimage="button/mini_hover.png"
+                pushed-bgimage="button/mini_pushed.png" normal-bgfit="center"/>
+        <Button name="close_window" tooltip="关闭" width="28" height="26"
+                normal-bgimage="button/close_normal.png" hot-bgimage="button/close_hover.png"
+                pushed-bgimage="button/close_pushed.png" normal-bgfit="center"/>
+      </HBox>
+      <HBox height="64" padding="2 38" spacing="18" align="center">
+        <Image src="label/uu_logo.png" width="40" height="46"/>
+        <Button tooltip="返回" width="28" height="34" normal-bgimage="button/back_normal.png"
+                hot-bgimage="button/back_hover.png" normal-bgfit="center"/>
+        <Button text="首页" width="72" height="42" normal-bgcolor="#181D42" normal-fgcolor="#FFFFFF"
+                font-size="18" bold="true" normal-textalign="center"/>
+        <Button text="游戏" width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
+        <Button text="云联机" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
+        <Button text="云存档" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
+        <Panel flex="1" mouse="transparent"/>
+        <Edit name="search" text="搜索" width="168" height="36" padding="0 18"
+              normal-bgcolor="#30366E" normal-fgcolor="#929AC2" corner-radius="18" font-size="15"/>
+        <Button name="open_login" tooltip="登录" width="38" height="38"
+                normal-bgimage="label/user_center.svg" hot-bgimage="label/user_center.svg"
+                normal-bgfit="stretch"/>
+      </HBox>
+    </VBox>
+
+    <VBox flex="1" spacing="18" padding="18 40" normal-bgcolor="#181D42">
+      <HBox height="356" spacing="16">
+        <VBox width="218" height="356" spacing="8">
+          <Button name="btn_start" width="218" height="320"
+                  normal-bgimage="common/steam_card.png" hot-bgimage="common/steam_card_hot.png"
+                  pushed-bgimage="common/steam_card_hot.png" normal-bgfit="stretch"/>
+          <Label text="Steam 商店" height="28" normal-fgcolor="#FFFFFF" font-size="17"
+                 normal-textalign="center"/>
+        </VBox>
+        <VBox width="218" height="356" spacing="8">
+          <Button width="218" height="320"
+                  normal-bgimage="common/empty_card.png" hot-bgimage="common/empty_card_hot.png"
+                  pushed-bgimage="common/empty_card_hot.png" normal-bgfit="stretch"/>
+          <Panel height="28" mouse="transparent"/>
+        </VBox>
+        <VBox width="218" height="356" spacing="8">
+          <Button width="218" height="320"
+                  normal-bgimage="common/empty_card.png" hot-bgimage="common/empty_card_hot.png"
+                  pushed-bgimage="common/empty_card_hot.png" normal-bgfit="stretch"/>
+          <Panel height="28" mouse="transparent"/>
+        </VBox>
+        <VBox width="218" height="356" spacing="8">
+          <Button width="218" height="320"
+                  normal-bgimage="common/empty_card.png" hot-bgimage="common/empty_card_hot.png"
+                  pushed-bgimage="common/empty_card_hot.png" normal-bgfit="stretch"/>
+          <Panel height="28" mouse="transparent"/>
+        </VBox>
+      </HBox>
+      <HBox height="136" spacing="16">
+        <Image src="button/default_banner.png" width="452" height="136"/>
+        <VBox flex="1" spacing="16">
+          <HBox height="60" spacing="16">
+            <Button text="会员充值" width="218" height="60" normal-bgimage="button/membership_recharge.svg"
+                    normal-bgfit="stretch" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
+            <Button text="我的游戏  (1)" width="218" height="60" normal-bgcolor="#30386F"
+                    hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
+          </HBox>
+          <HBox height="60" spacing="16">
+            <Image src="button/college_student_discount.png" width="218" height="60"/>
+            <Button text="我的卡券" width="218" height="60" normal-bgcolor="#30386F"
+                    hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
+          </HBox>
+        </VBox>
+      </HBox>
+      <Label name="home_status" text="选择一个游戏开始体验 UU 加速器" height="22"
+             normal-fgcolor="#7D89B7" font-size="13"/>
+    </VBox>
+  </VBox>
+
+  <!-- 登录弹层：点击遮罩、右上角关闭按钮均可收起。 -->
+  <Panel name="login_overlay" visible="false" normal-bgcolor="#80070A1B">
+    <VBox x="210" y="136" width="580" height="416" spacing="0" normal-bgcolor="#2E3465"
+          normal-bgimage="label/phone_and_wechat_login_bk.svg" normal-bgfit="stretch" corner-radius="8"
+          normal-shadow="0 8 #66000000">
+      <HBox height="36" padding="4 8">
+        <Panel flex="1" mouse="transparent"/>
+        <Button name="close_login" tooltip="关闭登录" width="28" height="28"
+                normal-bgimage="button/close_normal.png" hot-bgimage="button/close_hover.png"
+                pushed-bgimage="button/close_pushed.png" normal-bgfit="center"/>
+      </HBox>
+      <HBox flex="1" spacing="18" padding="12 24" align="center">
+        <VBox width="252" spacing="16" align="center">
+          <Label text="扫码登录" height="28" normal-fgcolor="#FFFFFF" font-size="19" bold="true"
+                 normal-textalign="center"/>
+          <Image src="label/uu_qrcode.png" width="160" height="160"/>
+          <HBox height="26" spacing="6" align="center" justify="center">
+            <Label text="使用" width="42" normal-fgcolor="#B7BBD9" font-size="14"/>
+            <Image src="label/wechat_logo.svg" width="24" height="24"/>
+            <Label text="微信扫码登录" width="104" normal-fgcolor="#B7BBD9" font-size="14"/>
+          </HBox>
+        </VBox>
+        <VBox width="256" spacing="16" align="center">
+          <Label text="短信登录" height="28" normal-fgcolor="#FFFFFF" font-size="19" bold="true"
+                 normal-textalign="center"/>
+          <HBox width="256" height="44" normal-bgcolor="#222857" corner-radius="6">
+            <Label text="+86  ▾" width="76" height="44" normal-fgcolor="#B7BBD9" font-size="14"
+                   normal-textalign="center"/>
+            <Edit name="edit_phone" text="请输入手机号" flex="1" height="44" padding="0 10"
+                  normal-bgcolor="#222857" normal-fgcolor="#9095BB" font-size="14"/>
+          </HBox>
+          <HBox width="256" height="44" normal-bgcolor="#222857" corner-radius="6">
+            <Edit name="edit_code" text="请输入验证码" flex="1" height="44" padding="0 12"
+                  normal-bgcolor="#222857" normal-fgcolor="#9095BB" font-size="14"/>
+            <Button text="获取验证码" width="104" height="44" normal-bgcolor="#222857"
+                    normal-fgcolor="#00D2C4" hot-fgcolor="#73D3CB" font-size="14"/>
+          </HBox>
+          <Button name="btn_login" text="登录" width="256" height="40" normal-bgcolor="#00CFC4"
+                  hot-bgcolor="#28DED2" pushed-bgcolor="#00A79F" normal-fgcolor="#FFFFFF"
+                  corner-radius="6" font-size="16" bold="true"/>
+          <Label name="login_status" text="本地演示，不会发送账号信息" width="256" height="24"
+                 normal-fgcolor="#9DA6CE" font-size="12" normal-textalign="center"/>
+        </VBox>
+      </HBox>
+    </VBox>
+  </Panel>
+
+  <!-- 设置弹层：尺寸与 v40/set.xml 一致。 -->
+  <Panel name="settings_overlay" visible="false" normal-bgcolor="#80070A1B">
+    <VBox x="120" y="64" width="760" height="560" spacing="0" normal-bgcolor="#30386F"
+          corner-radius="8" normal-shadow="0 8 #66000000">
+      <HBox height="42" padding="5 10" normal-bgcolor="#343C78">
+        <Label text="设置" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="18"/>
+        <Button name="close_settings" tooltip="关闭设置" width="28" height="28"
+                normal-bgimage="button/close_normal.png" hot-bgimage="button/close_hover.png"
+                pushed-bgimage="button/close_pushed.png" normal-bgfit="center"/>
+      </HBox>
+      <HBox flex="1">
+        <VBox width="180" spacing="0" normal-bgcolor="#343C78">
+          <Button text="系统设置" width="180" height="48" padding="0 0 0 52"
+                  normal-bgimage="button/setform_system_selected.svg" normal-bgfit="stretch"
+                  normal-fgcolor="#FFFFFF" font-size="15" normal-textalign="left"/>
+          <Button text="功能专区" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Button text="加速设置" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Button text="自助修复" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Button text="游戏平台授权" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Button text="AI 设置" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Button text="下载设置" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Button text="关于" width="180" height="48" padding="0 0 0 52"
+                  normal-bgcolor="#343C78" hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9"
+                  font-size="15" normal-textalign="left"/>
+          <Panel flex="1" mouse="transparent"/>
+        </VBox>
+        <VBox flex="1" spacing="0" padding="18 24" normal-bgcolor="#30386F">
+          <Label text="系统设置" height="34" normal-fgcolor="#FFFFFF" font-size="20" bold="true"/>
+          <HBox height="54" align="center">
+            <Label text="语言设置" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <ComboBox name="language" options="跟随系统,简体中文,English" selected="0" width="150" height="36"
+                      normal-bgcolor="#3D4785" normal-fgcolor="#FFFFFF" border-width="1"
+                      normal-bordercolor="#4F5A9A" corner-radius="6"/>
+          </HBox>
+          <Separator height="1" normal-bgcolor="#474F82"/>
+          <HBox height="58" align="center">
+            <Label text="开机自动运行" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <CheckBox name="set_startup" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
+                      selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          </HBox>
+          <Separator height="1" normal-bgcolor="#474F82"/>
+          <HBox height="58" align="center">
+            <Label text="自动创建桌面快捷方式" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <CheckBox name="set_desktop" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
+                      selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          </HBox>
+          <Separator height="1" normal-bgcolor="#474F82"/>
+          <HBox height="58" align="center">
+            <Label text="启动后自动加速" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <CheckBox name="set_auto" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
+                      selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          </HBox>
+          <Separator height="1" normal-bgcolor="#474F82"/>
+          <HBox height="70" align="center">
+            <VBox flex="1" spacing="2">
+              <Label text="加速时休眠不断网" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
+              <Label text="加速游戏时，电脑休眠仍保持网络连通。" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+            </VBox>
+            <CheckBox name="set_sleep" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
+                      selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          </HBox>
+          <Separator height="1" normal-bgcolor="#474F82"/>
+          <HBox height="70" align="center">
+            <VBox flex="1" spacing="2">
+              <Label text="开启 UU 音效" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
+              <Label text="启动、加速、退出时播放提示音。" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+            </VBox>
+            <CheckBox name="set_audio" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
+                      selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          </HBox>
+          <Separator height="1" normal-bgcolor="#474F82"/>
+          <HBox height="70" align="center">
+            <VBox flex="1" spacing="2">
+              <Label text="专区小红点提醒" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
+              <Label text="“补给站”专区出现小红点提醒。" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+            </VBox>
+            <CheckBox name="set_notice" switch="true" checked="true" text="" width="52" height="26" normal-bgcolor="#565E99"
+                      selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          </HBox>
+          <Label name="settings_status" text="设置变更仅在当前演示会话中生效" flex="1" height="24"
+                 normal-fgcolor="#93A0CA" font-size="12"/>
+        </VBox>
+      </HBox>
+    </VBox>
+  </Panel>
+</Panel>

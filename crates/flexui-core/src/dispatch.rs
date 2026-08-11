@@ -75,6 +75,11 @@ impl<'a> EventCtx<'a> {
     pub fn set_enabled(&mut self, name: &str, enabled: bool) {
         self.with(name, move |w| w.base_mut().enabled = enabled);
     }
+
+    /// 便捷：设置某控件及其子树是否参与布局、绘制与命中测试。
+    pub fn set_visible(&mut self, name: &str, visible: bool) {
+        self.with(name, move |w| w.base_mut().visible = visible);
+    }
 }
 
 /// Radio 组 → TabBox 的绑定（组成 tabbar）。
@@ -314,6 +319,7 @@ impl Dispatcher {
 
     /// 光标闪烁：切换焦点控件 caret 相位，返回其矩形供局部失效（无焦点返回 None）。
     pub fn blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        self.ensure_focus_valid(root);
         let fid = self.focus?;
         let mut rect = None;
         visit_mut(root, fid, &mut |w| {
@@ -447,6 +453,7 @@ impl Dispatcher {
 
     /// 复制焦点控件的选中文本（无选区返回 None）。供后端写系统剪贴板。
     pub fn copy_selection(&mut self, root: &mut dyn Widget) -> Option<String> {
+        self.ensure_focus_valid(root);
         let fid = self.focus?;
         let mut out = None;
         visit_mut(root, fid, &mut |w| out = w.selected_text());
@@ -455,6 +462,7 @@ impl Dispatcher {
 
     /// 剪切焦点控件的选中文本：返回文本并删除选区、脏其区域（无选区返回 None）。
     pub fn cut_selection(&mut self, root: &mut dyn Widget) -> Option<String> {
+        self.ensure_focus_valid(root);
         let fid = self.focus?;
         let mut out = None;
         let mut deleted = false;
@@ -474,6 +482,7 @@ impl Dispatcher {
 
     /// 把文本粘贴到焦点控件（替换选区或在光标处插入）。
     pub fn paste(&mut self, root: &mut dyn Widget, s: &str) {
+        self.ensure_focus_valid(root);
         let Some(fid) = self.focus else { return };
         let mut changed = false;
         visit_mut(root, fid, &mut |w| changed = w.replace_selection(s));
@@ -486,6 +495,7 @@ impl Dispatcher {
 
     /// 全选焦点控件文本。
     pub fn select_all_focused(&mut self, root: &mut dyn Widget) {
+        self.ensure_focus_valid(root);
         let Some(fid) = self.focus else { return };
         visit_mut(root, fid, &mut |w| w.select_all());
         if let Some(r) = rect_of(root, fid) {
@@ -508,6 +518,7 @@ impl Dispatcher {
 
     /// 分发一个事件到控件树。
     pub fn handle(&mut self, root: &mut dyn Widget, ev: &Event) {
+        self.ensure_focus_valid(root);
         // 有模态浮层时事件独占给浮层（主树不收事件）。
         if !self.overlays.is_empty() {
             self.handle_with_overlay(root, ev);
@@ -602,9 +613,9 @@ impl Dispatcher {
     /// 焦点移到下一个可聚焦控件（Tab 遍历）。
     fn focus_next(&mut self, root: &mut dyn Widget) {
         let mut order: Vec<WidgetId> = Vec::new();
-        for_each_mut(root, &mut |w| {
+        for_each_visible_mut(root, true, &mut |w| {
             let b = w.base();
-            if b.focusable && b.enabled && b.visible {
+            if b.focusable && b.enabled {
                 order.push(b.id);
             }
         });
@@ -626,13 +637,24 @@ impl Dispatcher {
         self.needs_redraw = true;
     }
 
+    /// 隐藏或禁用当前焦点控件后，立即停止向它分发键盘与剪贴板事件。
+    fn ensure_focus_valid(&mut self, root: &mut dyn Widget) {
+        let Some(id) = self.focus else { return };
+        if is_focus_candidate(root, id, true) {
+            return;
+        }
+        self.focus = None;
+        for_each_mut(root, &mut |w| w.base_mut().focused = false);
+        self.needs_redraw = true;
+    }
+
     /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
     fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dy: f32) {
         // 找到包含该点的最深可滚动容器 id。
         let mut target: Option<WidgetId> = None;
-        for_each_mut(root, &mut |w| {
+        for_each_visible_mut(root, true, &mut |w| {
             let b = w.base();
-            if b.scrollable && b.visible && b.rect.contains(pos) {
+            if b.scrollable && b.rect.contains(pos) {
                 target = Some(b.id); // 后序覆盖 → 保留最深（子在父后遍历）
             }
         });
@@ -961,6 +983,38 @@ fn for_each_mut(node: &mut dyn Widget, f: &mut dyn FnMut(&mut dyn Widget)) {
     for i in 0..n {
         for_each_mut(node.base_mut().children[i].as_mut(), f);
     }
+}
+
+/// 前序遍历有效可见子树；隐藏父节点的后代不会被访问。
+fn for_each_visible_mut(
+    node: &mut dyn Widget,
+    ancestors_visible: bool,
+    f: &mut dyn FnMut(&mut dyn Widget),
+) {
+    let visible = ancestors_visible && node.base().visible;
+    if !visible {
+        return;
+    }
+    f(node);
+    let n = node.base().children.len();
+    for i in 0..n {
+        for_each_visible_mut(node.base_mut().children[i].as_mut(), visible, f);
+    }
+}
+
+/// id 对应控件是否位于有效可见子树，且自身可聚焦、可用。
+fn is_focus_candidate(node: &dyn Widget, id: WidgetId, ancestors_visible: bool) -> bool {
+    let b = node.base();
+    let visible = ancestors_visible && b.visible;
+    if !visible {
+        return false;
+    }
+    if b.id == id {
+        return b.focusable && b.enabled;
+    }
+    b.children
+        .iter()
+        .any(|child| is_focus_candidate(child.as_ref(), id, visible))
 }
 
 /// 查找 id 匹配的节点并执行 f，返回是否找到。
@@ -1330,6 +1384,30 @@ mod tests {
         disp.handle(&mut root, &kd(9));
         assert!(root.base().children[1].base().focused);
         assert!(!root.base().children[0].base().focused);
+    }
+
+    #[test]
+    fn hidden_子树不参与焦点遍历且会清理旧焦点() {
+        let mut hidden = Panel::new().push(Edit::new().name("hidden_edit").size(80.0, 30.0));
+        hidden.base_mut().visible = false;
+        let mut root = VBox::new()
+            .push(Button::new("visible").size(80.0, 30.0))
+            .push(hidden);
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+        let mut disp = Dispatcher::new();
+
+        disp.handle(&mut root, &kd(9));
+        assert!(root.base().children[0].base().focused);
+
+        root.base_mut().children[1].base_mut().visible = true;
+        disp.handle(&mut root, &kd(9));
+        assert!(root.base().children[1].base().children[0].base().focused);
+
+        root.base_mut().children[1].base_mut().visible = false;
+        disp.handle(&mut root, &Event::Char { ch: 'x' });
+        assert_eq!(disp.focus(), None);
+        assert_eq!(root.base().children[1].base().children[0].base().text, "");
     }
 
     #[test]

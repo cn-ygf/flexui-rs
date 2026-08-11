@@ -1,0 +1,7 @@
+[package]
+name = "flexui-examples"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flexui = { path = "../flexui" }

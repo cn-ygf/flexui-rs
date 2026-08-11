@@ -46,6 +46,9 @@ pub fn measure_stack(b: &mut Base, avail: Size, cv: &dyn Canvas) -> Size {
     let mut w = 0.0f32;
     let mut h = 0.0f32;
     for child in b.children.iter_mut() {
+        if !child.base().visible {
+            continue;
+        }
         let m = child.base().margin;
         let s = measure_node(child.as_mut(), inner, cv);
         w = w.max(s.width + m.horizontal());
@@ -57,6 +60,9 @@ pub fn measure_stack(b: &mut Base, avail: Size, cv: &dyn Canvas) -> Size {
 /// 默认摆放：子控件填充内容区（叠放 / 单子）；设了 `pos` 的子控件绝对定位。
 pub fn arrange_stack(b: &mut Base, content: Rect, cv: &dyn Canvas) {
     for child in b.children.iter_mut() {
+        if !child.base().visible {
+            continue;
+        }
         let pos = child.base().pos;
         if let Some((px, py)) = pos {
             // 绝对定位：按子控件期望尺寸放到 content.origin + (px,py)。
@@ -76,10 +82,13 @@ pub fn measure_axis(b: &mut Base, axis: Axis, avail: Size, cv: &dyn Canvas) -> S
         (avail.width - b.padding.horizontal()).max(0.0),
         (avail.height - b.padding.vertical()).max(0.0),
     );
-    let n = b.children.len();
+    let n = b.children.iter().filter(|child| child.base().visible).count();
     let mut main = 0.0f32;
     let mut cross = 0.0f32;
     for child in b.children.iter_mut() {
+        if !child.base().visible {
+            continue;
+        }
         let m = child.base().margin;
         let s = measure_node(child.as_mut(), inner, cv);
         main += main_of(axis, s) + main_margin(axis, m);
@@ -98,8 +107,9 @@ pub fn measure_axis(b: &mut Base, axis: Axis, avail: Size, cv: &dyn Canvas) -> S
 /// 沿主轴摆放（VBox/HBox）：Sizing::Fill 子控件分摊剩余（权重 flex_grow，0 视为 1）；
 /// 无 Fill 时按 justify 分布剩余空间；交叉轴按 align 对齐；尊重每子 margin。
 pub fn arrange_axis(b: &mut Base, axis: Axis, content: Rect, cv: &dyn Canvas) {
-    let n = b.children.len();
-    if n == 0 {
+    let child_count = b.children.len();
+    let visible_count = b.children.iter().filter(|child| child.base().visible).count();
+    if visible_count == 0 {
         return;
     }
     let inner = Size::new(content.size.width, content.size.height);
@@ -108,11 +118,14 @@ pub fn arrange_axis(b: &mut Base, axis: Axis, content: Rect, cv: &dyn Canvas) {
     let spacing = b.spacing;
 
     // 度量 + 归类（是否 Fill 及其权重）。
-    let mut desired: Vec<Size> = Vec::with_capacity(n);
-    let mut weights: Vec<f32> = Vec::with_capacity(n);
+    let mut desired = vec![Size::default(); child_count];
+    let mut weights = vec![0.0f32; child_count];
     let mut grow_sum = 0.0f32;
     let mut fixed_main = 0.0f32;
-    for child in b.children.iter_mut() {
+    for (i, child) in b.children.iter_mut().enumerate() {
+        if !child.base().visible {
+            continue;
+        }
         let cb = child.base();
         let m = cb.margin;
         // 主轴 Fill 或 flex_grow>0 都参与撑开（后者兼容旧 flex 用法）。
@@ -133,10 +146,10 @@ pub fn arrange_axis(b: &mut Base, axis: Axis, content: Rect, cv: &dyn Canvas) {
         } else {
             fixed_main += main_of(axis, s);
         }
-        desired.push(s);
-        weights.push(weight);
+        desired[i] = s;
+        weights[i] = weight;
     }
-    let total_spacing = spacing * (n as f32 - 1.0);
+    let total_spacing = spacing * (visible_count as f32 - 1.0);
     let main_avail = main_of_size(axis, content.size);
     let free = (main_avail - total_spacing - fixed_main).max(0.0);
     let has_grow = grow_sum > 0.0;
@@ -150,17 +163,24 @@ pub fn arrange_axis(b: &mut Base, axis: Axis, content: Rect, cv: &dyn Canvas) {
             Justify::Center => (main_start(axis, content) + free / 2.0, 0.0),
             Justify::End => (main_start(axis, content) + free, 0.0),
             Justify::SpaceBetween => {
-                let g = if n > 1 { free / (n as f32 - 1.0) } else { 0.0 };
+                let g = if visible_count > 1 {
+                    free / (visible_count as f32 - 1.0)
+                } else {
+                    0.0
+                };
                 (main_start(axis, content), g)
             }
             Justify::SpaceAround => {
-                let g = free / n as f32;
+                let g = free / visible_count as f32;
                 (main_start(axis, content) + g / 2.0, g)
             }
         }
     };
 
     for (i, child) in b.children.iter_mut().enumerate() {
+        if !child.base().visible {
+            continue;
+        }
         let m = child.base().margin;
         let main_size = if weights[i] > 0.0 {
             free * (weights[i] / grow_sum)
@@ -425,6 +445,27 @@ mod tests {
         assert_eq!(root.base().children[0].base().rect.size.height, 40.0);
         // Fill 拿走剩余 160
         assert_eq!(root.base().children[1].base().rect.size.height, 160.0);
+    }
+
+    #[test]
+    fn hidden_子节点不占布局空间() {
+        let mut hidden = Panel::new().size(50.0, 80.0).margin(12.0);
+        hidden.base_mut().visible = false;
+        hidden.base_mut().flex_grow = 1.0;
+        let mut root = VBox::new()
+            .spacing(10.0)
+            .push(Panel::new().size(50.0, 30.0))
+            .push(hidden)
+            .push(Panel::new().size(50.0, 50.0));
+        let cv = FakeCanvas;
+
+        let desired = measure_node(&mut root, Size::new(100.0, 200.0), &cv);
+        assert_eq!(desired.height, 90.0);
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 200.0), &cv);
+
+        let children = &root.base().children;
+        assert_eq!(children[1].base().rect, Rect::default());
+        assert_eq!(children[2].base().rect.top(), 40.0);
     }
 
     #[test]

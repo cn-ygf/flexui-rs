@@ -187,6 +187,9 @@ impl<'a> WindowCtx<'a> {
     pub fn set_enabled(&mut self, name: &str, enabled: bool) {
         EventCtx::new(self.root).set_enabled(name, enabled);
     }
+    pub fn set_visible(&mut self, name: &str, visible: bool) {
+        EventCtx::new(self.root).set_visible(name, visible);
+    }
     pub fn with<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
         EventCtx::new(self.root).with(name, f)
     }

@@ -11,6 +11,7 @@ members = [
     "crates/flexui-macos",
     "crates/flexui-windows",
     "crates/flexui",
+    "crates/flexui-examples",
     "crates/flexui-ffi",
 ]
 

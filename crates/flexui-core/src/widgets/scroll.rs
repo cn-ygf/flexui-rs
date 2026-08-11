@@ -56,15 +56,20 @@ impl Widget for ScrollView {
         let inner = Size::new(content.size.width, content.size.height);
         // 先量各子控件高度，求内容总高。
         let n = self.base.children.len();
-        let mut heights: Vec<f32> = Vec::with_capacity(n);
+        let mut heights = vec![0.0f32; n];
         let mut total = 0.0f32;
-        for child in self.base.children.iter_mut() {
+        let mut visible_count = 0usize;
+        for (i, child) in self.base.children.iter_mut().enumerate() {
+            if !child.base().visible {
+                continue;
+            }
             let s = measure_node(child.as_mut(), inner, cv);
-            heights.push(s.height);
+            heights[i] = s.height;
             total += s.height;
+            visible_count += 1;
         }
-        if n > 1 {
-            total += self.base.spacing * (n as f32 - 1.0);
+        if visible_count > 1 {
+            total += self.base.spacing * (visible_count as f32 - 1.0);
         }
         self.base.content_h = total;
         // 夹取滚动偏移到 [0, max(0, total - 视口高)]。
@@ -79,6 +84,9 @@ impl Widget for ScrollView {
         let spacing = self.base.spacing;
         let mut y = content.top() - self.base.scroll_y;
         for (i, child) in self.base.children.iter_mut().enumerate() {
+            if !child.base().visible {
+                continue;
+            }
             let rect = Rect::new(content.left(), y, content.size.width, heights[i]);
             layout::layout_node(child.as_mut(), rect, cv);
             y += heights[i] + spacing;
