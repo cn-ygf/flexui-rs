@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<Window title="UU 加速器 · flexui XML 示例" width="1000" height="688" resizable="false"
+        titlebar="none" system-corners="true" system-shadow="true" drag-region="0 0 1000 30">
 <Panel normal-bgcolor="#181D42" mouse="transparent" font-family="Microsoft YaHei">
   <!-- 主窗口。根容器与标题栏空白区域可穿透命中，用于 Windows 无边框拖动。 -->
   <VBox spacing="0" normal-bgcolor="#181D42" mouse="transparent">
@@ -230,3 +232,4 @@
     </VBox>
   </Panel>
 </Panel>
+</Window>

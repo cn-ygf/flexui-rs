@@ -1,16 +1,8 @@
-use flexui::{
-    DirProvider, ResourceManager, Skin, TitlebarMode, Window, WindowConfig, WindowCtx, WindowImpl,
-};
+use flexui::{DirProvider, ResourceManager, Skin, Window, WindowCtx, WindowImpl};
 
 struct UuExample;
 
 impl WindowImpl for UuExample {
-    fn config(&self) -> WindowConfig {
-        WindowConfig::new("UU 加速器 · flexui XML 示例", 1000.0, 688.0)
-            .resizable(false)
-            .titlebar(TitlebarMode::None)
-    }
-
     fn skin(&self) -> Skin {
         Skin::res("app.xml")
     }

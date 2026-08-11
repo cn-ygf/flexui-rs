@@ -34,7 +34,7 @@ pub use widgets::{
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
-    WindowDelegate, WindowHandle,
+    WindowDelegate, WindowDragRegion, WindowHandle,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。

@@ -22,7 +22,8 @@ use objc2_foundation::{
 use flexui_core::event::keys;
 use flexui_core::{
     find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, Mods, MouseButton, NewWindow,
-    Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowHandle,
+    Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowDragRegion,
+    WindowHandle,
 };
 
 use crate::canvas::{CgCanvas, ImageCache, SharedImageCache};
@@ -69,6 +70,8 @@ pub struct AppState {
     pub child_windows: Vec<Retained<NSWindow>>,
     /// 每窗口独立图片缓存，随窗口释放原生 NSImage。
     pub image_cache: SharedImageCache,
+    /// 内容区精确拖动范围；平台默认策略由 NSWindow 自己处理。
+    pub drag_region: WindowDragRegion,
 }
 
 pub struct FlexViewIvars {
@@ -116,9 +119,21 @@ define_class!(
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
-            self.dispatch(Event::MouseDown { pos: self.point(event), button: MouseButton::Left });
+            let pos = self.point(event);
+            let should_drag = {
+                let st = self.ivars().state.borrow();
+                matches!(st.drag_region, WindowDragRegion::Rect(rect) if rect.contains(pos))
+                    && flexui_core::hit_test(st.root.as_ref(), pos).is_none()
+            };
+            if should_drag {
+                if let Some(window) = self.window() {
+                    window.performWindowDragWithEvent(event);
+                    return;
+                }
+            }
+            self.dispatch(Event::MouseDown { pos, button: MouseButton::Left });
             if event.clickCount() >= 2 {
-                self.dispatch(Event::DoubleClick { pos: self.point(event) });
+                self.dispatch(Event::DoubleClick { pos });
             }
         }
 
@@ -423,6 +438,7 @@ impl FlexView {
         root: Node,
         disp: Dispatcher,
         delegate: Box<dyn WindowDelegate>,
+        drag_region: WindowDragRegion,
     ) -> Retained<Self> {
         let ivars = FlexViewIvars {
             state: RefCell::new(AppState {
@@ -431,6 +447,7 @@ impl FlexView {
                 delegate,
                 child_windows: Vec::new(),
                 image_cache: Rc::new(RefCell::new(ImageCache::default())),
+                drag_region,
             }),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);

@@ -106,8 +106,8 @@ pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NS
     if config.titlebar != TitlebarMode::System {
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
-        window.setHasShadow(true);
     }
+    window.setHasShadow(config.system_shadow);
     if config.titlebar == TitlebarMode::None {
         for button in [
             NSWindowButton::CloseButton,
@@ -119,12 +119,14 @@ pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NS
             }
         }
     }
-    // 无边框/隐藏模式允许拖动窗口背景移动窗口。
-    if config.titlebar != TitlebarMode::System {
+    // 平台默认策略保持旧行为；精确矩形由 FlexView 的 mouseDown 处理。
+    if config.titlebar != TitlebarMode::System
+        && config.drag_region == flexui_core::WindowDragRegion::PlatformDefault
+    {
         window.setMovableByWindowBackground(true);
     }
 
-    let view = FlexView::new(mtm, root, disp, delegate);
+    let view = FlexView::new(mtm, root, disp, delegate, config.drag_region);
     // 注册文件拖放类型（接收拖入的文件路径 → on_drop_files）。
     view.registerForDraggedTypes(&NSArray::from_slice(&[view::filenames_pboard_type()]));
     window.setContentView(Some(&view));

@@ -127,10 +127,12 @@ impl Skin {
 
 /// 用户「继承」的窗口基类（≈ duilib WindowImplBase）。
 ///
-/// 必需：`config`（窗口配置）、`skin`（界面来源）。其余为可重写钩子，默认空实现。
+/// 必需：`skin`（界面来源）。`config` 是 XML 不含 `<Window>` 时使用的兜底配置。
 pub trait WindowImpl: 'static {
     /// 窗口配置（标题/尺寸/resizable/标题栏）。
-    fn config(&self) -> WindowConfig;
+    fn config(&self) -> WindowConfig {
+        WindowConfig::default()
+    }
     /// 界面来源（XML / 资源路径 / 控件树）。
     fn skin(&self) -> Skin;
 

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use flexui_core::{
     Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, Gradient, HBox,
     HitPolicy, Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel,
-    Progress, Radio, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign,
-    TitlebarMode, VBox, VisualState, WidgetId, WindowConfig,
+    Progress, Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox,
+    TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig, WindowDragRegion,
 };
 use flexui_resource::ResourceManager;
 
@@ -145,7 +145,7 @@ fn load_window(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Resul
         includes: Vec::new(),
     };
     if el.tag.to_lowercase() == "window" {
-        let config = parse_window_config(&el);
+        let config = parse_window_config(&el)?;
         // Window 的子节点即内容；多个则包进 VBox。
         let mut kids: Vec<Node> = Vec::new();
         for child in &el.children {
@@ -179,7 +179,7 @@ fn load_window(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Resul
 }
 
 /// 从 `<Window>` 属性解析窗口配置。
-fn parse_window_config(el: &Element) -> WindowConfig {
+fn parse_window_config(el: &Element) -> Result<WindowConfig, LoadError> {
     let mut cfg = WindowConfig::new(
         el.attr("title").unwrap_or("flexui-rs"),
         el.attr("width").and_then(|s| s.parse().ok()).unwrap_or(640.0),
@@ -195,7 +195,40 @@ fn parse_window_config(el: &Element) -> WindowConfig {
             _ => TitlebarMode::System,
         };
     }
-    cfg
+    if let Some(v) = el.attr("system-corners") {
+        cfg.system_corners = parse_bool(v);
+    }
+    if let Some(v) = el.attr("system-shadow") {
+        cfg.system_shadow = parse_bool(v);
+    }
+    if let Some(v) = el.attr("drag-region") {
+        cfg.drag_region = parse_drag_region(v)?;
+    }
+    Ok(cfg)
+}
+
+/// 解析 `<Window drag-region>`：`x y width height`、`none` 或 `platform`。
+fn parse_drag_region(s: &str) -> Result<WindowDragRegion, LoadError> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "none" | "disabled" | "false" => Ok(WindowDragRegion::Disabled),
+        "platform" | "default" | "auto" => Ok(WindowDragRegion::PlatformDefault),
+        _ => {
+            let values = s
+                .split(|c: char| c == ',' || c.is_ascii_whitespace())
+                .filter(|part| !part.is_empty())
+                .map(str::parse::<f32>)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| LoadError(format!("drag-region 格式错误: {s}")))?;
+            if values.len() != 4 || values[2] <= 0.0 || values[3] <= 0.0 {
+                return Err(LoadError(format!(
+                    "drag-region 需要 x y width height，且宽高必须大于 0: {s}"
+                )));
+            }
+            Ok(WindowDragRegion::Rect(Rect::new(
+                values[0], values[1], values[2], values[3],
+            )))
+        }
+    }
 }
 
 /// 解析图片来源：有资源管理器则读成字节（支持 zip/内嵌），否则按文件路径。
@@ -789,7 +822,8 @@ mod tests {
 
     #[test]
     fn window_根解析配置() {
-        let xml = r#"<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false">
+        let xml = r#"<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false"
+            system-corners="false" system-shadow="false" drag-region="12 8 760 36">
             <VBox><Label name="hello" text="hi"/></VBox>
         </Window>"#;
         let doc = load_window_str(xml, &Context::new()).unwrap();
@@ -798,8 +832,32 @@ mod tests {
         assert_eq!(cfg.width, 800.0);
         assert!(!cfg.resizable);
         assert_eq!(cfg.titlebar, flexui_core::TitlebarMode::HiddenKeepControls);
+        assert!(!cfg.system_corners);
+        assert!(!cfg.system_shadow);
+        assert_eq!(
+            cfg.drag_region,
+            WindowDragRegion::Rect(Rect::new(12.0, 8.0, 760.0, 36.0))
+        );
         // 内容根含具名控件
         assert!(find_by_name(doc.root.as_ref(), "hello").is_some());
+    }
+
+    #[test]
+    fn window_拖动区域支持关闭和平台默认值() {
+        for (value, expected) in [
+            ("none", WindowDragRegion::Disabled),
+            ("platform", WindowDragRegion::PlatformDefault),
+        ] {
+            let xml = format!("<Window drag-region=\"{value}\"><Panel/></Window>");
+            let doc = load_window_str(&xml, &Context::new()).unwrap();
+            assert_eq!(doc.config.unwrap().drag_region, expected);
+        }
+    }
+
+    #[test]
+    fn window_拖动区域格式错误会报错() {
+        let xml = r#"<Window drag-region="0 bad 100 30"><Panel/></Window>"#;
+        assert!(load_window_str(xml, &Context::new()).is_err());
     }
 
     #[test]

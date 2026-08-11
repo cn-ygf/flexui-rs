@@ -6,6 +6,7 @@
 
 use crate::dispatch::EventCtx;
 use crate::widget::Widget;
+use flexui_geometry::Rect;
 
 /// 标题栏模式（一期先实现 System；隐藏留控件/无边框见开发计划阶段 3）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,6 +20,18 @@ pub enum TitlebarMode {
     None,
 }
 
+/// 无边框窗口的内容区拖动策略。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum WindowDragRegion {
+    /// 沿用平台原有的无边框窗口拖动行为。
+    #[default]
+    PlatformDefault,
+    /// 禁止从内容区拖动窗口。
+    Disabled,
+    /// 仅允许从指定逻辑坐标矩形内的空白区域拖动窗口。
+    Rect(Rect),
+}
+
 /// 窗口配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -28,6 +41,12 @@ pub struct WindowConfig {
     /// false = 禁止改变大小。
     pub resizable: bool,
     pub titlebar: TitlebarMode,
+    /// 无边框窗口是否使用平台提供的窗口圆角；平台无法关闭时遵循系统行为。
+    pub system_corners: bool,
+    /// 是否使用平台提供的窗口阴影。
+    pub system_shadow: bool,
+    /// 无边框窗口内容区的可拖动范围。
+    pub drag_region: WindowDragRegion,
 }
 
 impl Default for WindowConfig {
@@ -38,6 +57,9 @@ impl Default for WindowConfig {
             height: 440.0,
             resizable: true,
             titlebar: TitlebarMode::System,
+            system_corners: true,
+            system_shadow: true,
+            drag_region: WindowDragRegion::PlatformDefault,
         }
     }
 }
@@ -57,6 +79,22 @@ impl WindowConfig {
     }
     pub fn titlebar(mut self, m: TitlebarMode) -> Self {
         self.titlebar = m;
+        self
+    }
+    pub fn system_corners(mut self, v: bool) -> Self {
+        self.system_corners = v;
+        self
+    }
+    pub fn system_shadow(mut self, v: bool) -> Self {
+        self.system_shadow = v;
+        self
+    }
+    pub fn drag_region(mut self, region: WindowDragRegion) -> Self {
+        self.drag_region = region;
+        self
+    }
+    pub fn drag_area(mut self, rect: Rect) -> Self {
+        self.drag_region = WindowDragRegion::Rect(rect);
         self
     }
 }

@@ -8,18 +8,21 @@ use std::ptr::{null, null_mut};
 use flexui_core::event::keys;
 use flexui_core::{
     hit_test, layout_node, paint_tree, Color, Dispatcher, Event, Mods, MouseButton, NewWindow,
-    Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
+    Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion,
+    WindowHandle,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
-    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMNCRP_ENABLED,
-    DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_ENABLED,
+    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, InvalidateRect, ScreenToClient, HDC, PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow, SetProcessDpiAwarenessContext,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -29,15 +32,14 @@ use windows_sys::Win32::UI::Input::Ime::{
     COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
-use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::{GdiCanvas, ImageCache};
 use crate::gdiplus::{Gdiplus, OffscreenBitmap};
 
-/// 顶部可拖动条高度（逻辑像素）。
-const DRAG_STRIP: f32 = 40.0;
+/// 旧配置的默认顶部拖动条高度（逻辑像素）。
+const DEFAULT_DRAG_STRIP: f32 = 40.0;
 
 /// 窗口内部状态：控件树 + 分发器 + 窗口委托（通过窗口 USERDATA 关联到 HWND）。
 struct AppState {
@@ -49,6 +51,8 @@ struct AppState {
     frameless: bool,
     /// 固定尺寸窗口仍保留 WS_THICKFRAME 供 DWM 生成阴影，此字段用于禁止实际缩放。
     resizable: bool,
+    /// 内容区的窗口拖动范围。
+    drag_region: WindowDragRegion,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -133,9 +137,13 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 /// 存活窗口计数（最后一个关闭时退出消息循环）。
 static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// 让 DWM 管理无边框窗口的圆角与阴影；旧系统会忽略不支持的圆角属性。
-unsafe fn enable_frameless_dwm(hwnd: HWND) {
-    let policy = DWMNCRP_ENABLED;
+/// 配置无边框窗口的系统圆角与阴影；旧系统会忽略不支持的属性。
+unsafe fn configure_frameless_dwm(hwnd: HWND, corners: bool, shadow: bool) {
+    let policy = if corners || shadow {
+        DWMNCRP_ENABLED
+    } else {
+        DWMNCRP_DISABLED
+    };
     DwmSetWindowAttribute(
         hwnd,
         DWMWA_NCRENDERING_POLICY as u32,
@@ -143,7 +151,11 @@ unsafe fn enable_frameless_dwm(hwnd: HWND) {
         std::mem::size_of_val(&policy) as u32,
     );
 
-    let corner = DWMWCP_ROUND;
+    let corner = if corners {
+        DWMWCP_ROUND
+    } else {
+        DWMWCP_DONOTROUND
+    };
     DwmSetWindowAttribute(
         hwnd,
         DWMWA_WINDOW_CORNER_PREFERENCE as u32,
@@ -151,12 +163,22 @@ unsafe fn enable_frameless_dwm(hwnd: HWND) {
         std::mem::size_of_val(&corner) as u32,
     );
 
-    // 1px 原生框架足以让 DWM 为 WS_POPUP 窗口生成系统阴影。
+    // Windows 11 会为 WS_THICKFRAME 额外绘制激活边框；隐藏它可避免局部重绘后露出白边。
+    let border_color = DWMWA_COLOR_NONE;
+    DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_BORDER_COLOR as u32,
+        &border_color as *const _ as *const std::ffi::c_void,
+        std::mem::size_of_val(&border_color) as u32,
+    );
+
+    // 1px 原生框架足以让 DWM 为 WS_POPUP 窗口生成系统阴影；全零表示不扩展。
+    let margin = if shadow { 1 } else { 0 };
     let margins = MARGINS {
-        cxLeftWidth: 1,
-        cxRightWidth: 1,
-        cyTopHeight: 1,
-        cyBottomHeight: 1,
+        cxLeftWidth: margin,
+        cxRightWidth: margin,
+        cyTopHeight: margin,
+        cyBottomHeight: margin,
     };
     DwmExtendFrameIntoClientArea(hwnd, &margins);
 }
@@ -173,8 +195,13 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
     let class_name = wide("FlexUiWindowClass");
 
     let frameless = config.titlebar != TitlebarMode::System;
+    let keep_dwm_frame = config.resizable || config.system_corners || config.system_shadow;
     let mut style = if frameless {
-        WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+        let mut value = WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+        if keep_dwm_frame {
+            value |= WS_THICKFRAME;
+        }
+        value
     } else {
         WS_OVERLAPPEDWINDOW | WS_VISIBLE
     };
@@ -228,12 +255,13 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         image_cache: ImageCache::default(),
         frameless,
         resizable: config.resizable,
+        drag_region: config.drag_region,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     if frameless {
-        enable_frameless_dwm(hwnd);
+        configure_frameless_dwm(hwnd, config.system_corners, config.system_shadow);
     }
 
     DragAcceptFiles(hwnd, 1);
@@ -853,7 +881,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
             let lp = Point::new(pt.x as f32 / scale, pt.y as f32 / scale);
             let st = &*state;
-            if lp.y < DRAG_STRIP && hit_test(st.root.as_ref(), lp).is_none() {
+            let in_drag_region = match st.drag_region {
+                WindowDragRegion::PlatformDefault => lp.y < DEFAULT_DRAG_STRIP,
+                WindowDragRegion::Disabled => false,
+                WindowDragRegion::Rect(rect) => rect.contains(lp),
+            };
+            if in_drag_region && hit_test(st.root.as_ref(), lp).is_none() {
                 HTCAPTION as isize
             } else {
                 HTCLIENT as isize
