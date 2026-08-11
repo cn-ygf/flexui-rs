@@ -46,6 +46,22 @@ impl VisualState {
     }
 }
 
+/// 线性渐变（两色）：竖直（上→下）或水平（左→右）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gradient {
+    pub from: Color,
+    pub to: Color,
+    pub vertical: bool,
+}
+
+/// 投影（硬阴影：按 dx/dy 偏移的同形填充，无模糊）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    pub dx: f32,
+    pub dy: f32,
+    pub color: Color,
+}
+
 /// 单个状态槽的样式，所有字段可缺省（None 表示继承）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StyleSpec {
@@ -63,6 +79,12 @@ pub struct StyleSpec {
     pub border_width: Option<f32>,
     pub corner_radius: Option<Corners>,
     pub text_align: Option<TextAlign>,
+    /// 控件自身透明度 0~1（作用于本控件的背景/内容/边框，不含子控件）。
+    pub opacity: Option<f32>,
+    /// 背景线性渐变（存在时优先于 bg_color）。
+    pub gradient: Option<Gradient>,
+    /// 投影。
+    pub shadow: Option<Shadow>,
 }
 
 impl StyleSpec {
@@ -81,6 +103,9 @@ impl StyleSpec {
             border_width: self.border_width.or(base.border_width),
             corner_radius: self.corner_radius.or(base.corner_radius),
             text_align: self.text_align.or(base.text_align),
+            opacity: self.opacity.or(base.opacity),
+            gradient: self.gradient.or(base.gradient),
+            shadow: self.shadow.or(base.shadow),
         }
     }
 }

@@ -19,21 +19,37 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
     let rect = b.rect;
     let radius = style.corner_radius.unwrap_or_default();
     let rounded = !is_zero_corners(radius);
+    // 控件自身透明度：乘进本控件绘制用到的所有颜色的 alpha（不含子控件）。
+    let op = style.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
 
-    // 1. 背景色
-    if let Some(bg) = style.bg_color {
+    // 0. 投影（在背景之下，按 dx/dy 偏移同形填充）。
+    if let Some(sh) = style.shadow {
+        let sr = Rect::new(rect.left() + sh.dx, rect.top() + sh.dy, rect.size.width, rect.size.height);
+        cv.fill_round_rect(sr, radius, dim(sh.color, op));
+    }
+    // 1. 背景：渐变优先于纯色。
+    if let Some(g) = style.gradient {
+        cv.fill_gradient_rect(rect, radius, dim(g.from, op), dim(g.to, op), g.vertical);
+    } else if let Some(bg) = style.bg_color {
+        let c = dim(bg, op);
         if rounded {
-            cv.fill_round_rect(rect, radius, bg);
+            cv.fill_round_rect(rect, radius, c);
         } else {
-            cv.fill_rect(rect, bg);
+            cv.fill_rect(rect, c);
         }
     }
     // 2. 背景图（支持换色 tint 与渲染方式 fit）
     if let Some(img) = &style.bg_image {
         cv.draw_image(img, rect, style.bg_tint, style.bg_fit.clone().unwrap_or_default());
     }
-    // 3. 控件内容（文字/图标）
-    node.paint_content(cv, &style);
+    // 3. 控件内容（文字/图标）；透明时用降低 alpha 的前景色。
+    if op < 1.0 {
+        let mut cs = style.clone();
+        cs.fg_color = cs.fg_color.map(|c| dim(c, op));
+        node.paint_content(cv, &cs);
+    } else {
+        node.paint_content(cv, &style);
+    }
     // 4. 前景图
     if let Some(img) = &style.fg_image {
         cv.draw_image(img, rect, style.fg_tint, style.fg_fit.clone().unwrap_or_default());
@@ -41,6 +57,7 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
     // 5. 边框
     if let (Some(bc), Some(bw)) = (style.border_color, style.border_width) {
         if bw > 0.0 {
+            let bc = dim(bc, op);
             if rounded {
                 cv.stroke_round_rect(rect, radius, bc, bw);
             } else {
@@ -61,6 +78,15 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
 
 fn is_zero_corners(c: Corners) -> bool {
     c.tl == 0.0 && c.tr == 0.0 && c.br == 0.0 && c.bl == 0.0
+}
+
+/// 把颜色的 alpha 乘以透明度系数（op=1 原样返回）。
+fn dim(c: flexui_geometry::Color, op: f32) -> flexui_geometry::Color {
+    if op >= 1.0 {
+        c
+    } else {
+        flexui_geometry::Color::rgba(c.r, c.g, c.b, c.a * op)
+    }
 }
 
 /// 便捷：在内容区内按对齐方式画一行文字（控件 paint_content 复用）。
@@ -133,7 +159,7 @@ mod tests {
     use super::*;
     use crate::layout::layout_node;
     use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
-    use crate::widgets::{Button, VBox};
+    use crate::widgets::{Button, Panel, VBox};
     use flexui_geometry::{Color, Rect, Size};
     use flexui_gfx::{Canvas, Font};
 
@@ -191,6 +217,25 @@ mod tests {
         let mut rec2 = Recorder::default();
         paint_tree(&root, &mut rec2);
         assert!(rec2.fills.iter().any(|(_, c)| *c == Color::from_u8(200, 200, 200, 255)), "hover 应用 hot 底色");
+    }
+
+    #[test]
+    fn 透明度_降低填充alpha() {
+        let spec = StyleSpec {
+            bg_color: Some(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            opacity: Some(0.5),
+            ..Default::default()
+        };
+        let panel = Panel::new().style(StyleSet::new().with_normal(spec)).size(10.0, 10.0);
+        let mut root = VBox::new().push(panel);
+        let mut rec = Recorder::default();
+        layout_node(&mut root, Rect::new(0.0, 0.0, 50.0, 50.0), &rec);
+        paint_tree(&root, &mut rec);
+        // 应有一次红色、alpha≈0.5 的填充。
+        assert!(
+            rec.fills.iter().any(|(_, c)| c.r == 1.0 && (c.a - 0.5).abs() < 1e-6),
+            "透明度应把红色 alpha 降到 0.5"
+        );
     }
 
     #[test]

@@ -120,6 +120,19 @@ pub trait Canvas {
     /// 填充圆角矩形。
     fn fill_round_rect(&mut self, rect: Rect, radius: Corners, color: Color);
 
+    /// 用两色线性渐变填充（圆角）矩形；`vertical`=true 上→下，false 左→右。
+    /// 缺省实现回退为起始色纯填充；后端覆写为真渐变。
+    fn fill_gradient_rect(
+        &mut self,
+        rect: Rect,
+        radius: Corners,
+        from: Color,
+        _to: Color,
+        _vertical: bool,
+    ) {
+        self.fill_round_rect(rect, radius, from);
+    }
+
     /// 描边圆角矩形（用于边框）。
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32);
 

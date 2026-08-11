@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, HBox, HitPolicy,
-    Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel, Progress, Radio,
-    Separator, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign, TitlebarMode, VBox,
-    VisualState, WidgetId, WindowConfig,
+    Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, Gradient, HBox,
+    HitPolicy, Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel,
+    Progress, Radio, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign,
+    TitlebarMode, VBox, VisualState, WidgetId, WindowConfig,
 };
 use flexui_resource::ResourceManager;
 
@@ -488,8 +488,38 @@ fn apply_style_attr(
         "fgtint" => spec.fg_tint = parse_color(val),
         "fgfit" => spec.fg_fit = parse_fit(val),
         "textalign" => spec.text_align = parse_align(val),
+        "opacity" => spec.opacity = val.parse().ok(),
+        "bggradient" | "gradient" => spec.gradient = parse_gradient(val),
+        "shadow" => spec.shadow = parse_shadow(val),
         _ => {} // 未知属性忽略
     }
+}
+
+/// 解析渐变："色A,色B[,h|v]"（默认竖直）。
+fn parse_gradient(v: &str) -> Option<Gradient> {
+    let parts: Vec<&str> = v.split(',').map(|s| s.trim()).collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let from = parse_color(parts[0])?;
+    let to = parse_color(parts[1])?;
+    let vertical = parts
+        .get(2)
+        .map(|d| !d.eq_ignore_ascii_case("h") && !d.eq_ignore_ascii_case("horizontal"))
+        .unwrap_or(true);
+    Some(Gradient { from, to, vertical })
+}
+
+/// 解析投影："dx dy #color"。
+fn parse_shadow(v: &str) -> Option<Shadow> {
+    let p: Vec<&str> = v.split_whitespace().collect();
+    if p.len() < 3 {
+        return None;
+    }
+    let dx = p[0].parse().ok()?;
+    let dy = p[1].parse().ok()?;
+    let color = parse_color(p[2])?;
+    Some(Shadow { dx, dy, color })
 }
 
 /// 解析渲染方式：stretch/center/tile/ninepatch(l,t,r,b)。
@@ -862,6 +892,21 @@ mod tests {
         assert_eq!(b.selected_index, 2);
         assert!(b.selected);
         assert_eq!(b.children.len(), 0, "item 不作为子节点");
+    }
+
+    #[test]
+    fn xml_渐变阴影透明度() {
+        let ctx = Context::new();
+        let xml = r##"<Box normal-bggradient="#FF0000,#0000FF" normal-shadow="0 2 #80000000" normal-opacity="0.5"/>"##;
+        let res = load_str(xml, &ctx).unwrap();
+        let s = res.root.base().resolved_style();
+        assert_eq!(s.opacity, Some(0.5));
+        let g = s.gradient.unwrap();
+        assert_eq!(g.from, Color::from_u8(255, 0, 0, 255));
+        assert_eq!(g.to, Color::from_u8(0, 0, 255, 255));
+        assert!(g.vertical);
+        let sh = s.shadow.unwrap();
+        assert_eq!((sh.dx, sh.dy), (0.0, 2.0));
     }
 
     #[test]

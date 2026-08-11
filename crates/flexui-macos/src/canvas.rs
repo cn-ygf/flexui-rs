@@ -13,7 +13,7 @@ use objc2::AllocAnyThread;
 use objc2_app_kit::{
     NSBezierPath, NSBitmapImageRep, NSColor, NSCompositingOperation, NSDeviceRGBColorSpace, NSFont,
     NSFontAttributeName, NSFontManager, NSFontTraitMask, NSForegroundColorAttributeName,
-    NSGraphicsContext, NSImage, NSStringDrawing, NSUnderlineStyleAttributeName,
+    NSGradient, NSGraphicsContext, NSImage, NSStringDrawing, NSUnderlineStyleAttributeName,
 };
 use objc2_foundation::{
     MainThreadMarker, NSData, NSDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString,
@@ -257,6 +257,30 @@ impl Canvas for CgCanvas {
         let path = round_rect_path(rect, radius);
         to_nscolor(color).set();
         path.fill();
+    }
+
+    fn fill_gradient_rect(
+        &mut self,
+        rect: Rect,
+        radius: Corners,
+        from: Color,
+        to: Color,
+        vertical: bool,
+    ) {
+        let path = round_rect_path(rect, radius);
+        let grad = NSGradient::initWithStartingColor_endingColor(
+            NSGradient::alloc(),
+            &to_nscolor(from),
+            &to_nscolor(to),
+        );
+        if let Some(grad) = grad {
+            // 视图为 flipped（y 向下）：竖直=90°（from 在上→to 在下），水平=0°（左→右）。
+            let angle = if vertical { 90.0 } else { 0.0 };
+            grad.drawInBezierPath_angle(&path, angle);
+        } else {
+            to_nscolor(from).set();
+            path.fill();
+        }
     }
 
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {

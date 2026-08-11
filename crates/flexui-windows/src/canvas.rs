@@ -306,6 +306,43 @@ impl Canvas for GdiCanvas {
         }
     }
 
+    fn fill_gradient_rect(
+        &mut self,
+        rect: Rect,
+        radius: Corners,
+        from: Color,
+        to: Color,
+        vertical: bool,
+    ) {
+        unsafe {
+            let path = self.build_round_path(rect, radius);
+            let (p1, p2) = if vertical {
+                (
+                    gp::PointF { X: rect.left(), Y: rect.top() },
+                    gp::PointF { X: rect.left(), Y: rect.bottom() },
+                )
+            } else {
+                (
+                    gp::PointF { X: rect.left(), Y: rect.top() },
+                    gp::PointF { X: rect.right(), Y: rect.top() },
+                )
+            };
+            let mut brush: *mut gp::GpLineGradient = std::ptr::null_mut();
+            let st = gp::GdipCreateLineBrush(&p1, &p2, argb(from), argb(to), 0, &mut brush);
+            if st == 0 && !brush.is_null() {
+                gp::GdipFillPath(self.g, brush as *mut gp::GpBrush, path);
+                gp::GdipDeleteBrush(brush as *mut gp::GpBrush);
+            } else {
+                // 回退纯色。
+                let mut solid: *mut gp::GpSolidFill = std::ptr::null_mut();
+                gp::GdipCreateSolidFill(argb(from), &mut solid);
+                gp::GdipFillPath(self.g, solid as *mut gp::GpBrush, path);
+                gp::GdipDeleteBrush(solid as *mut gp::GpBrush);
+            }
+            gp::GdipDeletePath(path);
+        }
+    }
+
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
         unsafe {
             let path = self.build_round_path(rect, radius);
