@@ -9,10 +9,12 @@
 
 mod button;
 mod checkbox;
+mod combobox;
 mod edit;
 mod hbox;
 mod image;
 mod label;
+mod menu;
 mod panel;
 mod progress;
 mod radio;
@@ -24,10 +26,12 @@ mod vbox;
 
 pub use button::Button;
 pub use checkbox::CheckBox;
+pub use combobox::ComboBox;
 pub use edit::Edit;
 pub use hbox::HBox;
 pub use image::Image;
 pub use label::Label;
+pub use menu::{build_menu, build_menu_labels, MenuItem};
 pub use panel::Panel;
 pub use progress::Progress;
 pub use radio::Radio;

@@ -49,6 +49,10 @@ pub enum WidgetRole {
     Edit,
     /// 滑块（拖动改变 value）。
     Slider,
+    /// 下拉选择框（点击弹出选项菜单）。
+    ComboBox,
+    /// 菜单项（浮层菜单中的一行）。
+    MenuItem,
 }
 
 /// 节点类型：装箱的 trait 对象。
@@ -68,6 +72,8 @@ pub struct Base {
     pub sel_anchor: Option<usize>,
     /// 是否多行文本（Edit 用）：Enter 插入换行、按 \n 分行显示。
     pub multiline: bool,
+    /// 悬停提示文本（Tooltip）；None 表示无提示。
+    pub tooltip: Option<String>,
     /// IME 组合中的预览文本（marked text），显示在光标处，未提交。
     pub marked: String,
     pub font: Font,
@@ -137,6 +143,7 @@ impl Base {
             cursor: 0,
             sel_anchor: None,
             multiline: false,
+            tooltip: None,
             marked: String::new(),
             font: Font::default(),
             style: StyleSet::new(),
@@ -145,7 +152,14 @@ impl Base {
             pressed: false,
             focused: false,
             caret_on: true,
-            focusable: matches!(role, WidgetRole::Button | WidgetRole::Radio | WidgetRole::CheckBox | WidgetRole::Edit),
+            focusable: matches!(
+                role,
+                WidgetRole::Button
+                    | WidgetRole::Radio
+                    | WidgetRole::CheckBox
+                    | WidgetRole::Edit
+                    | WidgetRole::ComboBox
+            ),
             visible: true,
             hit: HitPolicy::Solid,
             selected: false,
@@ -245,6 +259,14 @@ pub trait Widget {
     }
     /// 全选文本。
     fn select_all(&mut self) {}
+
+    // —— 下拉/菜单钩子（供分发器打开选项菜单，ComboBox 覆写）——
+    /// 该控件点击时要弹出的菜单项文本；返回 None 表示不弹菜单。
+    fn menu_items(&self) -> Option<Vec<String>> {
+        None
+    }
+    /// 选中第 i 项（ComboBox：设 selected_index 并回填文本）。
+    fn set_selected_item(&mut self, _i: usize) {}
 }
 
 // —— 能力 trait：以 trait 约束表达「类型层级/继承视图」（组合优于继承的 Rust 表达）——
