@@ -70,7 +70,7 @@
         <Image src="button/default_banner@2.00x.png" width="452" height="136"/>
         <VBox flex="1" spacing="16">
           <HBox height="60" spacing="16">
-            <Button text="会员充值" width="218" height="60" normal-bgimage="button/membership_recharge.svg"
+            <Button width="218" height="60" normal-bgimage="button/membership_recharge.svg"
                     normal-bgfit="stretch" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
             <Button text="我的游戏  (1)" width="218" height="60" normal-bgcolor="#30386F"
                     hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
