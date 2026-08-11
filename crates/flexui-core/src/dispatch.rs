@@ -442,10 +442,17 @@ impl Dispatcher {
             } => {
                 let hit = hit_test(root, *pos);
                 self.press(root, hit);
-                // 命中指针型控件（Edit/Slider）：转发按下，让其按坐标定位光标/取值。
+                // 命中指针型控件（Edit/Slider/ListView）：转发按下，让其按坐标定位/选中。
                 if let Some(id) = self.pressed {
-                    if is_pointer_target(role_of(root, id)) {
+                    let role = role_of(root, id);
+                    if is_pointer_target(role) {
                         self.forward_to_widget(root, id, ev);
+                        // 列表点击即选择：按 name 上报，供窗口层 on_activate 处理。
+                        if role == Some(WidgetRole::ListView) {
+                            if let Some(name) = name_of(root, id) {
+                                self.activated.push(name);
+                            }
+                        }
                     }
                 }
             }
@@ -809,9 +816,12 @@ fn name_of(node: &dyn Widget, id: WidgetId) -> Option<String> {
     None
 }
 
-/// 该角色是否接收指针（按下/拖动）事件转发：文本框与滑块。
+/// 该角色是否接收指针（按下/拖动）事件转发：文本框、滑块、列表。
 fn is_pointer_target(role: Option<WidgetRole>) -> bool {
-    matches!(role, Some(WidgetRole::Edit) | Some(WidgetRole::Slider))
+    matches!(
+        role,
+        Some(WidgetRole::Edit) | Some(WidgetRole::Slider) | Some(WidgetRole::ListView)
+    )
 }
 
 /// 按 id 找控件的角色（用于判断是否文本控件）。
@@ -870,7 +880,7 @@ mod tests {
     use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
     use crate::widgets::{
-        Button, ComboBox, Edit, Label, Panel, Radio, ScrollView, Slider, TabBox, VBox,
+        Button, ComboBox, Edit, Label, ListView, Panel, Radio, ScrollView, Slider, TabBox, VBox,
     };
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
@@ -1087,6 +1097,19 @@ mod tests {
         disp.handle(&mut root, &Event::MouseUp { pos: c, button: MouseButton::Left });
         assert!(!disp.has_overlays());
         assert_eq!(disp.take_activations(), vec!["paste".to_string()]);
+    }
+
+    #[test]
+    fn listview_点击选中并上报激活() {
+        let mut root = VBox::new().push(ListView::new().name("lv").items(["a", "b", "c"]).row_height(20.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 点击第 2 行（y≈50 → row 2，列表在 (0,0,200,200)）。
+        disp.handle(&mut root, &Event::MouseDown { pos: Point::new(20.0, 50.0), button: MouseButton::Left });
+        assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
+        assert_eq!(root.base().children[0].base().selected_index, 2);
+        assert!(root.base().children[0].base().selected);
     }
 
     #[test]

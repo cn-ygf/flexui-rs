@@ -30,7 +30,7 @@ pub use window::{
 };
 pub use widgets::{
     build_menu, build_menu_labels, build_tooltip, Button, CheckBox, ComboBox, Edit, HBox, Image,
-    Label, MenuItem, Panel, Progress, Radio, ScrollView, Separator, Slider, TabBox, VBox,
+    Label, ListView, MenuItem, Panel, Progress, Radio, ScrollView, Separator, Slider, TabBox, VBox,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。

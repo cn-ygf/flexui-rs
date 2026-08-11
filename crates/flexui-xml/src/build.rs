@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use flexui_core::{
     Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, HBox, HitPolicy,
-    Image, ImageFit, ImageSource, Insets, Justify, Label, Node, Panel, Progress, Radio, Separator,
-    Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign, TitlebarMode, VBox, VisualState,
-    WidgetId, WindowConfig,
+    Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel, Progress, Radio,
+    Separator, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign, TitlebarMode, VBox,
+    VisualState, WidgetId, WindowConfig,
 };
 use flexui_resource::ResourceManager;
 
@@ -247,8 +247,8 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
         }
     }
 
-    // ComboBox 的 <item> 子元素已在 make_node 收进选项，不作为控件子节点。
-    if tag == "combobox" || tag == "select" {
+    // ComboBox/ListView 的 <item> 子元素已在 make_node 收进数据，不作为控件子节点。
+    if matches!(tag.as_str(), "combobox" | "select" | "listview" | "list") {
         return Ok(Some(node));
     }
 
@@ -322,6 +322,27 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
             }
             Box::new(cb)
         }
+        "listview" | "list" => {
+            let mut items: Vec<String> = Vec::new();
+            if let Some(o) = el.attr("items") {
+                items.extend(o.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+            }
+            for c in &el.children {
+                if c.tag.eq_ignore_ascii_case("item") {
+                    if let Some(t) = c.attr("text").or_else(|| c.attr("label")) {
+                        items.push(t.to_string());
+                    }
+                }
+            }
+            let mut lv = ListView::new().items(items);
+            if let Some(h) = el.attr("row-height").and_then(|s| s.parse::<f32>().ok()) {
+                lv = lv.row_height(h);
+            }
+            if let Some(i) = el.attr("selected").and_then(|s| s.parse::<usize>().ok()) {
+                lv = lv.selected(i);
+            }
+            Box::new(lv)
+        }
         "separator" | "hr" => {
             let vertical = el
                 .attr("orientation")
@@ -346,8 +367,10 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
     for (k, v) in attrs {
         let key = k.to_lowercase();
         match key.as_str() {
-            // 已在别处处理的属性（Separator orientation/thickness、Image src、ComboBox options/item）。
-            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" => {}
+            // 已在别处处理的属性（Separator orientation/thickness、Image src、
+            // ComboBox options、ListView items/row-height）。
+            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
+            | "row-height" => {}
             "name" => base.name = Some(v.clone()),
             "tooltip" => base.tooltip = Some(v.clone()),
             "value" => base.value = v.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
@@ -398,7 +421,7 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "tab-index" | "tabindex" => base.tab_index = v.parse().ok(),
             "checked" => base.selected = parse_bool(v),
             "selected" => {
-                if tag == "tabbox" || tag == "combobox" || tag == "select" {
+                if matches!(tag, "tabbox" | "combobox" | "select" | "listview" | "list") {
                     base.selected_index = v.parse().unwrap_or(0);
                 } else {
                     base.selected = parse_bool(v);
@@ -829,6 +852,16 @@ mod tests {
         let res2 = load_str(r##"<select><item text="X"/><item label="Y"/></select>"##, &ctx).unwrap();
         assert_eq!(res2.root.base().text, "X");
         assert_eq!(res2.root.base().children.len(), 0);
+    }
+
+    #[test]
+    fn xml_listview_项与选中() {
+        let ctx = Context::new();
+        let res = load_str(r##"<listview items="一,二,三" selected="2" row-height="24"/>"##, &ctx).unwrap();
+        let b = res.root.base();
+        assert_eq!(b.selected_index, 2);
+        assert!(b.selected);
+        assert_eq!(b.children.len(), 0, "item 不作为子节点");
     }
 
     #[test]

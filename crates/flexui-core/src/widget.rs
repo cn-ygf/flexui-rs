@@ -53,6 +53,8 @@ pub enum WidgetRole {
     ComboBox,
     /// 菜单项（浮层菜单中的一行）。
     MenuItem,
+    /// 列表视图（可滚动，点击选中行）。
+    ListView,
 }
 
 /// 节点类型：装箱的 trait 对象。

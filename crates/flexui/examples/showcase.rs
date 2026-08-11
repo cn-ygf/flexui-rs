@@ -63,6 +63,11 @@ impl WindowImpl for MainWindow {
                 let cur = ctx.with("theme", |w| w.base().text.clone()).unwrap_or_default();
                 ctx.set_text("status", format!("状态：主题切换为『{cur}』"));
             }
+            // ListView 选中行：读取选中索引。
+            "cities" => {
+                let idx = ctx.with("cities", |w| w.base().selected_index).unwrap_or(0);
+                ctx.set_text("status", format!("状态：选中城市 #{idx}"));
+            }
             // 右键菜单项。
             "ctxRefresh" => ctx.set_text("status", "状态：右键菜单 → 刷新"),
             "ctxAbout" => ctx.set_text("status", "状态：右键菜单 → 关于 flexui-rs"),
