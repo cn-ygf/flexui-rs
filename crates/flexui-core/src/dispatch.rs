@@ -3,10 +3,13 @@
 //! 维护 hover/pressed/focus 状态，做命中测试（含穿透），把鼠标交互翻译为
 //! 控件状态变化与点击回调；处理 Radio 分组互斥，并按 tabbar 绑定驱动 TabBox 翻页。
 
-use flexui_geometry::{Point, Rect};
+use flexui_geometry::{Point, Rect, Size};
+use flexui_gfx::Canvas;
 
 use crate::event::{Event, EventFlow, MouseButton};
-use crate::widget::{find_by_name, HitPolicy, Widget, WidgetId, WidgetRole};
+use crate::layout::layout_node;
+use crate::paint::paint_tree;
+use crate::widget::{find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
 
 /// 点击回调类型别名。
 pub type ClickHandler = Box<dyn FnMut(&mut EventCtx)>;
@@ -59,6 +62,24 @@ pub struct TabBinding {
     pub tabbox: WidgetId,
 }
 
+/// 模态浮层（下拉/菜单）：画在最上层、事件独占；选中/点外部/ESC 关闭。
+pub struct Overlay {
+    /// 浮层内容根（通常是一列 MenuItem 的 VBox）。
+    pub root: Node,
+    /// 锚点矩形（下拉=触发控件 rect；右键=点位 0 尺寸 rect）。
+    pub anchor: Rect,
+    /// 归属控件：Some=下拉框（选中回填 owner）；None=右键菜单（按项 name 上报）。
+    pub owner: Option<WidgetId>,
+    /// 点击浮层外部是否关闭（菜单恒为 true）。
+    pub dismiss_outside: bool,
+}
+
+/// 被动浮层（Tooltip）：只绘制、从不参与事件；由 hover + 定时器控制显隐。
+pub struct Tooltip {
+    pub root: Node,
+    pub anchor: Rect,
+}
+
 /// 事件分发器。
 pub struct Dispatcher {
     hover: Option<WidgetId>,
@@ -74,6 +95,14 @@ pub struct Dispatcher {
     double_clicked: Vec<String>,
     /// 本轮右键的具名控件 + 位置（供上下文菜单）。
     context_clicked: Vec<(String, Point)>,
+    /// 模态浮层栈（下拉/菜单）；顶部为当前活动浮层。
+    overlays: Vec<Overlay>,
+    /// 浮层内的悬停项（与主树 hover 分离，避免打开菜单清掉主树状态）。
+    overlay_hover: Option<WidgetId>,
+    /// 浮层内的按下项（与主树 pressed 分离）。
+    overlay_pressed: Option<WidgetId>,
+    /// 被动 Tooltip 浮层（None=不显示）。
+    tooltip: Option<Tooltip>,
 }
 
 impl Dispatcher {
@@ -88,6 +117,51 @@ impl Dispatcher {
             activated: Vec::new(),
             double_clicked: Vec::new(),
             context_clicked: Vec::new(),
+            overlays: Vec::new(),
+            overlay_hover: None,
+            overlay_pressed: None,
+            tooltip: None,
+        }
+    }
+
+    /// 是否有活动模态浮层。
+    pub fn has_overlays(&self) -> bool {
+        !self.overlays.is_empty()
+    }
+
+    /// 测试辅助：栈顶浮层第 i 个菜单项的中心点（需先 paint_overlays 布局）。
+    #[cfg(test)]
+    fn top_overlay_item_center(&self, i: usize) -> Option<Point> {
+        let ov = self.overlays.last()?;
+        let item = ov.root.base().children.get(i)?;
+        let r = item.base().rect;
+        Some(Point::new(r.left() + r.size.width / 2.0, r.top() + r.size.height / 2.0))
+    }
+
+    /// 测试辅助：栈顶浮层归属 id。
+    #[cfg(test)]
+    fn top_overlay_owner(&self) -> Option<WidgetId> {
+        self.overlays.last().and_then(|o| o.owner)
+    }
+
+    /// 绘制所有浮层（模态菜单 + 被动 Tooltip）到最上层（不受主树裁剪）。
+    /// 后端在 `paint_tree(root)` 之后调用；`window` 为窗口逻辑尺寸。
+    pub fn paint_overlays(&mut self, cv: &mut dyn Canvas, window: Size) {
+        for i in 0..self.overlays.len() {
+            let anchor = self.overlays[i].anchor;
+            let min_w = anchor.size.width; // 菜单至少与锚点同宽
+            let node = self.overlays[i].root.as_mut();
+            let desired = node.measure(window, &*cv);
+            let rect = place_overlay(anchor, desired, window, min_w);
+            layout_node(node, rect, &*cv);
+            paint_tree(&*node, cv);
+        }
+        if let Some(tip) = &mut self.tooltip {
+            let node = tip.root.as_mut();
+            let desired = node.measure(window, &*cv);
+            let rect = place_overlay(tip.anchor, desired, window, 0.0);
+            layout_node(node, rect, &*cv);
+            paint_tree(&*node, cv);
         }
     }
 
@@ -146,6 +220,122 @@ impl Dispatcher {
     /// 当前焦点控件 id。
     pub fn focus(&self) -> Option<WidgetId> {
         self.focus
+    }
+
+    /// 关闭所有模态浮层（并清理浮层内交互态）。
+    fn close_overlays(&mut self) {
+        self.overlays.clear();
+        self.overlay_hover = None;
+        self.overlay_pressed = None;
+        self.needs_redraw = true;
+    }
+
+    /// 有浮层时的事件路由：仅作用于栈顶浮层，不触及主树状态。
+    fn handle_with_overlay(&mut self, main_root: &mut dyn Widget, ev: &Event) {
+        // 取出栈顶浮层到局部，规避 self 与浮层 root 的自借用冲突。
+        let mut ov = match self.overlays.pop() {
+            Some(o) => o,
+            None => return,
+        };
+        let mut keep = true;
+        match ev {
+            Event::MouseMove { pos } => {
+                let hit = hit_test(ov.root.as_ref(), *pos);
+                self.overlay_hover(ov.root.as_mut(), hit);
+            }
+            Event::MouseDown { pos, button: MouseButton::Left } => {
+                match hit_test(ov.root.as_ref(), *pos) {
+                    Some(id) => self.overlay_press(ov.root.as_mut(), Some(id)),
+                    None if ov.dismiss_outside => keep = false,
+                    None => {}
+                }
+            }
+            Event::MouseUp { pos, button: MouseButton::Left } => {
+                let hit = hit_test(ov.root.as_ref(), *pos);
+                if self.overlay_release(ov.root.as_mut(), main_root, ov.owner, hit) {
+                    keep = false; // 选中即关闭
+                }
+            }
+            Event::KeyDown { key, .. } if *key == crate::event::keys::ESCAPE => {
+                keep = false;
+            }
+            _ => {}
+        }
+        if keep {
+            self.overlays.push(ov);
+        } else {
+            // ov 已出栈丢弃；清其余浮层与交互态。
+            self.close_overlays();
+        }
+    }
+
+    /// 浮层内 hover（只动浮层树的 hover 标记，主树不受影响）。
+    fn overlay_hover(&mut self, ov_root: &mut dyn Widget, hit: Option<WidgetId>) {
+        if self.overlay_hover == hit {
+            return;
+        }
+        self.overlay_hover = hit;
+        for_each_mut(ov_root, &mut |w| {
+            let b = w.base_mut();
+            b.hover = Some(b.id) == hit && b.enabled;
+        });
+        self.needs_redraw = true;
+    }
+
+    /// 浮层内按下（记录 overlay_pressed）。
+    fn overlay_press(&mut self, ov_root: &mut dyn Widget, hit: Option<WidgetId>) {
+        self.overlay_pressed = hit;
+        for_each_mut(ov_root, &mut |w| {
+            let b = w.base_mut();
+            b.pressed = Some(b.id) == hit && b.enabled;
+        });
+        self.needs_redraw = true;
+    }
+
+    /// 浮层内抬起：若按下/抬起同为某 MenuItem，则应用选择并返回 true（应关闭）。
+    fn overlay_release(
+        &mut self,
+        ov_root: &mut dyn Widget,
+        main_root: &mut dyn Widget,
+        owner: Option<WidgetId>,
+        hit: Option<WidgetId>,
+    ) -> bool {
+        let pressed = self.overlay_pressed.take();
+        for_each_mut(ov_root, &mut |w| w.base_mut().pressed = false);
+        let Some(pid) = pressed else { return false };
+        if Some(pid) != hit {
+            return false;
+        }
+        // 取该 MenuItem 的行号与 name。
+        let mut idx: Option<usize> = None;
+        let mut item_name: Option<String> = None;
+        visit_mut(ov_root, pid, &mut |w| {
+            if w.base().role == WidgetRole::MenuItem {
+                idx = Some(w.base().selected_index);
+                item_name = w.base().name.clone();
+            }
+        });
+        let Some(idx) = idx else { return false };
+        match owner {
+            // 下拉框：在主树回填 owner 并按 owner 名上报激活。
+            Some(oid) => {
+                let mut owner_name = None;
+                visit_mut(main_root, oid, &mut |w| {
+                    w.set_selected_item(idx);
+                    owner_name = w.base().name.clone();
+                });
+                if let Some(n) = owner_name {
+                    self.activated.push(n);
+                }
+            }
+            // 右键菜单：按项自身 name 上报激活。
+            None => {
+                if let Some(n) = item_name {
+                    self.activated.push(n);
+                }
+            }
+        }
+        true
     }
 
     /// 复制焦点控件的选中文本（无选区返回 None）。供后端写系统剪贴板。
@@ -211,6 +401,11 @@ impl Dispatcher {
 
     /// 分发一个事件到控件树。
     pub fn handle(&mut self, root: &mut dyn Widget, ev: &Event) {
+        // 有模态浮层时事件独占给浮层（主树不收事件）。
+        if !self.overlays.is_empty() {
+            self.handle_with_overlay(root, ev);
+            return;
+        }
         match ev {
             Event::MouseMove { pos } => {
                 let hit = hit_test(root, *pos);
@@ -405,6 +600,8 @@ impl Dispatcher {
         let mut info: Option<(WidgetRole, Option<u32>, Option<usize>)> = None;
         let mut enabled = false;
         let mut activated_name: Option<String> = None;
+        let mut menu: Option<Vec<String>> = None;
+        let mut anchor = Rect::default();
         visit_mut(root, id, &mut |w| {
             let b = w.base_mut();
             if !b.enabled {
@@ -418,8 +615,23 @@ impl Dispatcher {
             }
             info = Some((b.role, b.group, b.tab_index));
             activated_name = b.name.clone();
+            anchor = b.rect;
+            menu = w.menu_items();
         });
         if !enabled {
+            return;
+        }
+        // 打开下拉的控件（ComboBox）：本次点击只负责弹出菜单，不上报激活
+        //（激活留给选中项，避免 on_activate 在打开与选中各触发一次）。
+        if let Some(items) = menu {
+            let dropdown = crate::widgets::build_menu_labels(&items, Some(id));
+            self.overlays.push(Overlay {
+                root: dropdown,
+                anchor,
+                owner: Some(id),
+                dismiss_outside: true,
+            });
+            self.needs_redraw = true;
             return;
         }
         // 记录具名激活控件，供窗口层 on_activate 统一通知。
@@ -490,6 +702,33 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
         HitPolicy::Solid => Some(b.id),
         HitPolicy::Transparent => None,
     }
+}
+
+/// 计算浮层摆放矩形：优先锚点下方、放不下则上翻；X 夹到窗内；至少 min_width 宽。
+fn place_overlay(anchor: Rect, desired: Size, window: Size, min_width: f32) -> Rect {
+    let w = desired.width.max(min_width).min(window.width);
+    let h = desired.height.min(window.height);
+    // X：锚点左对齐，超出右边则左移，再夹到 0。
+    let mut x = anchor.left();
+    if x + w > window.width {
+        x = window.width - w;
+    }
+    if x < 0.0 {
+        x = 0.0;
+    }
+    // Y：优先锚点下方；放不下则上翻到上方；再放不下贴底。
+    let below = anchor.bottom();
+    let y = if below + h <= window.height {
+        below
+    } else {
+        let above = anchor.top() - h;
+        if above >= 0.0 {
+            above
+        } else {
+            (window.height - h).max(0.0)
+        }
+    };
+    Rect::new(x, y, w, h)
 }
 
 /// 两矩形的包围并集。
@@ -574,7 +813,9 @@ mod tests {
     use super::*;
     use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
-    use crate::widgets::{Button, Edit, Label, Panel, Radio, ScrollView, Slider, TabBox, VBox};
+    use crate::widgets::{
+        Button, ComboBox, Edit, Label, Panel, Radio, ScrollView, Slider, TabBox, VBox,
+    };
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
@@ -704,6 +945,72 @@ mod tests {
         // 越界夹取
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(200.0, 10.0) });
         assert_eq!(root.base().value, 1.0);
+    }
+
+    #[test]
+    fn place_overlay_下方上翻夹取() {
+        let win = Size::new(200.0, 100.0);
+        // 下方够放：y=锚点底部；宽取 max(desired,min)。
+        let r = place_overlay(Rect::new(10.0, 10.0, 50.0, 20.0), Size::new(40.0, 30.0), win, 50.0);
+        assert_eq!(r.top(), 30.0);
+        assert_eq!(r.size.width, 50.0);
+        // 下方放不下 → 上翻到锚点上方。
+        let r2 = place_overlay(Rect::new(10.0, 80.0, 50.0, 15.0), Size::new(40.0, 30.0), win, 0.0);
+        assert_eq!(r2.top(), 50.0);
+        // 锚点靠右 → X 夹到窗内。
+        let r3 = place_overlay(Rect::new(180.0, 10.0, 10.0, 10.0), Size::new(40.0, 10.0), win, 0.0);
+        assert_eq!(r3.left(), 160.0);
+    }
+
+    #[test]
+    fn combobox_点击弹下拉_选中回填并上报() {
+        let mut root =
+            VBox::new().push(ComboBox::new().name("cb").options(["A", "B", "C"]).size(120.0, 30.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
+        let mut disp = Dispatcher::new();
+        let cb_rect = root.base().children[0].base().rect;
+        // 点击 ComboBox → 打开下拉。
+        click_at(&mut disp, &mut root, Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0));
+        assert!(disp.has_overlays());
+        assert_eq!(disp.top_overlay_owner(), Some(root.base().children[0].base().id));
+        let _ = disp.take_activations(); // 忽略点击 combo 本身的激活
+        // 布局浮层后点击第 2 项 "B"。
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+        let c = disp.top_overlay_item_center(1).unwrap();
+        disp.handle(&mut root, &Event::MouseDown { pos: c, button: MouseButton::Left });
+        disp.handle(&mut root, &Event::MouseUp { pos: c, button: MouseButton::Left });
+        assert!(!disp.has_overlays(), "选中后关闭");
+        assert_eq!(disp.take_activations(), vec!["cb".to_string()]);
+        assert_eq!(root.base().children[0].base().text, "B");
+    }
+
+    #[test]
+    fn 浮层_点外部与esc关闭且不动主树焦点() {
+        // 先让一个 Edit 获焦，再打开下拉，验证关闭浮层不清 Edit 焦点。
+        let mut root = VBox::new()
+            .push(Edit::new().name("e").size(120.0, 30.0))
+            .push(ComboBox::new().name("cb").options(["A", "B"]).size(120.0, 30.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 聚焦 Edit。
+        click_at(&mut disp, &mut root, Point::new(10.0, 15.0));
+        let edit_focus = disp.focus();
+        assert!(edit_focus.is_some());
+        // 打开下拉（点 combo，位于第二行 y≈45）。
+        let cb_rect = root.base().children[1].base().rect;
+        click_at(&mut disp, &mut root, Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0));
+        assert!(disp.has_overlays());
+        // 点浮层外部 → 关闭；主树焦点不变。
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+        disp.handle(&mut root, &Event::MouseDown { pos: Point::new(280.0, 280.0), button: MouseButton::Left });
+        assert!(!disp.has_overlays(), "点外部关闭");
+        // 再开一次，用 ESC 关。
+        click_at(&mut disp, &mut root, Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0));
+        assert!(disp.has_overlays());
+        disp.handle(&mut root, &kd(crate::event::keys::ESCAPE));
+        assert!(!disp.has_overlays(), "ESC 关闭");
     }
 
     #[test]

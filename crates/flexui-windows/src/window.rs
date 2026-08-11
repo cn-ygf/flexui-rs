@@ -691,6 +691,7 @@ unsafe fn paint_window(hwnd: HWND, hdc: HDC, state: &mut AppState) {
     let lh = h as f32 / scale;
     layout_node(state.root.as_mut(), Rect::new(0.0, 0.0, lw, lh), &cv);
     paint_tree(state.root.as_ref(), &mut cv);
+    state.disp.paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
 
     // 整块 blit 到窗口（1:1 物理像素）。
     let mut gw: *mut gp::GpGraphics = null_mut();

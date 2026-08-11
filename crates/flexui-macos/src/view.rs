@@ -82,11 +82,12 @@ define_class!(
             let b = self.bounds();
             let size = Size::new(b.size.width as f32, b.size.height as f32);
             let mut st = self.ivars().state.borrow_mut();
-            let AppState { root, .. } = &mut *st;
+            let AppState { root, disp, .. } = &mut *st;
             let cv_measure = CgCanvas::new();
             layout_node(root.as_mut(), Rect::new(0.0, 0.0, size.width, size.height), &cv_measure);
             let mut cv = CgCanvas::new();
             paint_tree(root.as_ref(), &mut cv);
+            disp.paint_overlays(&mut cv, size);
         }
 
         #[unsafe(method(mouseMoved:))]
