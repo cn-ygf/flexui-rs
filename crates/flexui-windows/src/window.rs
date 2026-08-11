@@ -24,6 +24,7 @@ use windows_sys::Win32::UI::Input::Ime::{
     COMPOSITIONFORM, CFS_POINT, GCS_COMPSTR, GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::GdiCanvas;
@@ -134,6 +135,9 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
             frameless,
         }));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+
+        // 接收文件拖放（→ WM_DROPFILES → on_drop_files）。
+        DragAcceptFiles(hwnd, 1);
 
         ShowWindow(hwnd, SW_SHOW);
 
@@ -369,6 +373,20 @@ unsafe fn clipboard_paste(hwnd: HWND, state: *mut AppState) {
     }
 }
 
+/// 文件拖放 → 窗口委托 on_drop_files。
+unsafe fn fire_drop(hwnd: HWND, state: *mut AppState, paths: Vec<String>) {
+    if state.is_null() {
+        return;
+    }
+    let st = &mut *state;
+    let mut handle = WinWindowHandle { hwnd };
+    let root = &mut st.root;
+    let delegate = &mut st.delegate;
+    let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+    delegate.on_drop_files(&paths, &mut ctx);
+    InvalidateRect(hwnd, null(), 0);
+}
+
 /// Ctrl+A：全选。
 unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
     if state.is_null() {
@@ -519,6 +537,26 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_IME_ENDCOMPOSITION => {
             clear_marked_on_focus(hwnd, state);
+            0
+        }
+        // 文件拖放：读所有路径 → on_drop_files。
+        WM_DROPFILES => {
+            let hdrop = wparam as HDROP;
+            let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, null_mut(), 0);
+            let mut paths: Vec<String> = Vec::with_capacity(count as usize);
+            for i in 0..count {
+                let len = DragQueryFileW(hdrop, i, null_mut(), 0);
+                if len == 0 {
+                    continue;
+                }
+                let mut buf = vec![0u16; len as usize + 1];
+                let n = DragQueryFileW(hdrop, i, buf.as_mut_ptr(), buf.len() as u32);
+                paths.push(String::from_utf16_lossy(&buf[..n as usize]));
+            }
+            DragFinish(hdrop);
+            if !paths.is_empty() {
+                fire_drop(hwnd, state, paths);
+            }
             0
         }
         WM_MOUSEWHEEL => {

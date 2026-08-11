@@ -49,6 +49,12 @@ impl WindowImpl for MainWindow {
         ctx.set_text("status", format!("状态：收到后台消息「{msg}」"));
     }
 
+    /// 文件拖入窗口。
+    fn on_drop_files(&mut self, paths: &[String], ctx: &mut WindowCtx) {
+        let first = paths.first().map(|s| s.as_str()).unwrap_or("");
+        ctx.set_text("status", format!("状态：拖入 {} 个文件，首个 {first}", paths.len()));
+    }
+
     /// 统一点击通知（≈ duilib Notify）：按控件 name 分派。
     fn on_click(&mut self, name: &str, ctx: &mut WindowCtx) {
         match name {

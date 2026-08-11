@@ -20,7 +20,7 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSWindow, NSWindowStyleMask,
     NSWindowTitleVisibility,
 };
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString, NSTimer};
+use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
 use flexui_core::{Dispatcher, Node, TitlebarMode, WindowConfig, WindowDelegate};
 
@@ -78,6 +78,8 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
     }
 
     let view = FlexView::new(mtm, root, disp, delegate);
+    // 注册文件拖放类型（接收拖入的文件路径 → on_drop_files）。
+    view.registerForDraggedTypes(&NSArray::from_slice(&[view::filenames_pboard_type()]));
     window.setContentView(Some(&view));
     window.makeFirstResponder(Some(&view));
     // 视图兼任窗口委托（处理 on_close）。

@@ -200,6 +200,8 @@ pub trait WindowDelegate {
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
     /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
+    /// 文件拖放到窗口（paths 为被拖入的文件/目录绝对路径）。
+    fn on_drop_files(&mut self, _paths: &[String], _ctx: &mut WindowCtx) {}
     /// 关闭请求；返回 false 可阻止关闭。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true

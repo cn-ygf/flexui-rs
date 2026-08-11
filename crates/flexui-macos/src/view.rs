@@ -7,10 +7,11 @@
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Sel};
+use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSCursor, NSEvent, NSEventModifierFlags, NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
+    NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventModifierFlags,
+    NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound,
@@ -306,7 +307,43 @@ define_class!(
             NSNotFound as NSUInteger
         }
     }
+
+    // 文件拖放目标：接受拖入的文件，读路径后回调 on_drop_files。
+    unsafe impl NSDraggingDestination for FlexView {
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, _sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            NSDragOperation::Copy
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            let pb = sender.draggingPasteboard();
+            let mut paths: Vec<String> = Vec::new();
+            // propertyListForType(NSFilenamesPboardType) 返回 NSArray<NSString>（路径列表）。
+            // 泛型 NSArray 不是 DowncastTarget，直接用 msg_send 读取 count/objectAtIndex。
+            let plist = pb.propertyListForType(filenames_pboard_type());
+            if let Some(obj) = plist {
+                let count: usize = unsafe { msg_send![&*obj, count] };
+                for i in 0..count {
+                    let s: Retained<NSString> = unsafe { msg_send![&*obj, objectAtIndex: i] };
+                    paths.push(s.to_string());
+                }
+            }
+            if paths.is_empty() {
+                false
+            } else {
+                self.fire_drop(paths);
+                true
+            }
+        }
+    }
 );
+
+/// 文件名拖放类型（NSFilenamesPboardType 已弃用但读路径最简单，集中一处加 allow）。
+#[allow(deprecated)]
+pub(crate) fn filenames_pboard_type() -> &'static objc2_app_kit::NSPasteboardType {
+    unsafe { objc2_app_kit::NSFilenamesPboardType }
+}
 
 /// 命中测试：光标下最上层控件是否为文本输入（Edit）。用于切换 I-beam 光标。
 fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
@@ -411,6 +448,20 @@ impl FlexView {
         }
         for a in anims {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        }
+        drop(st);
+        self.setNeedsDisplay(true);
+    }
+
+    /// 文件拖放 → 窗口委托 on_drop_files。
+    fn fire_drop(&self, paths: Vec<String>) {
+        let window = self.window();
+        let mut st = self.ivars().state.borrow_mut();
+        let AppState { root, delegate, .. } = &mut *st;
+        if let Some(win) = window {
+            let mut handle = MacWindowHandle { window: win };
+            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            delegate.on_drop_files(&paths, &mut ctx);
         }
         drop(st);
         self.setNeedsDisplay(true);
