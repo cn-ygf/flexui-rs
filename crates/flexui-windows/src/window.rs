@@ -17,7 +17,8 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
-    GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow, SetProcessDpiAwarenessContext,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::Ime::{
     ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT,
@@ -89,7 +90,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     };
 
     unsafe {
-        // 开启 Per-Monitor V2 DPI 感知（清单已声明；此调用作为兜底，二者一致）。
+        // 开启 Per-Monitor V2 DPI 感知（若宿主未嵌入清单，此调用作为运行期兜底）。
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
         let hinstance = GetModuleHandleW(null());
@@ -145,6 +146,20 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         style &= !(WS_THICKFRAME | WS_MAXIMIZEBOX);
     }
 
+    // `WindowConfig` 使用逻辑像素；Per-Monitor V2 下 CreateWindowExW 接收物理像素。
+    // 同时补偿系统标题栏/边框，确保首次布局的客户区仍等于配置尺寸。
+    let dpi = GetDpiForSystem().max(96);
+    let scale = dpi as f32 / 96.0;
+    let mut outer = RECT {
+        left: 0,
+        top: 0,
+        right: (config.width.max(1.0) * scale).round() as i32,
+        bottom: (config.height.max(1.0) * scale).round() as i32,
+    };
+    AdjustWindowRectExForDpi(&mut outer, style, 0, 0, dpi);
+    let outer_width = (outer.right - outer.left).max(1);
+    let outer_height = (outer.bottom - outer.top).max(1);
+
     let title = wide(&config.title);
     let hwnd = CreateWindowExW(
         0,
@@ -153,8 +168,8 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         style,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        config.width as i32,
-        config.height as i32,
+        outer_width,
+        outer_height,
         null_mut(),
         null_mut(),
         hinstance,
