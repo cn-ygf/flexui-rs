@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Align, Base, BaseState, Button, CheckBox, Color, Corners, Edit, HBox, HitPolicy, Image, ImageFit,
-    ImageSource, Insets, Justify, Label, Node, Panel, Progress, Radio, Separator, Sizing, Slider,
-    StyleSet, StyleSpec, TabBox, TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig,
+    Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, HBox, HitPolicy,
+    Image, ImageFit, ImageSource, Insets, Justify, Label, Node, Panel, Progress, Radio, Separator,
+    Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign, TitlebarMode, VBox, VisualState,
+    WidgetId, WindowConfig,
 };
 use flexui_resource::ResourceManager;
 
@@ -246,6 +247,11 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
         }
     }
 
+    // ComboBox 的 <item> 子元素已在 make_node 收进选项，不作为控件子节点。
+    if tag == "combobox" || tag == "select" {
+        return Ok(Some(node));
+    }
+
     // 递归子节点。
     for child in &el.children {
         if let Some(c) = build(child, env)? {
@@ -297,6 +303,25 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
         "image" => Box::new(Image::new(resolve_image(res, el.attr("src").unwrap_or("")))),
         "progress" => Box::new(Progress::new()),
         "slider" => Box::new(Slider::new()),
+        "combobox" | "select" => {
+            // 选项来自 options="a,b,c" 与/或 <item text="..."/> 子元素。
+            let mut opts: Vec<String> = Vec::new();
+            if let Some(o) = el.attr("options") {
+                opts.extend(o.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+            }
+            for c in &el.children {
+                if c.tag.eq_ignore_ascii_case("item") {
+                    if let Some(t) = c.attr("text").or_else(|| c.attr("label")) {
+                        opts.push(t.to_string());
+                    }
+                }
+            }
+            let mut cb = ComboBox::new().options(opts);
+            if let Some(i) = el.attr("selected").and_then(|s| s.parse::<usize>().ok()) {
+                cb = cb.selected(i);
+            }
+            Box::new(cb)
+        }
         "separator" | "hr" => {
             let vertical = el
                 .attr("orientation")
@@ -321,9 +346,10 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
     for (k, v) in attrs {
         let key = k.to_lowercase();
         match key.as_str() {
-            // 已在别处处理的属性（含 Separator 的 orientation/thickness、Image 的 src）。
-            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" => {}
+            // 已在别处处理的属性（Separator orientation/thickness、Image src、ComboBox options/item）。
+            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" => {}
             "name" => base.name = Some(v.clone()),
+            "tooltip" => base.tooltip = Some(v.clone()),
             "value" => base.value = v.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
             "font-size" | "fontsize" => {
                 if let Ok(s) = v.parse::<f32>() {
@@ -372,7 +398,7 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "tab-index" | "tabindex" => base.tab_index = v.parse().ok(),
             "checked" => base.selected = parse_bool(v),
             "selected" => {
-                if tag == "tabbox" {
+                if tag == "tabbox" || tag == "combobox" || tag == "select" {
                     base.selected_index = v.parse().unwrap_or(0);
                 } else {
                     base.selected = parse_bool(v);
@@ -787,6 +813,22 @@ mod tests {
         // 非法
         assert_eq!(parse_insets("a b"), None);
         assert_eq!(parse_insets(""), None);
+    }
+
+    #[test]
+    fn xml_combobox_选项与tooltip() {
+        let ctx = Context::new();
+        // options 属性 + selected 索引 + tooltip。
+        let res = load_str(r##"<combobox options="a,b,c" selected="1" tooltip="选一个"/>"##, &ctx).unwrap();
+        let b = res.root.base();
+        assert_eq!(b.text, "b");
+        assert_eq!(b.selected_index, 1);
+        assert_eq!(b.tooltip.as_deref(), Some("选一个"));
+        assert_eq!(b.children.len(), 0, "item 不作为子节点");
+        // <item> 子元素形式。
+        let res2 = load_str(r##"<select><item text="X"/><item label="Y"/></select>"##, &ctx).unwrap();
+        assert_eq!(res2.root.base().text, "X");
+        assert_eq!(res2.root.base().children.len(), 0);
     }
 
     #[test]

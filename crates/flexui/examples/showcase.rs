@@ -4,7 +4,7 @@
 //! 用法：定义 `MainWindow` 实现 `WindowImpl`（≈ 继承 WindowImplBase），重写 config/skin
 //! 与 on_click（≈ Notify）；`Window::new(MainWindow{..}).center().run()`（≈ Window）。
 
-use flexui::{DirProvider, ResourceManager, Skin, Window, WindowConfig, WindowCtx, WindowImpl};
+use flexui::{DirProvider, Rect, ResourceManager, Skin, Window, WindowConfig, WindowCtx, WindowImpl};
 
 /// 主窗口：持有自己的状态（点击计数、主按钮启用态），重写窗口钩子。
 struct MainWindow {
@@ -58,8 +58,27 @@ impl WindowImpl for MainWindow {
                 let on = ctx.is_selected("chkNews").unwrap_or(false);
                 ctx.set_text("status", format!("状态：订阅通知 = {}", if on { "✓" } else { "✗" }));
             }
+            // ComboBox 选中：读回填后的当前文本。
+            "theme" => {
+                let cur = ctx.with("theme", |w| w.base().text.clone()).unwrap_or_default();
+                ctx.set_text("status", format!("状态：主题切换为『{cur}』"));
+            }
+            // 右键菜单项。
+            "ctxRefresh" => ctx.set_text("status", "状态：右键菜单 → 刷新"),
+            "ctxAbout" => ctx.set_text("status", "状态：右键菜单 → 关于 flexui-rs"),
             _ => {}
         }
+    }
+
+    /// 右键任意具名控件 → 在点位弹出上下文菜单（选项经 on_click 上报）。
+    fn on_context(&mut self, _name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
+        ctx.open_menu(
+            Rect::new(x, y, 0.0, 0.0),
+            vec![
+                ("刷新".to_string(), "ctxRefresh".to_string()),
+                ("关于".to_string(), "ctxAbout".to_string()),
+            ],
+        );
     }
 }
 

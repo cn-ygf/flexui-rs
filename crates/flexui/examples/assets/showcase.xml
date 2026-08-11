@@ -23,7 +23,7 @@
 
   <!-- 按钮组：完整 4 状态样式 -->
   <HBox spacing="10" height="44">
-    <Button name="btnPrimary" text="主要按钮" width="120" height="40"
+    <Button name="btnPrimary" text="主要按钮" width="120" height="40" tooltip="这是主要操作按钮（悬停约 0.5s 显示）"
             normal-bgcolor="#3478F6" hot-bgcolor="#4A8CFF" pushed-bgcolor="#2A5FD0"
             disabled-bgcolor="#5A5F6B" normal-fgcolor="#FFFFFF" corner-radius="8"/>
     <Button name="btnGhost" text="次要按钮" width="120" height="40"
@@ -32,6 +32,15 @@
     <Button name="btnToggle" text="禁用/启用主要按钮" width="170" height="40"
             normal-bgcolor="#7A5AF0" hot-bgcolor="#8B6BFF" pushed-bgcolor="#5F45C8"
             normal-fgcolor="#FFFFFF" corner-radius="8"/>
+  </HBox>
+
+  <!-- 下拉框（ComboBox）：点击弹出选项菜单，选中回填 -->
+  <HBox spacing="12" height="34">
+    <Label text="主题：" width="50" height="26" normal-fgcolor="#E6EBF5"/>
+    <ComboBox name="theme" options="深色,浅色,跟随系统" selected="0" width="140" height="30"
+              normal-bgcolor="#20242C" normal-fgcolor="#E6EBF5"
+              border-width="1" normal-bordercolor="#4A5064" corner-radius="6"
+              tooltip="选择界面主题"/>
   </HBox>
 
   <!-- 复选框 -->
