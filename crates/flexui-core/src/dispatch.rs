@@ -3,6 +3,8 @@
 //! 维护 hover/pressed/focus 状态，做命中测试（含穿透），把鼠标交互翻译为
 //! 控件状态变化与点击回调；处理 Radio 分组互斥，并按 tabbar 绑定驱动 TabBox 翻页。
 
+use std::sync::{Arc, Mutex};
+
 use flexui_geometry::{Point, Rect, Size};
 use flexui_gfx::Canvas;
 
@@ -14,6 +16,24 @@ use crate::widget::{find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole}
 
 /// 点击回调类型别名。
 pub type ClickHandler = Box<dyn FnMut(&mut EventCtx)>;
+
+/// 后台线程 → 主线程投递句柄（Clone + Send + Sync）。
+///
+/// 工作线程持有其克隆，`send` 把字符串消息投递到主线程邮箱；主线程（帧定时回调）
+/// 取走并交窗口委托 `on_message`。
+#[derive(Clone)]
+pub struct MainProxy {
+    queue: Arc<Mutex<Vec<String>>>,
+}
+
+impl MainProxy {
+    /// 投递一条消息到主线程（跨线程安全）。
+    pub fn send(&self, msg: impl Into<String>) {
+        if let Ok(mut q) = self.queue.lock() {
+            q.push(msg.into());
+        }
+    }
+}
 
 /// 事件上下文：传给控件回调（on_click），可按 name 访问/修改整棵控件树。
 ///
@@ -108,6 +128,8 @@ pub struct Dispatcher {
     tip_ticks: u32,
     /// 进行中的补间动画。
     anims: Vec<Anim>,
+    /// 后台线程投递的消息邮箱（主线程帧回调取走）。
+    mailbox: Arc<Mutex<Vec<String>>>,
 }
 
 impl Dispatcher {
@@ -128,7 +150,18 @@ impl Dispatcher {
             tooltip: None,
             tip_ticks: 0,
             anims: Vec::new(),
+            mailbox: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// 取一个可跨线程投递消息的句柄（发给工作线程）。
+    pub fn proxy(&self) -> MainProxy {
+        MainProxy { queue: Arc::clone(&self.mailbox) }
+    }
+
+    /// 取走后台线程投递的所有消息（主线程调用）。
+    pub fn drain_messages(&self) -> Vec<String> {
+        self.mailbox.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
     }
 
     /// 是否有进行中的动画（后端据此决定是否驱动帧定时器）。
@@ -1182,6 +1215,19 @@ mod tests {
         assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
         assert_eq!(root.base().children[0].base().selected_index, 2);
         assert!(root.base().children[0].base().selected);
+    }
+
+    #[test]
+    fn 主线程邮箱_跨线程投递与取走() {
+        let disp = Dispatcher::new();
+        let p = disp.proxy();
+        p.send("a");
+        let p2 = p.clone();
+        std::thread::spawn(move || p2.send("b")).join().unwrap();
+        let mut msgs = disp.drain_messages();
+        msgs.sort();
+        assert_eq!(msgs, vec!["a".to_string(), "b".to_string()]);
+        assert!(disp.drain_messages().is_empty(), "取走后清空");
     }
 
     #[test]

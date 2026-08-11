@@ -15,7 +15,7 @@ pub mod widgets;
 pub mod window;
 
 // 常用类型再导出，方便上层与后端使用。
-pub use dispatch::{hit_test, Dispatcher, EventCtx};
+pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
 pub use anim::{AnimProp, Easing};
 pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};

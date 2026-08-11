@@ -94,6 +94,7 @@ pub struct WindowCtx<'a> {
     win: &'a mut dyn WindowHandle,
     overlay_requests: Vec<OverlayRequest>,
     anim_requests: Vec<AnimRequest>,
+    proxy: Option<crate::dispatch::MainProxy>,
 }
 
 impl<'a> WindowCtx<'a> {
@@ -103,7 +104,24 @@ impl<'a> WindowCtx<'a> {
             win,
             overlay_requests: Vec::new(),
             anim_requests: Vec::new(),
+            proxy: None,
         }
+    }
+
+    /// 带主线程投递句柄构造（后端在 on_init 等处提供，供 app 拿去发给工作线程）。
+    pub fn with_proxy(
+        root: &'a mut dyn Widget,
+        win: &'a mut dyn WindowHandle,
+        proxy: crate::dispatch::MainProxy,
+    ) -> Self {
+        let mut c = Self::new(root, win);
+        c.proxy = Some(proxy);
+        c
+    }
+
+    /// 取主线程投递句柄（在 on_init 里获取，clone 给工作线程后 `send`）。
+    pub fn main_proxy(&self) -> Option<crate::dispatch::MainProxy> {
+        self.proxy.clone()
     }
 
     /// 在 anchor 处弹出上下文菜单；items 为 (标签, name)。选中项经 on_activate 上报。
@@ -180,6 +198,8 @@ pub trait WindowDelegate {
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下（平台无关键码）。
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
+    /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
+    fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 关闭请求；返回 false 可阻止关闭。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true

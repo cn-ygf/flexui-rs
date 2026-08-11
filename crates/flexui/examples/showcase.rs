@@ -35,6 +35,18 @@ impl WindowImpl for MainWindow {
 
     fn on_init(&mut self, ctx: &mut WindowCtx) {
         ctx.set_text("status", "状态：就绪，试试点击 / 勾选 / 切页 / 打字");
+        // 后台线程演示：1.2s 后经 MainProxy 投递消息到主线程。
+        if let Some(proxy) = ctx.main_proxy() {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                proxy.send("后台任务完成 ✅");
+            });
+        }
+    }
+
+    /// 后台线程投递的消息（主线程处理）。
+    fn on_message(&mut self, msg: &str, ctx: &mut WindowCtx) {
+        ctx.set_text("status", format!("状态：收到后台消息「{msg}」"));
     }
 
     /// 统一点击通知（≈ duilib Notify）：按控件 name 分派。

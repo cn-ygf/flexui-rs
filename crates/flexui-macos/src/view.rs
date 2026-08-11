@@ -417,7 +417,7 @@ impl FlexView {
         let mut handle = MacWindowHandle { window: window.clone() };
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, disp, delegate } = &mut *st;
-        let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+        let mut ctx = WindowCtx::with_proxy(root.as_mut(), &mut handle, disp.proxy());
         delegate.on_init(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
@@ -431,13 +431,35 @@ impl FlexView {
         self.setNeedsDisplay(true);
     }
 
-    /// 帧定时回调：推进动画并按需重绘。
+    /// 帧定时回调：推进动画、派发后台线程消息，并按需重绘。
     fn fire_frame(&self) {
+        let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
-        let AppState { root, disp, .. } = &mut *st;
+        let AppState { root, disp, delegate } = &mut *st;
         let changed = disp.tick_anims(root.as_mut(), 0.016);
+        let msgs = disp.drain_messages();
+        let mut anim_reqs = Vec::new();
+        let mut ov_reqs = Vec::new();
+        if !msgs.is_empty() {
+            if let Some(win) = window {
+                let mut handle = MacWindowHandle { window: win };
+                let mut ctx = WindowCtx::with_proxy(root.as_mut(), &mut handle, disp.proxy());
+                for m in &msgs {
+                    delegate.on_message(m, &mut ctx);
+                }
+                anim_reqs = ctx.take_anim_requests();
+                ov_reqs = ctx.take_overlay_requests();
+            }
+        }
+        for r in ov_reqs {
+            disp.open_menu(r.anchor, r.items);
+        }
+        for a in anim_reqs {
+            disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        }
+        let redraw = changed || !msgs.is_empty();
         drop(st);
-        if changed {
+        if redraw {
             self.setNeedsDisplay(true);
         }
     }

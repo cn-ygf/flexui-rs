@@ -151,7 +151,7 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         {
             let st = &mut *state;
             let mut handle = WinWindowHandle { hwnd };
-            let mut ctx = WindowCtx::new(st.root.as_mut(), &mut handle);
+            let mut ctx = WindowCtx::with_proxy(st.root.as_mut(), &mut handle, st.disp.proxy());
             st.delegate.on_init(&mut ctx);
             let overlays = ctx.take_overlay_requests();
             let anims = ctx.take_anim_requests();
@@ -605,7 +605,26 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let st = &mut *state;
                 if wparam == 2 {
                     let changed = st.disp.tick_anims(st.root.as_mut(), 0.016);
-                    if changed {
+                    let msgs = st.disp.drain_messages();
+                    let mut anim_reqs = Vec::new();
+                    let mut ov_reqs = Vec::new();
+                    if !msgs.is_empty() {
+                        let mut handle = WinWindowHandle { hwnd };
+                        let mut ctx =
+                            WindowCtx::with_proxy(st.root.as_mut(), &mut handle, st.disp.proxy());
+                        for m in &msgs {
+                            st.delegate.on_message(m, &mut ctx);
+                        }
+                        anim_reqs = ctx.take_anim_requests();
+                        ov_reqs = ctx.take_overlay_requests();
+                    }
+                    for r in ov_reqs {
+                        st.disp.open_menu(r.anchor, r.items);
+                    }
+                    for a in anim_reqs {
+                        st.disp.animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+                    }
+                    if changed || !msgs.is_empty() {
                         InvalidateRect(hwnd, null(), 0);
                     }
                 } else {

@@ -71,6 +71,8 @@ pub trait WindowImpl: 'static {
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下。
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
+    /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
+    fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 关闭请求；返回 false 阻止关闭。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true
@@ -100,6 +102,9 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     }
     fn on_key(&mut self, key: u32, ctx: &mut WindowCtx) {
         self.imp.on_key(key, ctx);
+    }
+    fn on_message(&mut self, msg: &str, ctx: &mut WindowCtx) {
+        self.imp.on_message(msg, ctx);
     }
     fn on_close(&mut self, ctx: &mut WindowCtx) -> bool {
         self.imp.on_close(ctx)
