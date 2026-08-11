@@ -103,6 +103,8 @@ pub struct Dispatcher {
     overlay_pressed: Option<WidgetId>,
     /// 被动 Tooltip 浮层（None=不显示）。
     tooltip: Option<Tooltip>,
+    /// hover 停留在带 tooltip 控件上累计的定时 tick 数（用于延时显示）。
+    tip_ticks: u32,
 }
 
 impl Dispatcher {
@@ -121,6 +123,7 @@ impl Dispatcher {
             overlay_hover: None,
             overlay_pressed: None,
             tooltip: None,
+            tip_ticks: 0,
         }
     }
 
@@ -142,6 +145,12 @@ impl Dispatcher {
     #[cfg(test)]
     fn top_overlay_owner(&self) -> Option<WidgetId> {
         self.overlays.last().and_then(|o| o.owner)
+    }
+
+    /// 测试辅助：是否正显示 Tooltip。
+    #[cfg(test)]
+    fn has_tooltip(&self) -> bool {
+        self.tooltip.is_some()
     }
 
     /// 打开一个上下文菜单（owner=None，选中项按其 name 上报激活）。
@@ -553,6 +562,11 @@ impl Dispatcher {
         }
         let old = self.hover;
         self.hover = hit;
+        // hover 变化：重置 tooltip 计时并立即隐藏当前提示。
+        self.tip_ticks = 0;
+        if self.tooltip.take().is_some() {
+            self.needs_redraw = true;
+        }
         for_each_mut(root, &mut |w| {
             let b = w.base_mut();
             b.hover = Some(b.id) == hit && b.enabled;
@@ -562,6 +576,38 @@ impl Dispatcher {
                 self.mark_dirty(r);
             }
         }
+    }
+
+    /// 定时器 tick 驱动 Tooltip 延时显示：hover 停留在带 tooltip 的控件累计到阈值即显示。
+    /// 返回需失效的矩形（供后端重绘）。由后端在闪烁定时回调里调用。
+    pub fn tooltip_tick(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        // 菜单打开或已显示提示时不处理。
+        if !self.overlays.is_empty() || self.tooltip.is_some() {
+            return None;
+        }
+        let Some(id) = self.hover else {
+            self.tip_ticks = 0;
+            return None;
+        };
+        // 读悬停控件的 tooltip 文本与矩形。
+        let mut text: Option<String> = None;
+        let mut rect = Rect::default();
+        visit_mut(root, id, &mut |w| {
+            text = w.base().tooltip.clone();
+            rect = w.base().rect;
+        });
+        let Some(text) = text.filter(|s| !s.is_empty()) else {
+            self.tip_ticks = 0;
+            return None;
+        };
+        self.tip_ticks += 1;
+        // 累计满 1 个 tick（≈0.53s）后显示。
+        if self.tip_ticks >= 1 {
+            self.tooltip = Some(Tooltip { root: crate::widgets::build_tooltip(&text), anchor: rect });
+            self.needs_redraw = true;
+            return Some(rect);
+        }
+        None
     }
 
     /// 处理按下：设置 pressed 与 focus。
@@ -1041,6 +1087,37 @@ mod tests {
         disp.handle(&mut root, &Event::MouseUp { pos: c, button: MouseButton::Left });
         assert!(!disp.has_overlays());
         assert_eq!(disp.take_activations(), vec!["paste".to_string()]);
+    }
+
+    #[test]
+    fn tooltip_延时显示与移开清除() {
+        let mut root = VBox::new().push(Button::new("b").name("bt").tooltip("提示").size(100.0, 30.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
+        let mut disp = Dispatcher::new();
+        // 无 hover → 不显示。
+        assert!(disp.tooltip_tick(&mut root).is_none());
+        // hover 到按钮。
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 15.0) });
+        // 一个 tick 后显示。
+        assert!(disp.tooltip_tick(&mut root).is_some());
+        assert!(disp.has_tooltip());
+        // 已显示：再 tick 不重复。
+        assert!(disp.tooltip_tick(&mut root).is_none());
+        // hover 移开 → 立即清除。
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(250.0, 250.0) });
+        assert!(!disp.has_tooltip());
+    }
+
+    #[test]
+    fn tooltip_无提示文本不显示() {
+        let mut root = VBox::new().push(Button::new("b").size(100.0, 30.0));
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
+        let mut disp = Dispatcher::new();
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 15.0) });
+        assert!(disp.tooltip_tick(&mut root).is_none());
+        assert!(!disp.has_tooltip());
     }
 
     #[test]

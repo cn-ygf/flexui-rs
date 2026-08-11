@@ -31,7 +31,7 @@ pub use edit::Edit;
 pub use hbox::HBox;
 pub use image::Image;
 pub use label::Label;
-pub use menu::{build_menu, build_menu_labels, MenuItem};
+pub use menu::{build_menu, build_menu_labels, build_tooltip, MenuItem};
 pub use panel::Panel;
 pub use progress::Progress;
 pub use radio::Radio;
@@ -180,6 +180,11 @@ macro_rules! common_builders {
             /// 命中策略（穿透/不穿透）。
             pub fn hit(mut self, h: $crate::widget::HitPolicy) -> Self {
                 self.base.hit = h;
+                self
+            }
+            /// 悬停提示文本（Tooltip）。
+            pub fn tooltip(mut self, s: impl Into<String>) -> Self {
+                self.base.tooltip = Some(s.into());
                 self
             }
             /// 点击回调（参数为事件上下文，可按 name 访问/修改其它控件）。

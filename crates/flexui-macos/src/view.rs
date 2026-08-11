@@ -479,13 +479,17 @@ impl FlexView {
         }
     }
 
-    /// 光标闪烁定时回调：切换焦点控件 caret 相位，只失效其区域。
+    /// 光标闪烁定时回调：切换焦点控件 caret 相位；顺带驱动 Tooltip 延时显示。
     fn fire_blink(&self) {
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, disp, .. } = &mut *st;
         let rect = disp.blink(root.as_mut());
+        disp.tooltip_tick(root.as_mut());
+        let redraw = disp.take_redraw(); // tooltip 显隐会置整窗重绘
         drop(st);
-        if let Some(r) = rect {
+        if redraw {
+            self.setNeedsDisplay(true);
+        } else if let Some(r) = rect {
             self.setNeedsDisplayInRect(to_nsrect(r));
         }
     }

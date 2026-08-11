@@ -585,11 +585,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             InvalidateRect(hwnd, null(), 0);
             0
         }
-        // 光标闪烁定时器：切换焦点控件 caret 相位，只失效其区域。
+        // 光标闪烁定时器：切换焦点控件 caret 相位；顺带驱动 Tooltip 延时显示。
         WM_TIMER => {
             if !state.is_null() {
                 let st = &mut *state;
-                if let Some(r) = st.disp.blink(st.root.as_mut()) {
+                let blink = st.disp.blink(st.root.as_mut());
+                st.disp.tooltip_tick(st.root.as_mut());
+                if st.disp.take_redraw() {
+                    InvalidateRect(hwnd, null(), 0);
+                } else if let Some(r) = blink {
                     let rc = to_physical_rect(hwnd, r);
                     InvalidateRect(hwnd, &rc, 0);
                 }

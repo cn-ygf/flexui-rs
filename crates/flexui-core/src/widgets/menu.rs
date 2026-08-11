@@ -85,6 +85,22 @@ pub fn build_menu_labels(labels: &[String], owner: Option<crate::widget::WidgetI
     build_menu(&items, owner)
 }
 
+/// 构建一个 Tooltip 提示气泡（深色底 + 边框 + 内边距的单行标签）。
+pub fn build_tooltip(text: &str) -> Node {
+    let style = StyleSpec {
+        bg_color: Some(Color::from_u8(50, 54, 64, 245)),
+        fg_color: Some(Color::from_u8(230, 235, 245, 255)),
+        border_color: Some(Color::from_u8(90, 96, 116, 255)),
+        border_width: Some(1.0),
+        corner_radius: Some(Corners::all(4.0)),
+        ..Default::default()
+    };
+    let lbl = crate::widgets::Label::new(text)
+        .style(StyleSet::new().with_normal(style))
+        .padding_xy(8.0, 4.0);
+    Box::new(lbl)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
