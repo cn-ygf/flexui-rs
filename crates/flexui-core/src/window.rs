@@ -87,6 +87,14 @@ pub struct AnimRequest {
     pub easing: crate::anim::Easing,
 }
 
+/// 一个待创建窗口的完整规格（多窗口用）。后端据此建原生窗口并接入共享事件循环。
+pub struct NewWindow {
+    pub config: WindowConfig,
+    pub root: crate::widget::Node,
+    pub disp: crate::dispatch::Dispatcher,
+    pub delegate: Box<dyn WindowDelegate>,
+}
+
 /// 传给窗口钩子的上下文：既能按 name 访问控件树，也能控制窗口、弹出菜单。
 /// ≈ duilib 里 InitWindow/Notify 内 `FindControl(...)` + `pWnd->Close()` 的能力。
 pub struct WindowCtx<'a> {
@@ -94,6 +102,7 @@ pub struct WindowCtx<'a> {
     win: &'a mut dyn WindowHandle,
     overlay_requests: Vec<OverlayRequest>,
     anim_requests: Vec<AnimRequest>,
+    new_windows: Vec<NewWindow>,
     proxy: Option<crate::dispatch::MainProxy>,
 }
 
@@ -104,8 +113,19 @@ impl<'a> WindowCtx<'a> {
             win,
             overlay_requests: Vec::new(),
             anim_requests: Vec::new(),
+            new_windows: Vec::new(),
             proxy: None,
         }
+    }
+
+    /// 在回调里打开一个新窗口（接入共享事件循环）。用 `flexui::build_window(imp)` 构造规格。
+    pub fn open_window(&mut self, spec: NewWindow) {
+        self.new_windows.push(spec);
+    }
+
+    /// 后端取走本轮待创建窗口。
+    pub fn take_new_windows(&mut self) -> Vec<NewWindow> {
+        std::mem::take(&mut self.new_windows)
     }
 
     /// 带主线程投递句柄构造（后端在 on_init 等处提供，供 app 拿去发给工作线程）。
@@ -143,7 +163,13 @@ impl<'a> WindowCtx<'a> {
         dur_secs: f32,
         easing: crate::anim::Easing,
     ) {
-        self.anim_requests.push(AnimRequest { name: name.into(), prop, to, dur_secs, easing });
+        self.anim_requests.push(AnimRequest {
+            name: name.into(),
+            prop,
+            to,
+            dur_secs,
+            easing,
+        });
     }
 
     /// 后端取走本轮动画请求（随后交给分发器 animate）。

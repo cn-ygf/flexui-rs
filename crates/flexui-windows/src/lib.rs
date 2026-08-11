@@ -17,7 +17,7 @@ pub use canvas::GdiCanvas;
 pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_text};
 pub use dialog::show_dialog;
 pub use gdiplus::{Gdiplus, OffscreenBitmap};
-pub use window::run;
+pub use window::{run, run_multi};
 
 use flexui_core::{layout_node, paint_tree, Rect, Widget};
 
@@ -42,6 +42,11 @@ pub fn render_tree_samples(
 }
 
 /// 便捷：只采样一个点。
-pub fn render_tree_argb(root: &mut dyn Widget, width: i32, height: i32, sample: (i32, i32)) -> Option<u32> {
+pub fn render_tree_argb(
+    root: &mut dyn Widget,
+    width: i32,
+    height: i32,
+    sample: (i32, i32),
+) -> Option<u32> {
     render_tree_samples(root, width, height, &[sample]).map(|v| v[0])
 }

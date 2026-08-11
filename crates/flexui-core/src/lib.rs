@@ -16,9 +16,9 @@ pub mod widgets;
 pub mod window;
 
 // 常用类型再导出，方便上层与后端使用。
-pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
 pub use anim::{AnimProp, Easing};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
+pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
 pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};
 pub use paint::paint_tree;
@@ -28,13 +28,13 @@ pub use widget::{
     find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable, Container,
     HitPolicy, Node, TextControl, Widget, WidgetId, WidgetRole,
 };
-pub use window::{
-    AnimRequest, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
-    WindowDelegate, WindowHandle,
-};
 pub use widgets::{
     build_menu, build_menu_labels, build_tooltip, Button, CheckBox, ComboBox, Edit, HBox, Image,
     Label, ListView, MenuItem, Panel, Progress, Radio, ScrollView, Separator, Slider, TabBox, VBox,
+};
+pub use window::{
+    AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
+    WindowDelegate, WindowHandle,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。

@@ -22,17 +22,45 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
-use flexui_core::{Dispatcher, Node, TitlebarMode, WindowConfig, WindowDelegate};
+use flexui_core::{Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate};
 
-/// 启动应用：创建窗口 + 承载控件树，进入主事件循环（阻塞）。
-///
-/// 由 facade 的 `Window` 驱动调用；`delegate` 承载 on_init/on_activate 等窗口钩子。
+/// 启动应用（单窗口）。由 facade 的 `Window` 驱动调用。
 pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn WindowDelegate>) {
-    let mtm = MainThreadMarker::new().expect("UI 必须在主线程运行");
+    run_multi(vec![NewWindow {
+        config,
+        root,
+        disp,
+        delegate,
+    }]);
+}
 
+/// 启动应用（多窗口）：一次性建多个窗口，共享同一事件循环。
+pub fn run_multi(windows: Vec<NewWindow>) {
+    let mtm = MainThreadMarker::new().expect("UI 必须在主线程运行");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 
+    // 保活：AppKit 的 ordered windows 会 retain 窗口，这里再存一份以防万一。
+    let mut kept: Vec<Retained<NSWindow>> = Vec::new();
+    for spec in windows {
+        kept.push(make_window(mtm, spec));
+    }
+
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    println!("[flexui] 窗口已创建，进入事件循环。关闭窗口后用 Cmd-Q 退出。");
+    app.run();
+    drop(kept);
+}
+
+/// 创建一个原生窗口并接入事件循环（定时器由 run loop 保活）。返回窗口句柄。
+pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NSWindow> {
+    let NewWindow {
+        config,
+        root,
+        disp,
+        delegate,
+    } = spec;
     let content = NSRect::new(
         NSPoint::new(0.0, 0.0),
         NSSize::new(config.width as f64, config.height as f64),
@@ -42,9 +70,11 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         // 无边框：无系统标题栏/交通灯。
         TitlebarMode::None => NSWindowStyleMask::Borderless,
         // 系统 或 隐藏留交通灯：都保留标题/关闭/最小化按钮。
-        _ => NSWindowStyleMask::Titled
-            | NSWindowStyleMask::Closable
-            | NSWindowStyleMask::Miniaturizable,
+        _ => {
+            NSWindowStyleMask::Titled
+                | NSWindowStyleMask::Closable
+                | NSWindowStyleMask::Miniaturizable
+        }
     };
     if config.resizable {
         style |= NSWindowStyleMask::Resizable;
@@ -114,10 +144,5 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
 
     window.center();
     window.makeKeyAndOrderFront(None);
-
-    #[allow(deprecated)]
-    app.activateIgnoringOtherApps(true);
-
-    println!("[flexui] 窗口已创建，进入事件循环。关闭窗口后用 Cmd-Q 退出。");
-    app.run();
+    window
 }

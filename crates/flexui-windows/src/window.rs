@@ -7,8 +7,8 @@ use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    hit_test, layout_node, paint_tree, Color, Dispatcher, Event, Mods, MouseButton, Node, Point,
-    Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
+    hit_test, layout_node, paint_tree, Color, Dispatcher, Event, Mods, MouseButton, NewWindow,
+    Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowHandle,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -20,8 +20,8 @@ use windows_sys::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::Ime::{
-    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow,
-    COMPOSITIONFORM, CFS_POINT, GCS_COMPSTR, GCS_RESULTSTR,
+    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT,
+    COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
@@ -70,17 +70,24 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// 启动应用：建窗 + 进入消息循环（阻塞直到窗口关闭）。
-///
-/// 由 facade 的 `Window` 驱动调用；`delegate` 承载 on_init/on_activate 等窗口钩子。
+/// 启动应用（单窗口）。由 facade 的 `Window` 驱动调用。
 pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn WindowDelegate>) {
+    run_multi(vec![NewWindow {
+        config,
+        root,
+        disp,
+        delegate,
+    }]);
+}
+
+/// 启动应用（多窗口）：一次性建多个窗口，共享同一消息循环。
+pub fn run_multi(windows: Vec<NewWindow>) {
     unsafe {
         // 开启 Per-Monitor V2 DPI 感知（清单已声明；此调用作为兜底，二者一致）。
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
         let hinstance = GetModuleHandleW(null());
         let class_name = wide("FlexUiWindowClass");
-
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
             lpfnWndProc: Some(wndproc),
@@ -95,80 +102,106 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         };
         RegisterClassW(&wc);
 
-        // 窗口样式。无边框模式用 WS_POPUP 去系统标题栏；保留 WS_THICKFRAME/最大化
-        // 以维持可缩放与系统 Aero Snap（拖到屏幕边缘贴靠）。
-        let frameless = config.titlebar != TitlebarMode::System;
-        let mut style = if frameless {
-            WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
-        } else {
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE
-        };
-        if !config.resizable {
-            style &= !(WS_THICKFRAME | WS_MAXIMIZEBOX);
+        for spec in windows {
+            create_window(spec);
         }
 
-        let title = wide(&config.title);
-        let hwnd = CreateWindowExW(
-            0,
-            class_name.as_ptr(),
-            title.as_ptr(),
-            style,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            config.width as i32,
-            config.height as i32,
-            null_mut(),
-            null_mut(),
-            hinstance,
-            null(),
-        );
-        if hwnd.is_null() {
-            eprintln!("[flexui] CreateWindowExW 失败");
-            return;
-        }
-
-        // 关联 AppState 到窗口。
-        let state = Box::into_raw(Box::new(AppState {
-            root,
-            disp,
-            delegate,
-            frameless,
-        }));
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
-
-        // 接收文件拖放（→ WM_DROPFILES → on_drop_files）。
-        DragAcceptFiles(hwnd, 1);
-
-        ShowWindow(hwnd, SW_SHOW);
-
-        // 光标闪烁定时器（530ms）+ 帧定时器（~60fps 驱动动画）。
-        SetTimer(hwnd, 1, 530, None);
-        SetTimer(hwnd, 2, 16, None);
-
-        // 窗口就绪后触发 on_init（≈ InitWindow）。
-        {
-            let st = &mut *state;
-            let mut handle = WinWindowHandle { hwnd };
-            let mut ctx = WindowCtx::with_proxy(st.root.as_mut(), &mut handle, st.disp.proxy());
-            st.delegate.on_init(&mut ctx);
-            let overlays = ctx.take_overlay_requests();
-            let anims = ctx.take_anim_requests();
-            for r in overlays {
-                st.disp.open_menu(r.anchor, r.items);
-            }
-            for a in anims {
-                st.disp.animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
-            }
-            InvalidateRect(hwnd, null(), 0);
-        }
-
-        // 消息循环。
+        // 消息循环（所有窗口共享；最后一个窗口关闭时 PostQuitMessage 退出）。
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
     }
+}
+
+/// 存活窗口计数（最后一个关闭时退出消息循环）。
+static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// 创建一个原生窗口并接入共享事件循环（窗口类须已注册）。
+unsafe fn create_window(spec: NewWindow) -> HWND {
+    let NewWindow {
+        config,
+        root,
+        disp,
+        delegate,
+    } = spec;
+    let hinstance = GetModuleHandleW(null());
+    let class_name = wide("FlexUiWindowClass");
+
+    let frameless = config.titlebar != TitlebarMode::System;
+    let mut style = if frameless {
+        WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME
+    } else {
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE
+    };
+    if !config.resizable {
+        style &= !(WS_THICKFRAME | WS_MAXIMIZEBOX);
+    }
+
+    let title = wide(&config.title);
+    let hwnd = CreateWindowExW(
+        0,
+        class_name.as_ptr(),
+        title.as_ptr(),
+        style,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        config.width as i32,
+        config.height as i32,
+        null_mut(),
+        null_mut(),
+        hinstance,
+        null(),
+    );
+    if hwnd.is_null() {
+        eprintln!("[flexui] CreateWindowExW 失败");
+        return hwnd;
+    }
+
+    let state = Box::into_raw(Box::new(AppState {
+        root,
+        disp,
+        delegate,
+        frameless,
+    }));
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+    WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    DragAcceptFiles(hwnd, 1);
+    ShowWindow(hwnd, SW_SHOW);
+    SetTimer(hwnd, 1, 530, None);
+    SetTimer(hwnd, 2, 16, None);
+
+    // on_init（可能请求打开新窗口/浮层/动画）。
+    let new_wins = {
+        let st = &mut *state;
+        let mut handle = WinWindowHandle { hwnd };
+        let mut ctx = WindowCtx::with_proxy(st.root.as_mut(), &mut handle, st.disp.proxy());
+        st.delegate.on_init(&mut ctx);
+        let overlays = ctx.take_overlay_requests();
+        let anims = ctx.take_anim_requests();
+        let nw = ctx.take_new_windows();
+        for r in overlays {
+            st.disp.open_menu(r.anchor, r.items);
+        }
+        for a in anims {
+            st.disp.animate(
+                st.root.as_mut(),
+                &a.name,
+                a.prop,
+                a.to,
+                a.dur_secs,
+                a.easing,
+            );
+        }
+        InvalidateRect(hwnd, null(), 0);
+        nw
+    };
+    for w in new_wins {
+        create_window(w);
+    }
+    hwnd
 }
 
 /// 取窗口关联的 AppState（可能为空）。
@@ -198,32 +231,46 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     let doubles = st.disp.take_double_clicks();
     let contexts = st.disp.take_context_clicks();
 
-    let mut reqs = Vec::new();
-    let mut anim_reqs = Vec::new();
-    if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
-        let mut handle = WinWindowHandle { hwnd };
-        let root = &mut st.root;
-        let delegate = &mut st.delegate;
-        let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
-        for name in &acts {
-            delegate.on_activate(name, &mut ctx);
-        }
-        for name in &doubles {
-            delegate.on_double_click(name, &mut ctx);
-        }
-        for (name, pos) in &contexts {
-            delegate.on_context(name, pos.x, pos.y, &mut ctx);
-        }
-        reqs = ctx.take_overlay_requests();
-        anim_reqs = ctx.take_anim_requests();
-    }
+    let (reqs, anim_reqs, new_wins) =
+        if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
+            let mut handle = WinWindowHandle { hwnd };
+            let root = &mut st.root;
+            let delegate = &mut st.delegate;
+            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            for name in &acts {
+                delegate.on_activate(name, &mut ctx);
+            }
+            for name in &doubles {
+                delegate.on_double_click(name, &mut ctx);
+            }
+            for (name, pos) in &contexts {
+                delegate.on_context(name, pos.x, pos.y, &mut ctx);
+            }
+            (
+                ctx.take_overlay_requests(),
+                ctx.take_anim_requests(),
+                ctx.take_new_windows(),
+            )
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
     // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
         st.disp.open_menu(r.anchor, r.items);
     }
     for a in anim_reqs {
-        st.disp.animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        st.disp.animate(
+            st.root.as_mut(),
+            &a.name,
+            a.prop,
+            a.to,
+            a.dur_secs,
+            a.easing,
+        );
+    }
+    for w in new_wins {
+        create_window(w);
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
     if need || opened || !acts.is_empty() || !doubles.is_empty() {
@@ -257,7 +304,12 @@ unsafe fn imm_comp_string(hwnd: HWND, gcs: u32) -> Option<String> {
     let result = if bytes > 0 {
         let n = bytes as usize;
         let mut buf = vec![0u8; n];
-        ImmGetCompositionStringW(himc, gcs, buf.as_mut_ptr() as *mut core::ffi::c_void, n as u32);
+        ImmGetCompositionStringW(
+            himc,
+            gcs,
+            buf.as_mut_ptr() as *mut core::ffi::c_void,
+            n as u32,
+        );
         let u16buf: Vec<u16> = buf
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -310,7 +362,9 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     }
     let st = &mut *state;
     let Some(id) = st.disp.focus() else { return };
-    let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else { return };
+    let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
+        return;
+    };
     let r = w.base().rect;
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
@@ -324,7 +378,12 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
             x: (r.left() * scale) as i32,
             y: (r.bottom() * scale) as i32,
         },
-        rcArea: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+        rcArea: RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
     };
     ImmSetCompositionWindow(himc, &form);
     ImmReleaseContext(hwnd, himc);
@@ -411,7 +470,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_MOUSEMOVE => {
-            dispatch(hwnd, state, Event::MouseMove { pos: mouse_pos(hwnd, lparam) });
+            dispatch(
+                hwnd,
+                state,
+                Event::MouseMove {
+                    pos: mouse_pos(hwnd, lparam),
+                },
+            );
             0
         }
         WM_LBUTTONDOWN => {
@@ -474,7 +539,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 0x2E => keys::DELETE,
                 _ => return DefWindowProcW(hwnd, msg, wparam, lparam), // 其余交系统（保留 WM_CHAR）
             };
-            let mods = Mods { shift, ctrl, ..Default::default() };
+            let mods = Mods {
+                shift,
+                ctrl,
+                ..Default::default()
+            };
             dispatch(hwnd, state, Event::KeyDown { key, mods });
             0
         }
@@ -482,12 +551,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             dispatch(
                 hwnd,
                 state,
-                Event::MouseUp { pos: mouse_pos(hwnd, lparam), button: MouseButton::Right },
+                Event::MouseUp {
+                    pos: mouse_pos(hwnd, lparam),
+                    button: MouseButton::Right,
+                },
             );
             0
         }
         WM_LBUTTONDBLCLK => {
-            dispatch(hwnd, state, Event::DoubleClick { pos: mouse_pos(hwnd, lparam) });
+            dispatch(
+                hwnd,
+                state,
+                Event::DoubleClick {
+                    pos: mouse_pos(hwnd, lparam),
+                },
+            );
             0
         }
         WM_CHAR => {
@@ -495,11 +573,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             // 其余作为 Char。
             let code = wparam as u32;
             let ev = if code == 8 {
-                Event::KeyDown { key: 8, mods: Mods::default() }
+                Event::KeyDown {
+                    key: 8,
+                    mods: Mods::default(),
+                }
             } else if code == 9 {
-                Event::KeyDown { key: 9, mods: Mods::default() }
+                Event::KeyDown {
+                    key: 9,
+                    mods: Mods::default(),
+                }
             } else if code == 13 {
-                Event::KeyDown { key: keys::ENTER, mods: Mods::default() }
+                Event::KeyDown {
+                    key: keys::ENTER,
+                    mods: Mods::default(),
+                }
             } else if let Some(ch) = char::from_u32(code) {
                 Event::Char { ch }
             } else {
@@ -561,8 +648,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam >> 16) & 0xFFFF) as u16 as i16;
-            let dy = delta as f32 / 30.0; // 一格(120) ≈ 4px 逻辑
-            // lparam 为屏幕坐标 → 客户区 → 逻辑坐标。
+            // 一格(120) ≈ 4px 逻辑；lparam 为屏幕坐标 → 客户区 → 逻辑坐标。
+            let dy = delta as f32 / 30.0;
             let mut pt = POINT {
                 x: (lparam & 0xFFFF) as u16 as i16 as i32,
                 y: ((lparam >> 16) & 0xFFFF) as u16 as i16 as i32,
@@ -577,7 +664,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_SIZE => {
             let w = (lparam & 0xFFFF) as u16 as f32;
             let h = ((lparam >> 16) & 0xFFFF) as u16 as f32;
-            dispatch(hwnd, state, Event::WindowResized { width: w, height: h });
+            dispatch(
+                hwnd,
+                state,
+                Event::WindowResized {
+                    width: w,
+                    height: h,
+                },
+            );
             InvalidateRect(hwnd, null(), 0);
             0
         }
@@ -604,7 +698,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         st.disp.open_menu(r.anchor, r.items);
                     }
                     for a in anim_reqs {
-                        st.disp.animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+                        st.disp.animate(
+                            st.root.as_mut(),
+                            &a.name,
+                            a.prop,
+                            a.to,
+                            a.dur_secs,
+                            a.easing,
+                        );
                     }
                     if changed || !msgs.is_empty() {
                         InvalidateRect(hwnd, null(), 0);
@@ -690,7 +791,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 drop(Box::from_raw(state));
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             }
-            PostQuitMessage(0);
+            // 仅在最后一个窗口关闭时退出消息循环（多窗口）。
+            if WINDOW_COUNT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) <= 1 {
+                PostQuitMessage(0);
+            }
             0
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -724,7 +828,9 @@ unsafe fn paint_window(hwnd: HWND, hdc: HDC, state: &mut AppState) {
     let lh = h as f32 / scale;
     layout_node(state.root.as_mut(), Rect::new(0.0, 0.0, lw, lh), &cv);
     paint_tree(state.root.as_ref(), &mut cv);
-    state.disp.paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
+    state
+        .disp
+        .paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
 
     // 整块 blit 到窗口（1:1 物理像素）。
     let mut gw: *mut gp::GpGraphics = null_mut();

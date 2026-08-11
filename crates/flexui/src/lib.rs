@@ -13,15 +13,17 @@ pub use flexui_xml::{
 };
 
 // 资源系统（RM1-5）。
-pub use flexui_resource::{
-    DirProvider, ResError, ResourceManager, ResourceProvider, ZipProvider,
-};
+pub use flexui_resource::{DirProvider, ResError, ResourceManager, ResourceProvider, ZipProvider};
 
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
 #[cfg(target_os = "macos")]
 use flexui_macos::run as backend_run;
+#[cfg(target_os = "macos")]
+use flexui_macos::run_multi as backend_run_multi;
 #[cfg(target_os = "windows")]
 use flexui_windows::run as backend_run;
+#[cfg(target_os = "windows")]
+use flexui_windows::run_multi as backend_run_multi;
 
 /// 系统剪贴板文本读写（macOS NSPasteboard / Windows CF_UNICODETEXT）。
 pub mod clipboard {
@@ -194,6 +196,50 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     }
 }
 
+/// 把一个 `WindowImpl` 加载成可交给后端创建的窗口规格。
+///
+/// 可用于多窗口：在任意窗口回调里用 `build_window` 构造规格后传给 `ctx.open_window`。
+pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
+    let ctx = Context::new();
+    // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
+    let (config, root, bindings) = match imp.skin() {
+        Skin::Xml(xml) => {
+            let doc = load_window_str(&xml, &ctx)?;
+            (
+                doc.config.unwrap_or_else(|| imp.config()),
+                doc.root,
+                doc.bindings,
+            )
+        }
+        Skin::Res(path) => {
+            let res = imp.resources();
+            let doc = load_window_res(&res, &path, &ctx)?;
+            (
+                doc.config.unwrap_or_else(|| imp.config()),
+                doc.root,
+                doc.bindings,
+            )
+        }
+        Skin::Tree(node) => (imp.config(), node, Vec::new()),
+    };
+    let mut disp = Dispatcher::new();
+    for (group, tabbox) in bindings {
+        disp.bind_tab(group, tabbox);
+    }
+    Ok(NewWindow {
+        config,
+        root,
+        disp,
+        delegate: Box::new(ImplDelegate { imp }),
+    })
+}
+
+/// 启动多个窗口，共享同一个平台事件循环。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn run_multi(windows: Vec<NewWindow>) {
+    backend_run_multi(windows);
+}
+
 /// 窗口驱动（≈ duilib Window）：加载皮肤、建原生窗口、进事件循环。用户不继承，直接用。
 pub struct Window<W: WindowImpl> {
     imp: W,
@@ -213,40 +259,13 @@ impl<W: WindowImpl> Window<W> {
     /// 启动：加载皮肤 → 建窗 → on_init → 进主事件循环（阻塞）。
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn run(self) {
-        let ctx = Context::new();
-        // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
-        let (config, root, bindings) = match self.imp.skin() {
-            Skin::Xml(xml) => match load_window_str(&xml, &ctx) {
-                Ok(doc) => (
-                    doc.config.unwrap_or_else(|| self.imp.config()),
-                    doc.root,
-                    doc.bindings,
-                ),
-                Err(e) => {
-                    eprintln!("[flexui] 皮肤 XML 加载失败: {e}");
-                    return;
-                }
-            },
-            Skin::Res(path) => {
-                let res = self.imp.resources();
-                match load_window_res(&res, &path, &ctx) {
-                    Ok(doc) => (
-                        doc.config.unwrap_or_else(|| self.imp.config()),
-                        doc.root,
-                        doc.bindings,
-                    ),
-                    Err(e) => {
-                        eprintln!("[flexui] 皮肤资源加载失败: {e}");
-                        return;
-                    }
-                }
+        let spec = match build_window(self.imp) {
+            Ok(spec) => spec,
+            Err(e) => {
+                eprintln!("[flexui] 窗口加载失败: {e}");
+                return;
             }
-            Skin::Tree(node) => (self.imp.config(), node, Vec::new()),
         };
-        let mut disp = Dispatcher::new();
-        for (group, tabbox) in bindings {
-            disp.bind_tab(group, tabbox);
-        }
-        backend_run(config, root, disp, Box::new(ImplDelegate { imp: self.imp }));
+        backend_run(spec.config, spec.root, spec.disp, spec.delegate);
     }
 }

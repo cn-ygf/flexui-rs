@@ -5,14 +5,42 @@
 //! 与 on_click（≈ Notify）；`Window::new(MainWindow{..}).center().run()`（≈ Window）。
 
 use flexui::{
-    AnimProp, DirProvider, Easing, Rect, ResourceManager, Skin, Window, WindowConfig, WindowCtx,
-    WindowImpl,
+    build_window, AnimProp, DirProvider, Easing, Rect, ResourceManager, Skin, Window, WindowConfig,
+    WindowCtx, WindowImpl,
 };
 
 /// 主窗口：持有自己的状态（点击计数、主按钮启用态），重写窗口钩子。
 struct MainWindow {
     clicks: u32,
     primary_enabled: bool,
+}
+
+struct ChildWindow;
+
+impl WindowImpl for ChildWindow {
+    fn config(&self) -> WindowConfig {
+        WindowConfig::new("flexui-rs 子窗口", 360.0, 180.0)
+    }
+
+    fn skin(&self) -> Skin {
+        Skin::xml(
+            r##"
+<VBox spacing="12" padding="18" normal-bgcolor="#20242C">
+  <Label text="这是一个由主窗口回调打开的子窗口" height="26" normal-fgcolor="#FFFFFF" bold="true"/>
+  <Label text="它共享同一个平台事件循环，可以独立关闭。" height="24" normal-fgcolor="#AFC0D8"/>
+  <Button name="closeChild" text="关闭" width="88" height="32"
+          normal-bgcolor="#3478F6" hot-bgcolor="#4A8CFF" pushed-bgcolor="#2A5FD0"
+          normal-fgcolor="#FFFFFF" corner-radius="6"/>
+</VBox>
+"##,
+        )
+    }
+
+    fn on_click(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if name == "closeChild" {
+            ctx.close();
+        }
+    }
 }
 
 impl WindowImpl for MainWindow {
@@ -52,7 +80,10 @@ impl WindowImpl for MainWindow {
     /// 文件拖入窗口。
     fn on_drop_files(&mut self, paths: &[String], ctx: &mut WindowCtx) {
         let first = paths.first().map(|s| s.as_str()).unwrap_or("");
-        ctx.set_text("status", format!("状态：拖入 {} 个文件，首个 {first}", paths.len()));
+        ctx.set_text(
+            "status",
+            format!("状态：拖入 {} 个文件，首个 {first}", paths.len()),
+        );
     }
 
     /// 统一点击通知（≈ duilib Notify）：按控件 name 分派。
@@ -60,7 +91,10 @@ impl WindowImpl for MainWindow {
         match name {
             "btnPrimary" => {
                 self.clicks += 1;
-                ctx.set_text("status", format!("状态：点击『主要按钮』，共 {} 次", self.clicks));
+                ctx.set_text(
+                    "status",
+                    format!("状态：点击『主要按钮』，共 {} 次", self.clicks),
+                );
                 // 动画：进度条平滑补间到满。
                 ctx.animate("prog", AnimProp::Value, 1.0, 0.8, Easing::EaseInOut);
             }
@@ -78,25 +112,47 @@ impl WindowImpl for MainWindow {
                     None => ctx.set_text("status", "状态：已取消选择文件"),
                 }
             }
+            "btnChild" => match build_window(ChildWindow) {
+                Ok(spec) => {
+                    ctx.open_window(spec);
+                    ctx.set_text("status", "状态：已请求打开子窗口");
+                }
+                Err(e) => ctx.set_text("status", format!("状态：子窗口创建失败：{e}")),
+            },
             "btnToggle" => {
                 self.primary_enabled = !self.primary_enabled;
                 ctx.set_enabled("btnPrimary", self.primary_enabled);
                 ctx.set_text(
                     "status",
-                    format!("状态：主要按钮已{}", if self.primary_enabled { "启用" } else { "禁用" }),
+                    format!(
+                        "状态：主要按钮已{}",
+                        if self.primary_enabled {
+                            "启用"
+                        } else {
+                            "禁用"
+                        }
+                    ),
                 );
             }
             "chkRemember" => {
                 let on = ctx.is_selected("chkRemember").unwrap_or(false);
-                ctx.set_text("status", format!("状态：记住我 = {}", if on { "✓" } else { "✗" }));
+                ctx.set_text(
+                    "status",
+                    format!("状态：记住我 = {}", if on { "✓" } else { "✗" }),
+                );
             }
             "chkNews" => {
                 let on = ctx.is_selected("chkNews").unwrap_or(false);
-                ctx.set_text("status", format!("状态：订阅通知 = {}", if on { "✓" } else { "✗" }));
+                ctx.set_text(
+                    "status",
+                    format!("状态：订阅通知 = {}", if on { "✓" } else { "✗" }),
+                );
             }
             // ComboBox 选中：读回填后的当前文本。
             "theme" => {
-                let cur = ctx.with("theme", |w| w.base().text.clone()).unwrap_or_default();
+                let cur = ctx
+                    .with("theme", |w| w.base().text.clone())
+                    .unwrap_or_default();
                 ctx.set_text("status", format!("状态：主题切换为『{cur}』"));
             }
             // ListView 选中行：读取选中索引。

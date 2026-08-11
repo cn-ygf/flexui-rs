@@ -45,6 +45,9 @@
               normal-bgcolor="#20242C" normal-fgcolor="#E6EBF5"
               border-width="1" normal-bordercolor="#4A5064" corner-radius="6"
               tooltip="选择界面主题"/>
+    <Button name="btnChild" text="打开子窗口" width="120" height="30"
+            normal-bgcolor="#5A6478" hot-bgcolor="#6C7890" pushed-bgcolor="#444D5E"
+            normal-fgcolor="#FFFFFF" corner-radius="6"/>
   </HBox>
 
   <!-- 复选框 -->

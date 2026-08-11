@@ -10,8 +10,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventModifierFlags,
-    NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
+    NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent,
+    NSEventModifierFlags, NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound,
@@ -20,8 +20,8 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, Mods, MouseButton, Node,
-    Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowHandle,
+    find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, Mods, MouseButton, NewWindow,
+    Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowHandle,
 };
 
 use crate::canvas::CgCanvas;
@@ -64,6 +64,8 @@ pub struct AppState {
     pub root: Node,
     pub disp: Dispatcher,
     pub delegate: Box<dyn WindowDelegate>,
+    /// 回调中动态打开的子窗口保活句柄。
+    pub child_windows: Vec<Retained<NSWindow>>,
 }
 
 pub struct FlexViewIvars {
@@ -392,18 +394,20 @@ fn command_to_key(name: &[u8]) -> Option<(u32, bool)> {
         b"cancelOperation:" => (keys::ESCAPE, false),
         // —— Shift 扩选 ——
         b"moveLeftAndModifySelection:" | b"moveWordLeftAndModifySelection:" => (keys::LEFT, true),
-        b"moveRightAndModifySelection:" | b"moveWordRightAndModifySelection:" => (keys::RIGHT, true),
+        b"moveRightAndModifySelection:" | b"moveWordRightAndModifySelection:" => {
+            (keys::RIGHT, true)
+        }
         b"moveUpAndModifySelection:" => (keys::UP, true),
         b"moveDownAndModifySelection:" => (keys::DOWN, true),
-        b"moveToBeginningOfLineAndModifySelection:"
-        | b"moveToLeftEndOfLineAndModifySelection:" => (keys::HOME, true),
+        b"moveToBeginningOfLineAndModifySelection:" | b"moveToLeftEndOfLineAndModifySelection:" => {
+            (keys::HOME, true)
+        }
         b"moveToEndOfLineAndModifySelection:" | b"moveToRightEndOfLineAndModifySelection:" => {
             (keys::END, true)
         }
         _ => return None,
     })
 }
-
 
 impl FlexView {
     pub fn new(
@@ -413,7 +417,12 @@ impl FlexView {
         delegate: Box<dyn WindowDelegate>,
     ) -> Retained<Self> {
         let ivars = FlexViewIvars {
-            state: RefCell::new(AppState { root, disp, delegate }),
+            state: RefCell::new(AppState {
+                root,
+                disp,
+                delegate,
+                child_windows: Vec::new(),
+            }),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
@@ -436,13 +445,21 @@ impl FlexView {
 
     /// 窗口创建后触发 on_init（≈ duilib InitWindow）。
     pub fn fire_init(&self, window: &Retained<NSWindow>) {
-        let mut handle = MacWindowHandle { window: window.clone() };
+        let mut handle = MacWindowHandle {
+            window: window.clone(),
+        };
         let mut st = self.ivars().state.borrow_mut();
-        let AppState { root, disp, delegate } = &mut *st;
+        let AppState {
+            root,
+            disp,
+            delegate,
+            ..
+        } = &mut *st;
         let mut ctx = WindowCtx::with_proxy(root.as_mut(), &mut handle, disp.proxy());
         delegate.on_init(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
+        let new_wins = ctx.take_new_windows();
         for r in overlays {
             disp.open_menu(r.anchor, r.items);
         }
@@ -450,7 +467,25 @@ impl FlexView {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
         }
         drop(st);
+        self.create_windows(new_wins);
         self.setNeedsDisplay(true);
+    }
+
+    /// 创建回调里请求的新窗口（多窗口）。
+    fn create_windows(&self, specs: Vec<NewWindow>) {
+        if specs.is_empty() {
+            return;
+        }
+        let mtm = self.mtm();
+        let mut created = Vec::with_capacity(specs.len());
+        for spec in specs {
+            created.push(crate::make_window(mtm, spec));
+        }
+        self.ivars()
+            .state
+            .borrow_mut()
+            .child_windows
+            .extend(created);
     }
 
     /// 文件拖放 → 窗口委托 on_drop_files。
@@ -471,7 +506,12 @@ impl FlexView {
     fn fire_frame(&self) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
-        let AppState { root, disp, delegate } = &mut *st;
+        let AppState {
+            root,
+            disp,
+            delegate,
+            ..
+        } = &mut *st;
         let changed = disp.tick_anims(root.as_mut(), 0.016);
         let msgs = disp.drain_messages();
         let mut anim_reqs = Vec::new();
@@ -523,7 +563,12 @@ impl FlexView {
     fn dispatch(&self, ev: Event) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
-        let AppState { root, disp, delegate } = &mut *st;
+        let AppState {
+            root,
+            disp,
+            delegate,
+            ..
+        } = &mut *st;
         disp.handle(root.as_mut(), &ev);
         let need = disp.take_redraw();
         let dirty = disp.take_dirty();
@@ -533,6 +578,7 @@ impl FlexView {
 
         let mut reqs = Vec::new();
         let mut anim_reqs = Vec::new();
+        let mut new_wins = Vec::new();
         if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
             if let Some(win) = window {
                 let mut handle = MacWindowHandle { window: win };
@@ -548,6 +594,7 @@ impl FlexView {
                 }
                 reqs = ctx.take_overlay_requests();
                 anim_reqs = ctx.take_anim_requests();
+                new_wins = ctx.take_new_windows();
             }
         }
         // 委托里请求的上下文菜单 / 动画 → 交分发器。
@@ -559,6 +606,7 @@ impl FlexView {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
         }
         drop(st);
+        self.create_windows(new_wins);
         // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。
         if need || opened || !acts.is_empty() || !doubles.is_empty() {
             self.setNeedsDisplay(true);
@@ -585,7 +633,9 @@ impl FlexView {
     /// 把首字符键码抛给窗口委托 on_key（与 IME 路径并行，供上层监听按键）。
     fn fire_on_key(&self, event: &NSEvent) {
         let Some(s) = event.characters() else { return };
-        let Some(ch) = s.to_string().chars().next() else { return };
+        let Some(ch) = s.to_string().chars().next() else {
+            return;
+        };
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, delegate, .. } = &mut *st;
@@ -610,7 +660,10 @@ impl FlexView {
         self.with_focused(|b| b.marked.clear());
         for ch in text.chars() {
             if ch == '\n' || ch == '\r' {
-                self.dispatch(Event::KeyDown { key: keys::ENTER, mods: Mods::default() });
+                self.dispatch(Event::KeyDown {
+                    key: keys::ENTER,
+                    mods: Mods::default(),
+                });
             } else if !ch.is_control() {
                 self.dispatch(Event::Char { ch });
             }
@@ -667,7 +720,9 @@ impl FlexView {
 
     /// 粘贴：读剪贴板文本插入到焦点控件。
     fn ime_paste(&self) {
-        let Some(text) = crate::clipboard::get_text() else { return };
+        let Some(text) = crate::clipboard::get_text() else {
+            return;
+        };
         let dirty = {
             let mut st = self.ivars().state.borrow_mut();
             let AppState { root, disp, .. } = &mut *st;
