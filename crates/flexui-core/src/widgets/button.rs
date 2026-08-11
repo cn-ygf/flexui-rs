@@ -44,6 +44,7 @@ impl Widget for Button {
             &self.base.font,
             color,
             align,
+            true,
         );
     }
 }

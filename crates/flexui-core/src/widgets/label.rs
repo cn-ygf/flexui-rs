@@ -43,6 +43,7 @@ impl Widget for Label {
             &self.base.font,
             color,
             align,
+            true,
         );
     }
 }

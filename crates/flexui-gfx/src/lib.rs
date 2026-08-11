@@ -54,13 +54,19 @@ pub enum TextAlign {
     Right,
 }
 
-/// 字体描述（一期只含字号与字族名，后续再扩粗细/斜体等）。
+/// 字体描述：字号、字族名与样式（粗体/斜体/下划线）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Font {
     /// 字族名，None 表示用系统默认字体。
     pub family: Option<String>,
     /// 字号（逻辑像素/point）。
     pub size: f32,
+    /// 粗体。
+    pub bold: bool,
+    /// 斜体。
+    pub italic: bool,
+    /// 下划线。
+    pub underline: bool,
 }
 
 impl Font {
@@ -68,7 +74,30 @@ impl Font {
         Self {
             family: None,
             size,
+            bold: false,
+            italic: false,
+            underline: false,
         }
+    }
+    /// 指定字族名。
+    pub fn family(mut self, name: impl Into<String>) -> Self {
+        self.family = Some(name.into());
+        self
+    }
+    /// 设置粗体。
+    pub fn bold(mut self, on: bool) -> Self {
+        self.bold = on;
+        self
+    }
+    /// 设置斜体。
+    pub fn italic(mut self, on: bool) -> Self {
+        self.italic = on;
+        self
+    }
+    /// 设置下划线。
+    pub fn underline(mut self, on: bool) -> Self {
+        self.underline = on;
+        self
     }
 }
 
@@ -112,4 +141,20 @@ pub trait Canvas {
 
     /// 追加矩形裁剪区（缺省为空，后端可覆写）。
     fn clip_rect(&mut self, _rect: Rect) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Font;
+
+    #[test]
+    fn font_样式构建() {
+        let f = Font::system(16.0).bold(true).italic(true).underline(true).family("Menlo");
+        assert_eq!(f.size, 16.0);
+        assert!(f.bold && f.italic && f.underline);
+        assert_eq!(f.family.as_deref(), Some("Menlo"));
+        // 默认无样式
+        let d = Font::default();
+        assert!(!d.bold && !d.italic && !d.underline);
+    }
 }

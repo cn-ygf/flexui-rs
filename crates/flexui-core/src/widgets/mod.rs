@@ -143,6 +143,31 @@ macro_rules! common_builders {
                 self.base.flex_grow = g;
                 self
             }
+            /// 字号。
+            pub fn font_size(mut self, s: f32) -> Self {
+                self.base.font.size = s;
+                self
+            }
+            /// 字族名。
+            pub fn font_family(mut self, name: impl Into<String>) -> Self {
+                self.base.font.family = Some(name.into());
+                self
+            }
+            /// 粗体。
+            pub fn bold(mut self) -> Self {
+                self.base.font.bold = true;
+                self
+            }
+            /// 斜体。
+            pub fn italic(mut self) -> Self {
+                self.base.font.italic = true;
+                self
+            }
+            /// 下划线。
+            pub fn underline(mut self) -> Self {
+                self.base.font.underline = true;
+                self
+            }
             /// 是否可用（disabled 状态）。
             pub fn enabled(mut self, e: bool) -> Self {
                 self.base.enabled = e;
@@ -178,7 +203,7 @@ pub(crate) fn paint_indicator_and_text(
     if style.bg_image.is_some() || style.fg_image.is_some() {
         let content = crate::layout::content_rect(base);
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
-        draw_aligned_text(cv, &base.text, content, &base.font, color, TextAlign::Left);
+        draw_aligned_text(cv, &base.text, content, &base.font, color, TextAlign::Left, true);
         return;
     }
 
@@ -214,5 +239,5 @@ pub(crate) fn paint_indicator_and_text(
         content.size.height,
     );
     let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
-    draw_aligned_text(cv, &base.text, text_rect, &base.font, color, TextAlign::Left);
+    draw_aligned_text(cv, &base.text, text_rect, &base.font, color, TextAlign::Left, true);
 }

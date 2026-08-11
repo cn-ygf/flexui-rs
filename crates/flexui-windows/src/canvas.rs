@@ -252,9 +252,11 @@ impl GdiCanvas {
             // 回退到系统通用 sans-serif（wine/windows 均可用）。
             gp::GdipGetGenericFontFamilySansSerif(&mut family);
         }
+        // GDI+ FontStyle 位标志：Bold=1 Italic=2 Underline=4。
+        let style = (font.bold as i32) | ((font.italic as i32) << 1) | ((font.underline as i32) << 2);
         let mut f: *mut gp::GpFont = std::ptr::null_mut();
         if !family.is_null() {
-            gp::GdipCreateFont(family, font.size, 0, UNIT_PIXEL, &mut f);
+            gp::GdipCreateFont(family, font.size, style, UNIT_PIXEL, &mut f);
         }
         (f, family)
     }

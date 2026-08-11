@@ -64,6 +64,8 @@ fn is_zero_corners(c: Corners) -> bool {
 }
 
 /// 便捷：在内容区内按对齐方式画一行文字（控件 paint_content 复用）。
+///
+/// `elide=true` 时超宽文本尾部用省略号「…」截断（静态文本控件用；Edit 传 false 以免截断输入）。
 pub fn draw_aligned_text(
     cv: &mut dyn Canvas,
     text: &str,
@@ -71,13 +73,23 @@ pub fn draw_aligned_text(
     font: &flexui_gfx::Font,
     color: flexui_geometry::Color,
     align: flexui_gfx::TextAlign,
+    elide: bool,
 ) {
     use flexui_geometry::Point;
     use flexui_gfx::TextAlign;
     if text.is_empty() {
         return;
     }
-    let size = cv.measure_text(text, font);
+    // 超宽则截断加省略号。
+    let shown = if elide {
+        elide_to_width(cv, text, font, content.size.width)
+    } else {
+        text.to_string()
+    };
+    if shown.is_empty() {
+        return;
+    }
+    let size = cv.measure_text(&shown, font);
     let x = match align {
         TextAlign::Left => content.left(),
         TextAlign::Center => content.left() + (content.size.width - size.width) / 2.0,
@@ -85,7 +97,35 @@ pub fn draw_aligned_text(
     };
     // 垂直居中
     let y = content.top() + (content.size.height - size.height) / 2.0;
-    cv.draw_text(text, Point::new(x, y.max(content.top())), font, color);
+    cv.draw_text(&shown, Point::new(x, y.max(content.top())), font, color);
+}
+
+/// 把文本尾部用「…」截断到不超过 max_w（单行）。宽度足够则原样返回。
+pub fn elide_to_width(
+    cv: &dyn Canvas,
+    text: &str,
+    font: &flexui_gfx::Font,
+    max_w: f32,
+) -> String {
+    if max_w <= 0.0 {
+        return String::new();
+    }
+    if cv.measure_text(text, font).width <= max_w {
+        return text.to_string();
+    }
+    const ELL: &str = "…";
+    let chars: Vec<char> = text.chars().collect();
+    // 从长到短找到「前缀 + …」能放下的最大前缀。
+    let mut n = chars.len();
+    while n > 0 {
+        n -= 1;
+        let mut s: String = chars[..n].iter().collect();
+        s.push_str(ELL);
+        if cv.measure_text(&s, font).width <= max_w {
+            return s;
+        }
+    }
+    ELL.to_string()
 }
 
 #[cfg(test)]
@@ -151,5 +191,43 @@ mod tests {
         let mut rec2 = Recorder::default();
         paint_tree(&root, &mut rec2);
         assert!(rec2.fills.iter().any(|(_, c)| *c == Color::from_u8(200, 200, 200, 255)), "hover 应用 hot 底色");
+    }
+
+    #[test]
+    fn 省略号_超宽文本截断() {
+        use flexui_gfx::TextAlign;
+        let mut rec = Recorder::default();
+        let font = Font::default(); // size14 → 每字 8.4px
+        // 内容宽 30 → 放不下 8 个字，应截断加「…」。
+        draw_aligned_text(
+            &mut rec,
+            "abcdefgh",
+            Rect::new(0.0, 0.0, 30.0, 20.0),
+            &font,
+            Color::BLACK,
+            TextAlign::Left,
+            true,
+        );
+        let shown = &rec.texts[0];
+        assert!(shown.ends_with('…'), "应以省略号结尾: {shown}");
+        assert!(shown.chars().count() < 8, "应比原文短");
+        assert!(rec.measure_text(shown, &font).width <= 30.0, "应放得下");
+    }
+
+    #[test]
+    fn 省略号_关闭时不截断() {
+        use flexui_gfx::TextAlign;
+        let mut rec = Recorder::default();
+        let font = Font::default();
+        draw_aligned_text(
+            &mut rec,
+            "abcdefgh",
+            Rect::new(0.0, 0.0, 30.0, 20.0),
+            &font,
+            Color::BLACK,
+            TextAlign::Left,
+            false,
+        );
+        assert_eq!(rec.texts[0], "abcdefgh");
     }
 }

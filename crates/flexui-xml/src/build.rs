@@ -325,6 +325,15 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "v-if" | "src" | "bindgroup" | "orientation" | "thickness" => {}
             "name" => base.name = Some(v.clone()),
             "value" => base.value = v.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
+            "font-size" | "fontsize" => {
+                if let Ok(s) = v.parse::<f32>() {
+                    base.font.size = s;
+                }
+            }
+            "font-family" | "font" => base.font.family = Some(v.clone()),
+            "bold" => base.font.bold = parse_bool(v),
+            "italic" => base.font.italic = parse_bool(v),
+            "underline" => base.font.underline = parse_bool(v),
             "text" => base.text = v.clone(),
             "width" => base.width = parse_sizing(v),
             "height" => base.height = parse_sizing(v),
@@ -778,6 +787,17 @@ mod tests {
         // 非法
         assert_eq!(parse_insets("a b"), None);
         assert_eq!(parse_insets(""), None);
+    }
+
+    #[test]
+    fn xml_字体样式() {
+        let ctx = Context::new();
+        let xml = r##"<Label text="x" bold="true" italic="true" underline="true" font-size="20" font-family="Menlo"/>"##;
+        let res = load_str(xml, &ctx).unwrap();
+        let f = &res.root.base().font;
+        assert!(f.bold && f.italic && f.underline);
+        assert_eq!(f.size, 20.0);
+        assert_eq!(f.family.as_deref(), Some("Menlo"));
     }
 
     #[test]

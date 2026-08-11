@@ -12,9 +12,12 @@ use objc2::runtime::AnyObject;
 use objc2::AllocAnyThread;
 use objc2_app_kit::{
     NSBezierPath, NSBitmapImageRep, NSColor, NSCompositingOperation, NSDeviceRGBColorSpace, NSFont,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSGraphicsContext, NSImage, NSStringDrawing,
+    NSFontAttributeName, NSFontManager, NSFontTraitMask, NSForegroundColorAttributeName,
+    NSGraphicsContext, NSImage, NSStringDrawing, NSUnderlineStyleAttributeName,
 };
-use objc2_foundation::{NSData, NSDictionary, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{
+    MainThreadMarker, NSData, NSDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString,
+};
 
 /// macOS 画布：无内部状态，绘制落到 drawRect 当前上下文。
 pub struct CgCanvas;
@@ -188,32 +191,53 @@ fn to_nscolor(c: Color) -> Retained<NSColor> {
     NSColor::colorWithSRGBRed_green_blue_alpha(c.r as f64, c.g as f64, c.b as f64, c.a as f64)
 }
 
-/// 构造字体对象：有字族名走 fontWithName，否则用系统字体。
+/// 构造字体对象：有字族名走 fontWithName，否则系统字体；再按需叠加粗体/斜体特征。
 fn to_nsfont(font: &Font) -> Retained<NSFont> {
-    if let Some(name) = &font.family {
+    let base = if let Some(name) = &font.family {
         let ns_name = NSString::from_str(name);
         // fontWithName 可能返回 None（字体不存在），回退到系统字体。
         NSFont::fontWithName_size(&ns_name, font.size as f64)
             .unwrap_or_else(|| NSFont::systemFontOfSize(font.size as f64))
     } else {
         NSFont::systemFontOfSize(font.size as f64)
+    };
+    if !font.bold && !font.italic {
+        return base;
     }
+    // 经 NSFontManager 叠加粗体/斜体特征（不可用时保持原字体）。
+    let Some(mtm) = MainThreadMarker::new() else {
+        return base;
+    };
+    let mgr = NSFontManager::sharedFontManager(mtm);
+    let mut f = base;
+    if font.bold {
+        f = mgr.convertFont_toHaveTrait(&f, NSFontTraitMask::BoldFontMask);
+    }
+    if font.italic {
+        f = mgr.convertFont_toHaveTrait(&f, NSFontTraitMask::ItalicFontMask);
+    }
+    f
 }
 
-/// 构造文字属性字典：字体 + 前景色。
-fn text_attributes(
-    font: &Font,
-    color: Color,
-) -> Retained<NSDictionary<NSString, AnyObject>> {
+/// 构造文字属性字典：字体 + 前景色（+ 下划线）。
+fn text_attributes(font: &Font, color: Color) -> Retained<NSDictionary<NSString, AnyObject>> {
     let ns_font = to_nsfont(font);
     let ns_color = to_nscolor(color);
-    // 通过 Deref 链把具体对象强制成 &AnyObject 作为字典的值。
+    // 属性名是 AppKit 的 extern 静态量，读取需 unsafe。
+    let (k_font, k_color) = unsafe { (NSFontAttributeName, NSForegroundColorAttributeName) };
     let font_obj: &AnyObject = &ns_font;
     let color_obj: &AnyObject = &ns_color;
-    // 属性名是 AppKit 的 extern 静态量，读取需 unsafe。
-    let (k_font, k_color) =
-        unsafe { (NSFontAttributeName, NSForegroundColorAttributeName) };
-    NSDictionary::from_slices(&[k_font, k_color], &[font_obj, color_obj])
+    let mut keys: Vec<&NSString> = vec![k_font, k_color];
+    let mut vals: Vec<&AnyObject> = vec![font_obj, color_obj];
+    // 下划线：NSUnderlineStyleSingle = 1。
+    let underline = NSNumber::numberWithInt(1);
+    if font.underline {
+        let k_underline = unsafe { NSUnderlineStyleAttributeName };
+        let u_obj: &AnyObject = &underline;
+        keys.push(k_underline);
+        vals.push(u_obj);
+    }
+    NSDictionary::from_slices(&keys, &vals)
 }
 
 impl Canvas for CgCanvas {

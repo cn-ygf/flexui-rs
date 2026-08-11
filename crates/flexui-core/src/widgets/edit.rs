@@ -258,7 +258,7 @@ impl Edit {
             }
             // 文字。
             let line_rect = Rect::new(content.left(), y, content.size.width, line_h);
-            draw_aligned_text(cv, line, line_rect, &self.base.font, color, TextAlign::Left);
+            draw_aligned_text(cv, line, line_rect, &self.base.font, color, TextAlign::Left, false);
             // 光标（仅当前行）。
             if self.base.focused && self.base.caret_on && i == cur_line {
                 let pre: String = line.chars().take(cur_col).collect();
@@ -340,7 +340,7 @@ impl Widget for Edit {
         let before: String = self.base.text.chars().take(self.base.cursor).collect();
         let after: String = self.base.text.chars().skip(self.base.cursor).collect();
         let display = format!("{before}{}{after}", self.base.marked);
-        draw_aligned_text(cv, &display, content, &self.base.font, color, TextAlign::Left);
+        draw_aligned_text(cv, &display, content, &self.base.font, color, TextAlign::Left, false);
 
         let before_w = cv.measure_text(&before, &self.base.font).width;
         // 组合串下划线。

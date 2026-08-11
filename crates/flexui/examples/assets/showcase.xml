@@ -7,7 +7,15 @@
 -->
 <VBox spacing="12" padding="16" normal-bgcolor="#1A1C22">
 
-  <Label text="flexui-rs · 全控件总览（XML 布局 + 事件响应）" height="26" normal-fgcolor="#FFFFFF"/>
+  <Label text="flexui-rs · 全控件总览（XML 布局 + 事件响应）" height="26" normal-fgcolor="#FFFFFF" bold="true" font-size="16"/>
+
+  <!-- 字体样式 + 省略号（窄宽 Label 超宽自动截断） -->
+  <HBox spacing="16" height="22">
+    <Label text="粗体" normal-fgcolor="#E6EBF5" bold="true" width="60"/>
+    <Label text="斜体" normal-fgcolor="#E6EBF5" italic="true" width="60"/>
+    <Label text="下划线" normal-fgcolor="#E6EBF5" underline="true" width="70"/>
+    <Label text="这是一段很长会被省略号截断的文本示例" normal-fgcolor="#8FA0C0" width="160"/>
+  </HBox>
 
   <!-- 状态栏：被各控件的事件更新 -->
   <Label name="status" text="状态：等待交互…（点击按钮 / 勾选 / 切页 / 在输入框打字）"
