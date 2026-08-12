@@ -15,14 +15,24 @@ pub use view::{FlexView, MacWindowHandle};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::MainThreadOnly;
+use objc2::{AnyThread, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSWindow, NSWindowButton,
-    NSWindowStyleMask, NSWindowTitleVisibility,
+    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSImage, NSWindow,
+    NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
 };
-use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString, NSTimer};
+use objc2_foundation::{MainThreadMarker, NSArray, NSData, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
 use flexui_core::{Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate};
+
+/// 设置当前进程的应用图标（Dock、应用切换器）。
+pub fn set_application_icon(bytes: &[u8]) {
+    let mtm = MainThreadMarker::new().expect("应用图标必须在主线程设置");
+    let data = NSData::with_bytes(bytes);
+    if let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) {
+        let app = NSApplication::sharedApplication(mtm);
+        unsafe { app.setApplicationIconImage(Some(&icon)) };
+    }
+}
 
 /// 启动应用（单窗口）。由 facade 的 `Window` 驱动调用。
 pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn WindowDelegate>) {

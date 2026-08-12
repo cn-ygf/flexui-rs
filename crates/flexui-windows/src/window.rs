@@ -83,6 +83,12 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Win32 `MAKEINTRESOURCEW`：把 16 位资源 ID 编码进指针值，API 不会解引用它。
+#[allow(clippy::manual_dangling_ptr)]
+const fn int_resource(id: u16) -> *const u16 {
+    id as usize as *const u16
+}
+
 /// 启动应用（单窗口）。由 facade 的 `Window` 驱动调用。
 pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn WindowDelegate>) {
     run_multi(vec![NewWindow {
@@ -107,13 +113,15 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 
         let hinstance = GetModuleHandleW(null());
         let class_name = wide("FlexUiWindowClass");
+        // 资源 ID 1 是 Windows 约定的主应用图标；未嵌入时 LoadIconW 返回空。
+        let app_icon = LoadIconW(hinstance, int_resource(1));
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
             lpfnWndProc: Some(wndproc),
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: hinstance,
-            hIcon: null_mut(),
+            hIcon: app_icon,
             hCursor: LoadCursorW(null_mut(), IDC_ARROW),
             hbrBackground: null_mut(),
             lpszMenuName: null(),

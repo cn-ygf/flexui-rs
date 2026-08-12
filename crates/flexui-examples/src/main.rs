@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use flexui::{DirProvider, ResourceManager, Skin, Window, WindowCtx, WindowImpl};
 
 struct UuExample;
@@ -48,5 +50,7 @@ impl WindowImpl for UuExample {
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    flexui::set_application_icon(include_bytes!("../assets/app.icns"));
     Window::new(UuExample).center().run();
 }

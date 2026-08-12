@@ -25,6 +25,14 @@ use flexui_windows::run as backend_run;
 #[cfg(target_os = "windows")]
 use flexui_windows::run_multi as backend_run_multi;
 
+/// 设置应用图标。macOS 用于 Dock/应用切换器；Windows 的 EXE 图标由构建资源提供。
+pub fn set_application_icon(bytes: &[u8]) {
+    #[cfg(target_os = "macos")]
+    flexui_macos::set_application_icon(bytes);
+    #[cfg(not(target_os = "macos"))]
+    let _ = bytes;
+}
+
 /// 系统剪贴板文本读写（macOS NSPasteboard / Windows CF_UNICODETEXT）。
 pub mod clipboard {
     /// 读取系统剪贴板文本（无则 None）。
