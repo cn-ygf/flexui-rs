@@ -249,10 +249,27 @@ impl Dispatcher {
 
     /// 打开一个上下文菜单（owner=None，选中项按其 name 上报激活）。
     pub fn open_menu(&mut self, anchor: Rect, items: Vec<(String, String)>) {
+        self.open_styled_menu(anchor, items, None, None);
+    }
+
+    /// 打开可定制外观并标记当前项的上下文菜单。
+    pub fn open_styled_menu(
+        &mut self,
+        anchor: Rect,
+        items: Vec<(String, String)>,
+        style: Option<crate::widgets::MenuStyle>,
+        selected_name: Option<String>,
+    ) {
         if items.is_empty() {
             return;
         }
-        let menu = crate::widgets::build_menu(&items, None);
+        let style = style.unwrap_or_default();
+        let menu = crate::widgets::build_menu_styled(
+            &items,
+            None,
+            &style,
+            selected_name.as_deref(),
+        );
         self.overlays.push(Overlay { root: menu, anchor, owner: None, dismiss_outside: true });
         self.needs_redraw = true;
     }

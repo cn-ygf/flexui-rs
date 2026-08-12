@@ -355,7 +355,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         let anims = ctx.take_anim_requests();
         let nw = ctx.take_new_windows();
         for r in overlays {
-            st.disp.open_menu(r.anchor, r.items);
+            st.disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
         }
         for a in anims {
             st.disp.animate(
@@ -430,7 +430,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
-        st.disp.open_menu(r.anchor, r.items);
+        st.disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
     }
     for a in anim_reqs {
         st.disp.animate(
@@ -966,7 +966,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         ov_reqs = ctx.take_overlay_requests();
                     }
                     for r in ov_reqs {
-                        st.disp.open_menu(r.anchor, r.items);
+                        st.disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
                     }
                     for a in anim_reqs {
                         st.disp.animate(

@@ -522,7 +522,7 @@ impl FlexView {
         let anims = ctx.take_anim_requests();
         let new_wins = ctx.take_new_windows();
         for r in overlays {
-            disp.open_menu(r.anchor, r.items);
+            disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
         }
         for a in anims {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -589,7 +589,7 @@ impl FlexView {
             }
         }
         for r in ov_reqs {
-            disp.open_menu(r.anchor, r.items);
+            disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
         }
         for a in anim_reqs {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -661,7 +661,7 @@ impl FlexView {
         // 委托里请求的上下文菜单 / 动画 → 交分发器。
         let opened = !reqs.is_empty();
         for r in reqs {
-            disp.open_menu(r.anchor, r.items);
+            disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
         }
         for a in anim_reqs {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);

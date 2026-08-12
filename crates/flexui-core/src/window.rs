@@ -114,6 +114,10 @@ pub struct OverlayRequest {
     pub anchor: flexui_geometry::Rect,
     /// 菜单项 (标签, name)；选中后按 name 经 on_activate 上报。
     pub items: Vec<(String, String)>,
+    /// 自定义菜单外观；None 使用框架默认值。
+    pub style: Option<crate::widgets::MenuStyle>,
+    /// 当前选中项的 name；菜单项左侧绘制勾选标记。
+    pub selected_name: Option<String>,
 }
 
 /// 属性动画请求（由 WindowCtx 收集，后端排空后交分发器）。
@@ -201,7 +205,28 @@ impl<'a> WindowCtx<'a> {
 
     /// 在 anchor 处弹出上下文菜单；items 为 (标签, name)。选中项经 on_activate 上报。
     pub fn open_menu(&mut self, anchor: flexui_geometry::Rect, items: Vec<(String, String)>) {
-        self.overlay_requests.push(OverlayRequest { anchor, items });
+        self.overlay_requests.push(OverlayRequest {
+            anchor,
+            items,
+            style: None,
+            selected_name: None,
+        });
+    }
+
+    /// 在 anchor 处弹出带自定义外观和当前选中项的菜单。
+    pub fn open_styled_menu(
+        &mut self,
+        anchor: flexui_geometry::Rect,
+        items: Vec<(String, String)>,
+        style: crate::widgets::MenuStyle,
+        selected_name: Option<String>,
+    ) {
+        self.overlay_requests.push(OverlayRequest {
+            anchor,
+            items,
+            style: Some(style),
+            selected_name,
+        });
     }
 
     /// 后端取走本轮浮层请求（随后交给分发器 open_menu）。
