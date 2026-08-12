@@ -186,8 +186,18 @@ pub trait Canvas {
     /// 在指定位置绘制一行文字（左上角对齐 origin）。
     fn draw_text(&mut self, text: &str, origin: Point, font: &Font, color: Color);
 
+    /// 按文本前进边界绘制，供输入控件与插入光标共用同一套排版边界。
+    fn draw_text_advance(&mut self, text: &str, origin: Point, font: &Font, color: Color) {
+        self.draw_text(text, origin, font, color);
+    }
+
     /// 度量一行文字的尺寸（用于布局）。
     fn measure_text(&self, text: &str, font: &Font) -> Size;
+
+    /// 测量文本排版前进宽度，供插入光标和选区使用。
+    fn measure_text_advance(&self, text: &str, font: &Font) -> f32 {
+        self.measure_text(text, font).width
+    }
 
     /// 在矩形内绘制图片，支持换色 tint 与渲染方式 fit（缺省为空，后端覆写）。
     /// tint 为 Some 时按目标色重着色（保留 alpha 形状），用于「黑图动态换色」。

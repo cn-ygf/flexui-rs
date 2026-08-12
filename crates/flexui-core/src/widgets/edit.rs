@@ -274,18 +274,18 @@ impl Edit {
                 if s < e {
                     let pre: String = line.chars().take(s - ls).collect();
                     let mid: String = line.chars().skip(s - ls).take(e - s).collect();
-                    let x0 = content.left() + cv.measure_text(&pre, &self.base.font).width;
-                    let w = cv.measure_text(&mid, &self.base.font).width;
+                    let x0 = content.left() + cv.measure_text_advance(&pre, &self.base.font);
+                    let w = cv.measure_text_advance(&mid, &self.base.font);
                     cv.fill_rect(Rect::new(x0, y, w.max(1.0), line_h), SEL_COLOR);
                 }
             }
             // 文字。
             let line_rect = Rect::new(content.left(), y, content.size.width, line_h);
-            draw_aligned_text(cv, line, line_rect, &self.base.font, color, TextAlign::Left, false);
+            Self::draw_input_text(cv, line, line_rect, &self.base.font, color);
             // 光标（仅当前行）。
             if self.base.focused && self.base.caret_on && i == cur_line {
                 let pre: String = line.chars().take(cur_col).collect();
-                let cx = content.left() + cv.measure_text(&pre, &self.base.font).width + 1.0;
+                let cx = content.left() + cv.measure_text_advance(&pre, &self.base.font) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
                 cv.fill_rect(Rect::new(cx, cyc.max(y), 1.5, caret_h), color);
             }
@@ -296,6 +296,22 @@ impl Edit {
 
     fn shows_placeholder(&self) -> bool {
         self.base.text.is_empty() && self.base.marked.is_empty() && !self.base.placeholder.is_empty()
+    }
+
+    /// 输入文本使用与字符前进宽度相同的排版方式，确保光标紧贴字符边界。
+    fn draw_input_text(
+        cv: &mut dyn Canvas,
+        text: &str,
+        rect: Rect,
+        font: &flexui_gfx::Font,
+        color: Color,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+        let height = cv.measure_text(text, font).height;
+        let y = rect.top() + (rect.size.height - height) / 2.0;
+        cv.draw_text_advance(text, Point::new(rect.left(), y.max(rect.top())), font, color);
     }
 }
 
@@ -332,7 +348,7 @@ impl Widget for Edit {
             let mut offs = Vec::with_capacity(n + 1);
             for i in 0..=n {
                 let pre: String = line.chars().take(i).collect();
-                offs.push(cv.measure_text(&pre, &self.base.font).width);
+                offs.push(cv.measure_text_advance(&pre, &self.base.font));
             }
             lines.push(LineCache { start, offsets: offs });
             start += n + 1; // +1 跳过换行符
@@ -365,8 +381,8 @@ impl Widget for Edit {
             if let Some((lo, hi)) = self.base.sel_range() {
                 let pre: String = self.base.text.chars().take(lo).collect();
                 let sel: String = self.base.text.chars().skip(lo).take(hi - lo).collect();
-                let x0 = content.left() + cv.measure_text(&pre, &self.base.font).width;
-                let w = cv.measure_text(&sel, &self.base.font).width;
+                let x0 = content.left() + cv.measure_text_advance(&pre, &self.base.font);
+                let w = cv.measure_text_advance(&sel, &self.base.font);
                 cv.fill_rect(
                     Rect::new(x0, cy.max(content.top()), w.max(1.0), caret_h),
                     SEL_COLOR,
@@ -377,12 +393,12 @@ impl Widget for Edit {
         let before: String = self.base.text.chars().take(self.base.cursor).collect();
         let after: String = self.base.text.chars().skip(self.base.cursor).collect();
         let display = format!("{before}{}{after}", self.base.marked);
-        draw_aligned_text(cv, &display, content, &self.base.font, color, TextAlign::Left, false);
+        Self::draw_input_text(cv, &display, content, &self.base.font, color);
 
-        let before_w = cv.measure_text(&before, &self.base.font).width;
+        let before_w = cv.measure_text_advance(&before, &self.base.font);
         // 组合串下划线。
         if !self.base.marked.is_empty() {
-            let marked_w = cv.measure_text(&self.base.marked, &self.base.font).width;
+            let marked_w = cv.measure_text_advance(&self.base.marked, &self.base.font);
             let uy = (cy + caret_h - 1.0).min(content.bottom() - 1.0);
             cv.fill_rect(
                 Rect::new(content.left() + before_w, uy, marked_w.max(1.0), 1.0),
@@ -391,7 +407,7 @@ impl Widget for Edit {
         }
         // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与字号一致、垂直居中。
         if self.base.focused && self.base.caret_on {
-            let marked_w = cv.measure_text(&self.base.marked, &self.base.font).width;
+            let marked_w = cv.measure_text_advance(&self.base.marked, &self.base.font);
             let cx = content.left() + before_w + marked_w + 1.0;
             cv.fill_rect(Rect::new(cx, cy.max(content.top()), 1.5, caret_h), color);
         }

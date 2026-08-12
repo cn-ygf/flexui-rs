@@ -624,6 +624,55 @@ impl Canvas for GdiCanvas<'_> {
         }
     }
 
+    fn draw_text_advance(&mut self, text: &str, origin: Point, font: &Font, color: Color) {
+        if text.is_empty() {
+            return;
+        }
+        unsafe {
+            let (f, family) = self.make_font(font);
+            if f.is_null() {
+                if !family.is_null() {
+                    gp::GdipDeleteFontFamily(family);
+                }
+                return;
+            }
+            let mut brush: *mut gp::GpSolidFill = std::ptr::null_mut();
+            gp::GdipCreateSolidFill(argb(color), &mut brush);
+            let layout = gp::RectF {
+                X: origin.x,
+                Y: origin.y,
+                Width: 10000.0,
+                Height: 10000.0,
+            };
+            let mut format: *mut gp::GpStringFormat = std::ptr::null_mut();
+            gp::GdipStringFormatGetGenericTypographic(&mut format);
+            if !format.is_null() {
+                let mut flags = 0;
+                gp::GdipGetStringFormatFlags(format, &mut flags);
+                gp::GdipSetStringFormatFlags(
+                    format,
+                    flags | gp::StringFormatFlagsMeasureTrailingSpaces,
+                );
+            }
+            let wtext = wide(text);
+            gp::GdipDrawString(
+                self.g,
+                wtext.as_ptr(),
+                -1,
+                f,
+                &layout,
+                format,
+                brush as *const gp::GpBrush,
+            );
+            if !format.is_null() {
+                gp::GdipDeleteStringFormat(format);
+            }
+            gp::GdipDeleteBrush(brush as *mut gp::GpBrush);
+            gp::GdipDeleteFont(f);
+            gp::GdipDeleteFontFamily(family);
+        }
+    }
+
     fn measure_text(&self, text: &str, font: &Font) -> Size {
         unsafe {
             let (f, family) = self.make_font(font);
@@ -660,6 +709,61 @@ impl Canvas for GdiCanvas<'_> {
             gp::GdipDeleteFont(f);
             gp::GdipDeleteFontFamily(family);
             Size::new(bbox.Width, bbox.Height)
+        }
+    }
+
+    fn measure_text_advance(&self, text: &str, font: &Font) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        unsafe {
+            let (f, family) = self.make_font(font);
+            if f.is_null() {
+                if !family.is_null() {
+                    gp::GdipDeleteFontFamily(family);
+                }
+                return 0.0;
+            }
+            let layout = gp::RectF {
+                X: 0.0,
+                Y: 0.0,
+                Width: 10000.0,
+                Height: 10000.0,
+            };
+            let mut bbox = gp::RectF {
+                X: 0.0,
+                Y: 0.0,
+                Width: 0.0,
+                Height: 0.0,
+            };
+            let mut format: *mut gp::GpStringFormat = std::ptr::null_mut();
+            gp::GdipStringFormatGetGenericTypographic(&mut format);
+            if !format.is_null() {
+                let mut flags = 0;
+                gp::GdipGetStringFormatFlags(format, &mut flags);
+                gp::GdipSetStringFormatFlags(
+                    format,
+                    flags | gp::StringFormatFlagsMeasureTrailingSpaces,
+                );
+            }
+            let wtext = wide(text);
+            gp::GdipMeasureString(
+                self.g,
+                wtext.as_ptr(),
+                -1,
+                f,
+                &layout,
+                format,
+                &mut bbox,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            if !format.is_null() {
+                gp::GdipDeleteStringFormat(format);
+            }
+            gp::GdipDeleteFont(f);
+            gp::GdipDeleteFontFamily(family);
+            bbox.Width
         }
     }
 
