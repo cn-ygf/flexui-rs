@@ -18,7 +18,8 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, HDC, PAINTSTRUCT,
+    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, ValidateRect, HDC,
+    PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -40,6 +41,10 @@ use crate::gdiplus::{Gdiplus, OffscreenBitmap};
 
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
+/// 延迟到当前鼠标消息完成后再最小化，确保 DWM 缓存的是稳定的最终帧。
+const WM_APP_MINIMIZE: u32 = WM_APP + 1;
+/// 还原消息栈退出后再刷新最小化期间发生的内容更新。
+const WM_APP_RESTORE_REDRAW: u32 = WM_APP + 2;
 
 /// 窗口内部状态：控件树 + 分发器 + 窗口委托（通过窗口 USERDATA 关联到 HWND）。
 struct AppState {
@@ -53,8 +58,12 @@ struct AppState {
     resizable: bool,
     /// 内容区的窗口拖动范围。
     drag_region: WindowDragRegion,
-    /// 用于在最小化还原时同步绘制第一帧，避免 DWM 先合成未更新的客户区。
+    /// 窗口是否处于最小化状态。
     minimized: bool,
+    /// 最近一次有效客户区尺寸；同尺寸还原时直接复用 DWM 缓存帧。
+    client_size: (u16, u16),
+    /// 最小化期间内容发生变化，恢复动画结束后需要异步补画。
+    redraw_after_restore: bool,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -70,7 +79,7 @@ impl WindowHandle for WinWindowHandle {
         unsafe { PostMessageW(self.hwnd, WM_CLOSE, 0, 0) };
     }
     fn minimize(&mut self) {
-        unsafe { ShowWindow(self.hwnd, SW_MINIMIZE) };
+        unsafe { PostMessageW(self.hwnd, WM_APP_MINIMIZE, 0, 0) };
     }
     fn maximize(&mut self) {
         unsafe { ShowWindow(self.hwnd, SW_MAXIMIZE) };
@@ -118,7 +127,8 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         // 资源 ID 1 是 Windows 约定的主应用图标；未嵌入时 LoadIconW 返回空。
         let app_icon = LoadIconW(hinstance, int_resource(1));
         let wc = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
+            // 尺寸变化由 WM_SIZE 显式失效；HREDRAW/VREDRAW 会在还原时制造额外整窗重绘。
+            style: CS_DBLCLKS,
             lpfnWndProc: Some(wndproc),
             cbClsExtra: 0,
             cbWndExtra: 0,
@@ -258,6 +268,8 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         return hwnd;
     }
 
+    let mut client_rect: RECT = std::mem::zeroed();
+    GetClientRect(hwnd, &mut client_rect);
     let state = Box::into_raw(Box::new(AppState {
         root,
         disp,
@@ -267,6 +279,11 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         resizable: config.resizable,
         drag_region: config.drag_region,
         minimized: false,
+        client_size: (
+            (client_rect.right - client_rect.left).max(0) as u16,
+            (client_rect.bottom - client_rect.top).max(0) as u16,
+        ),
+        redraw_after_restore: false,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -378,6 +395,11 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     }
     for w in new_wins {
         create_window(w);
+    }
+    // 最小化期间保留 DWM 的最后一帧，不积累恢复后立即触发的绘制请求。
+    if st.minimized {
+        st.redraw_after_restore |= need || opened || !acts.is_empty() || !doubles.is_empty() || dirty.is_some();
+        return;
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
     if need || opened || !acts.is_empty() || !doubles.is_empty() {
@@ -584,6 +606,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             EndPaint(hwnd, &ps);
             0
         }
+        WM_APP_MINIMIZE => {
+            if !state.is_null() && IsIconic(hwnd) == 0 {
+                // 鼠标已离开即将隐藏的窗口，先把 hover/tooltip 清理后的稳定帧交给 DWM。
+                dispatch(
+                    hwnd,
+                    state,
+                    Event::MouseMove {
+                        pos: Point::new(-1.0, -1.0),
+                    },
+                );
+                InvalidateRect(hwnd, null(), 0);
+                UpdateWindow(hwnd);
+                ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            0
+        }
+        WM_APP_RESTORE_REDRAW => {
+            if !state.is_null() {
+                if (*state).minimized {
+                    (*state).redraw_after_restore = true;
+                } else {
+                    InvalidateRect(hwnd, null(), 0);
+                }
+            }
+            0
+        }
         WM_MOUSEMOVE => {
             dispatch(
                 hwnd,
@@ -782,6 +830,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     (*state).minimized = true;
                 }
                 // 最小化会携带 0 x 0 客户区，不能用它破坏当前布局。
+                // 丢弃系统在最小化过程中生成的无效区，恢复时直接复用稳定帧。
+                ValidateRect(hwnd, null());
                 return 0;
             }
             if wparam != SIZE_RESTORED as usize && wparam != SIZE_MAXIMIZED as usize {
@@ -789,25 +839,38 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 return 0;
             }
 
-            let restored_from_minimized = if state.is_null() {
-                false
+            let w = (lparam & 0xFFFF) as u16;
+            let h = ((lparam >> 16) & 0xFFFF) as u16;
+            let (restored_from_minimized, size_changed, redraw_after_restore) = if state.is_null() {
+                (false, true, false)
             } else {
-                std::mem::replace(&mut (*state).minimized, false)
+                let st = &mut *state;
+                let restored = st.minimized;
+                st.minimized = false;
+                (
+                    restored,
+                    std::mem::replace(&mut st.client_size, (w, h)) != (w, h),
+                    std::mem::take(&mut st.redraw_after_restore),
+                )
             };
-            let w = (lparam & 0xFFFF) as u16 as f32;
-            let h = ((lparam >> 16) & 0xFFFF) as u16 as f32;
-            dispatch(
-                hwnd,
-                state,
-                Event::WindowResized {
-                    width: w,
-                    height: h,
-                },
-            );
-            InvalidateRect(hwnd, null(), 0);
+            if !size_changed && !redraw_after_restore {
+                // 同尺寸还原无需产生新帧，DWM 可直接复用最小化前的重定向表面。
+                return 0;
+            }
+            if size_changed {
+                dispatch(
+                    hwnd,
+                    state,
+                    Event::WindowResized {
+                        width: w as f32,
+                        height: h as f32,
+                    },
+                );
+            }
             if restored_from_minimized {
-                // ShowWindow(SW_RESTORE) 返回前提交完整客户区，避免短暂透出后方窗口。
-                UpdateWindow(hwnd);
+                PostMessageW(hwnd, WM_APP_RESTORE_REDRAW, 0, 0);
+            } else {
+                InvalidateRect(hwnd, null(), 0);
             }
             0
         }
@@ -816,7 +879,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if !state.is_null() {
                 let st = &mut *state;
                 if wparam == 2 {
-                    let changed = st.disp.tick_anims(st.root.as_mut(), 0.016);
+                    let changed = if st.minimized {
+                        false
+                    } else {
+                        st.disp.tick_anims(st.root.as_mut(), 0.016)
+                    };
                     let msgs = st.disp.drain_messages();
                     let mut anim_reqs = Vec::new();
                     let mut ov_reqs = Vec::new();
@@ -844,9 +911,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         );
                     }
                     if changed || !msgs.is_empty() {
-                        InvalidateRect(hwnd, null(), 0);
+                        if st.minimized {
+                            st.redraw_after_restore = true;
+                        } else {
+                            InvalidateRect(hwnd, null(), 0);
+                        }
                     }
-                } else {
+                } else if !st.minimized {
                     let blink = st.disp.blink(st.root.as_mut());
                     st.disp.tooltip_tick(st.root.as_mut());
                     if st.disp.take_redraw() {
@@ -861,6 +932,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 背景擦除由我们的双缓冲全覆盖，拦截以消除闪烁。
         WM_ERASEBKGND => 1,
+        WM_SYSCOMMAND if (wparam & 0xFFF0) == SC_MINIMIZE as usize => {
+            PostMessageW(hwnd, WM_APP_MINIMIZE, 0, 0);
+            0
+        }
         WM_SYSCOMMAND
             if !state.is_null()
                 && !(*state).resizable
