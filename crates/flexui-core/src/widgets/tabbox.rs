@@ -5,17 +5,19 @@ use flexui_gfx::Canvas;
 
 use crate::common_builders;
 use crate::layout;
-use crate::widget::{Base, Container, Node, Widget, WidgetRole};
+use crate::widget::{Base, Container, Node, Widget, WidgetProperty, WidgetRole};
 
 /// 多页容器：仅显示 `selected_index` 指向的那一页，配合 Radio 组成 tabbar。
 pub struct TabBox {
     base: Base,
+    selected_index: usize,
 }
 
 impl TabBox {
     pub fn new() -> Self {
         Self {
             base: Base::new(WidgetRole::TabBox),
+            selected_index: 0,
         }
     }
     /// 追加一页。
@@ -29,7 +31,7 @@ impl TabBox {
     }
     /// 初始选中页。
     pub fn selected(mut self, i: usize) -> Self {
-        self.base.selected_index = i;
+        self.selected_index = i;
         self
     }
 }
@@ -67,7 +69,7 @@ impl Widget for TabBox {
         layout::size_from_content(&self.base, width, height)
     }
     fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
-        let sel = self.base.selected_index;
+        let sel = self.selected_index;
         for (i, child) in self.base.children.iter_mut().enumerate() {
             // 只让当前页可见，其余页隐藏（隐藏页跳过绘制与命中）。
             child.base_mut().visible = i == sel;
@@ -75,6 +77,14 @@ impl Widget for TabBox {
                 layout::layout_node(child.as_mut(), content, cv);
             }
         }
+    }
+    fn apply_property(&mut self, property: WidgetProperty) -> bool {
+        if let WidgetProperty::SelectedIndex(i) = property { self.selected_index = i; true } else { false }
+    }
+    fn selected_index(&self) -> Option<usize> { Some(self.selected_index) }
+    fn set_selected_index(&mut self, index: usize) -> bool {
+        self.selected_index = index.min(self.base.children.len().saturating_sub(1));
+        true
     }
 }
 

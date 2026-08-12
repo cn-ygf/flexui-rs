@@ -33,9 +33,9 @@ impl Easing {
 /// 可动画的数值属性。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnimProp {
-    /// `Base.value`（Progress/Slider，夹取到 0~1）。
+    /// Progress/Slider 的归一化值（夹取到 0~1）。
     Value,
-    /// `Base.scroll_y`（ScrollView/ListView，平滑滚动）。
+    /// ScrollView/ListView 的纵向滚动位置。
     ScrollY,
 }
 

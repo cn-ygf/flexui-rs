@@ -6,29 +6,31 @@ use flexui_gfx::Canvas;
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Clickable, TextControl, Widget, WidgetRole};
+use crate::widget::{Base, Clickable, TextControl, Widget, WidgetProperty, WidgetRole};
 
 use super::paint_indicator_and_text;
 
 /// 单选：同 group 互斥（互斥逻辑在分发器实现），可绑定 tab_index 驱动 TabBox。
 pub struct Radio {
     base: Base,
+    group: Option<u32>,
+    tab_index: Option<usize>,
 }
 
 impl Radio {
     pub fn new(text: impl Into<String>) -> Self {
         let mut base = Base::new(WidgetRole::Radio);
         base.text = text.into();
-        Self { base }
+        Self { base, group: None, tab_index: None }
     }
     /// 所属分组。
     pub fn group(mut self, g: u32) -> Self {
-        self.base.group = Some(g);
+        self.group = Some(g);
         self
     }
     /// 关联的 TabBox 页索引（组成 tabbar）。
     pub fn tab_index(mut self, i: usize) -> Self {
-        self.base.tab_index = Some(i);
+        self.tab_index = Some(i);
         self
     }
     pub fn selected(mut self, v: bool) -> Self {
@@ -51,6 +53,16 @@ impl Widget for Radio {
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         paint_indicator_and_text(&self.base, cv, style, true);
     }
+    fn apply_property(&mut self, property: WidgetProperty) -> bool {
+        match property {
+            WidgetProperty::Group(v) => self.group = v,
+            WidgetProperty::TabIndex(v) => self.tab_index = v,
+            _ => return false,
+        }
+        true
+    }
+    fn selection_group(&self) -> Option<u32> { self.group }
+    fn tab_index(&self) -> Option<usize> { self.tab_index }
 }
 
 common_builders!(Radio);

@@ -28,7 +28,7 @@ mod vbox;
 pub use button::Button;
 pub use checkbox::CheckBox;
 pub use combobox::ComboBox;
-pub use edit::Edit;
+pub use edit::{Edit, EditConfig};
 pub use hbox::HBox;
 pub use image::Image;
 pub use label::Label;

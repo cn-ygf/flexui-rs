@@ -482,9 +482,9 @@ unsafe fn imm_comp_string(hwnd: HWND, gcs: u32) -> Option<String> {
 }
 
 /// 对焦点控件的 Base 执行 f，返回其逻辑矩形（供失效重绘）。
-unsafe fn with_focus_base(
+unsafe fn with_focus_widget(
     state: *mut AppState,
-    f: impl FnOnce(&mut flexui_core::Base),
+    f: impl FnOnce(&mut dyn Widget),
 ) -> Option<Rect> {
     if state.is_null() {
         return None;
@@ -492,17 +492,15 @@ unsafe fn with_focus_base(
     let st = &mut *state;
     let id = st.disp.focus()?;
     let w = flexui_core::find_mut_by_id(st.root.as_mut(), id)?;
-    let b = w.base_mut();
-    f(b);
-    Some(b.rect)
+    let rect = w.base().rect;
+    f(w);
+    Some(rect)
 }
 
 /// 设置焦点控件的 IME 组合串并失效其区域。
 unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
     let owned = text.to_string();
-    if let Some(r) = with_focus_base(state, move |b| {
-        if !b.edit_read_only { b.marked = owned; }
-    }) {
+    if let Some(r) = with_focus_widget(state, move |w| { w.set_marked_text(owned); }) {
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -510,7 +508,7 @@ unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
 
 /// 清除焦点控件的 IME 组合串并失效其区域。
 unsafe fn clear_marked_on_focus(hwnd: HWND, state: *mut AppState) {
-    if let Some(r) = with_focus_base(state, |b| b.marked.clear()) {
+    if let Some(r) = with_focus_widget(state, |w| { w.clear_marked_text(); }) {
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }

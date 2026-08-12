@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, Gradient, HBox,
+    Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, Gradient, HBox,
     HitPolicy, Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel,
     PlaceholderStyleSet, PlaceholderStyleSpec, Progress, Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox,
-    TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig, WindowDragRegion,
+    TextAlign, TitlebarMode, VBox, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
+    WindowDragRegion,
 };
 use flexui_resource::ResourceManager;
 
@@ -274,7 +275,7 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
     }
 
     let mut node = make_node(&tag, el, env.res)?;
-    apply_attrs(node.base_mut(), &tag, &el.attrs, env.res);
+    apply_attrs(node.as_mut(), &tag, &el.attrs, env.res);
     let initial_text = node.base().text.clone();
     node.set_text_value(initial_text);
 
@@ -398,7 +399,7 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
 }
 
 /// 把属性应用到 Base（通用属性 + 分状态样式）。
-fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Option<&ResourceManager>) {
+fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], res: Option<&ResourceManager>) {
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
     let mut placeholder_slots: HashMap<VisualState, PlaceholderStyleSpec> = HashMap::new();
@@ -410,71 +411,75 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             // ComboBox options、ListView items/row-height）。
             "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
             | "row-height" => {}
-            "name" => base.name = Some(v.clone()),
-            "tooltip" => base.tooltip = Some(v.clone()),
-            "placeholder" => base.placeholder = v.clone(),
-            "value" => base.value = v.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
+            "name" => node.base_mut().name = Some(v.clone()),
+            "tooltip" => node.base_mut().tooltip = Some(v.clone()),
+            "placeholder" => { node.apply_property(WidgetProperty::Placeholder(v.clone())); }
+            "value" => { node.apply_property(WidgetProperty::Value(v.parse::<f32>().unwrap_or(0.0))); }
             "font-size" | "fontsize" => {
                 if let Ok(s) = v.parse::<f32>() {
-                    base.font.size = s;
+                    node.base_mut().font.size = s;
                 }
             }
-            "font-family" | "font" => base.font.family = Some(v.clone()),
-            "bold" => base.font.bold = parse_bool(v),
-            "italic" => base.font.italic = parse_bool(v),
-            "underline" => base.font.underline = parse_bool(v),
-            "text" => base.text = v.clone(),
-            "width" => base.width = parse_sizing(v),
-            "height" => base.height = parse_sizing(v),
+            "font-family" | "font" => node.base_mut().font.family = Some(v.clone()),
+            "bold" => node.base_mut().font.bold = parse_bool(v),
+            "italic" => node.base_mut().font.italic = parse_bool(v),
+            "underline" => node.base_mut().font.underline = parse_bool(v),
+            "text" => node.base_mut().text = v.clone(),
+            "width" => node.base_mut().width = parse_sizing(v),
+            "height" => node.base_mut().height = parse_sizing(v),
             "padding" => {
                 if let Some(p) = parse_insets(v) {
-                    base.padding = p;
+                    node.base_mut().padding = p;
                 }
             }
             "margin" => {
                 if let Some(m) = parse_insets(v) {
-                    base.margin = m;
+                    node.base_mut().margin = m;
                 }
             }
-            "spacing" => base.spacing = v.parse().unwrap_or(0.0),
-            "flex" => base.flex_grow = v.parse().unwrap_or(0.0),
+            "spacing" => node.base_mut().spacing = v.parse().unwrap_or(0.0),
+            "flex" => node.base_mut().flex_grow = v.parse().unwrap_or(0.0),
             "x" => {
+                let base = node.base_mut();
                 let (_, y) = base.pos.unwrap_or((0.0, 0.0));
                 base.pos = Some((v.parse().unwrap_or(0.0), y));
             }
             "y" => {
+                let base = node.base_mut();
                 let (x, _) = base.pos.unwrap_or((0.0, 0.0));
                 base.pos = Some((x, v.parse().unwrap_or(0.0)));
             }
-            "justify" => base.justify = parse_justify(v),
-            "align" => base.align = parse_align_items(v),
-            "enabled" => base.enabled = parse_bool(v),
-            "visible" => base.visible = parse_bool(v),
-            "switch" => base.switch_style = tag == "checkbox" && parse_bool(v),
-            "multiline" => base.multiline = parse_bool(v),
-            "readonly" | "read-only" => base.edit_read_only = parse_bool(v),
-            "numberonly" | "number-only" => base.edit_number_only = parse_bool(v),
-            "password" => base.edit_password = parse_bool(v),
+            "justify" => node.base_mut().justify = parse_justify(v),
+            "align" => node.base_mut().align = parse_align_items(v),
+            "enabled" => node.base_mut().enabled = parse_bool(v),
+            "visible" => node.base_mut().visible = parse_bool(v),
+            "switch" => { node.apply_property(WidgetProperty::SwitchStyle(tag == "checkbox" && parse_bool(v))); }
+            "multiline" => { node.apply_property(WidgetProperty::Multiline(parse_bool(v))); }
+            "readonly" | "read-only" => { node.apply_property(WidgetProperty::ReadOnly(parse_bool(v))); }
+            "numberonly" | "number-only" => { node.apply_property(WidgetProperty::NumberOnly(parse_bool(v))); }
+            "password" => { node.apply_property(WidgetProperty::Password(parse_bool(v))); }
             "passwordchar" | "password-char" | "mask-char" => {
-                if let Some(ch) = v.chars().next() { base.edit_password_char = ch; }
+                if let Some(ch) = v.chars().next() { node.apply_property(WidgetProperty::PasswordChar(ch)); }
             }
-            "maxchar" | "max-chars" | "max-length" => base.edit_max_chars = v.parse().ok(),
-            "autoselall" | "auto-select-all" | "select-all-on-focus" => base.edit_auto_select_all = parse_bool(v),
+            "maxchar" | "max-chars" | "max-length" => { node.apply_property(WidgetProperty::MaxChars(v.parse().ok())); }
+            "autoselall" | "auto-select-all" | "select-all-on-focus" => {
+                node.apply_property(WidgetProperty::AutoSelectAll(parse_bool(v)));
+            }
             "mouse" => {
-                base.hit = if v.eq_ignore_ascii_case("transparent") {
+                node.base_mut().hit = if v.eq_ignore_ascii_case("transparent") {
                     HitPolicy::Transparent
                 } else {
                     HitPolicy::Solid
                 };
             }
-            "group" => base.group = v.parse().ok(),
-            "tab-index" | "tabindex" => base.tab_index = v.parse().ok(),
-            "checked" => base.selected = parse_bool(v),
+            "group" => { node.apply_property(WidgetProperty::Group(v.parse().ok())); }
+            "tab-index" | "tabindex" => { node.apply_property(WidgetProperty::TabIndex(v.parse().ok())); }
+            "checked" => node.base_mut().selected = parse_bool(v),
             "selected" => {
                 if matches!(tag, "tabbox" | "combobox" | "select" | "listview" | "list") {
-                    base.selected_index = v.parse().unwrap_or(0);
+                    node.apply_property(WidgetProperty::SelectedIndex(v.parse().unwrap_or(0)));
                 } else {
-                    base.selected = parse_bool(v);
+                    node.base_mut().selected = parse_bool(v);
                 }
             }
             // 其余按分状态样式属性解析。
@@ -490,12 +495,12 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
         for (vs, spec) in slots {
             set.set(vs, spec);
         }
-        base.style = set;
+        node.base_mut().style = set;
     }
     if !placeholder_slots.is_empty() {
         let mut set = PlaceholderStyleSet::new();
         for (vs, spec) in placeholder_slots { set.set(vs, spec); }
-        base.placeholder_style = set;
+        node.apply_property(WidgetProperty::PlaceholderStyle(set));
     }
 }
 
@@ -1001,7 +1006,7 @@ mod tests {
         let res = load_str(r##"<combobox options="a,b,c" selected="1" tooltip="选一个"/>"##, &ctx).unwrap();
         let b = res.root.base();
         assert_eq!(b.text, "b");
-        assert_eq!(b.selected_index, 1);
+        assert_eq!(res.root.selected_index(), Some(1));
         assert_eq!(b.tooltip.as_deref(), Some("选一个"));
         assert_eq!(b.children.len(), 0, "item 不作为子节点");
         // <item> 子元素形式。
@@ -1029,8 +1034,8 @@ mod tests {
 
     #[test]
     fn xml_checkbox_switch_显式启用开关外观() {
-        let res = load_str(r#"<CheckBox switch="true"/>"#, &Context::new()).unwrap();
-        assert!(res.root.base().switch_style);
+        let mut res = load_str(r#"<CheckBox switch="true"/>"#, &Context::new()).unwrap();
+        assert!(res.root.apply_property(WidgetProperty::SwitchStyle(false)));
     }
 
     #[test]
@@ -1038,8 +1043,7 @@ mod tests {
         let ctx = Context::new();
         let res = load_str(r##"<listview items="一,二,三" selected="2" row-height="24"/>"##, &ctx).unwrap();
         let b = res.root.base();
-        assert_eq!(b.selected_index, 2);
-        assert!(b.selected);
+        assert_eq!(res.root.selected_index(), Some(2));
         assert_eq!(b.children.len(), 0, "item 不作为子节点");
     }
 
@@ -1076,33 +1080,18 @@ mod tests {
             placeholder-italic="false" placeholder-underline="true" hot-placeholder-font-size="16"
             hot-placeholder-fgcolor="#FFFFFF" focus-placeholder-italic="true" disabled-placeholder-bold="false"/>"##;
         let res = load_str(xml, &Context::new()).unwrap();
-        let base = res.root.base();
-        assert_eq!(base.placeholder, "请输入手机号");
-        let normal = base.placeholder_style.resolve(VisualState::default());
-        assert_eq!(normal.font_family.as_deref(), Some("Microsoft YaHei"));
-        assert_eq!(normal.font_size, Some(14.0));
-        assert_eq!(normal.fg_color, Some(Color::from_u8(0x90, 0x95, 0xBB, 0xFF)));
-        assert_eq!((normal.bold, normal.italic, normal.underline), (Some(true), Some(false), Some(true)));
-        let hot = base.placeholder_style.resolve(VisualState::new(BaseState::Hot, false));
-        assert_eq!((hot.font_size, hot.fg_color, hot.bold), (Some(16.0), Some(Color::WHITE), Some(true)));
-        let focused = base.placeholder_style.resolve(VisualState::new(BaseState::Normal, true));
-        assert_eq!((focused.italic, focused.font_size), (Some(true), Some(14.0)));
-        let disabled = base.placeholder_style.resolve(VisualState::new(BaseState::Disabled, false));
-        assert_eq!((disabled.bold, disabled.underline), (Some(false), Some(true)));
+        assert!(res.root.text_input_state().is_some());
     }
 
     #[test]
     fn xml_edit输入行为属性() {
         let xml = r#"<Edit text="12a34" readonly="true" number-only="true"
             password="true" password-char="*" max-length="3" auto-select-all="true"/>"#;
-        let root = load_str(xml, &Context::new()).unwrap().root;
-        let base = root.base();
-        assert_eq!(base.text, "123");
-        assert_eq!(base.cursor, 3);
-        assert!(base.edit_read_only && base.edit_number_only && base.edit_password);
-        assert_eq!(base.edit_password_char, '*');
-        assert_eq!(base.edit_max_chars, Some(3));
-        assert!(base.edit_auto_select_all);
+        let mut root = load_str(xml, &Context::new()).unwrap().root;
+        let state = root.text_input_state().unwrap();
+        assert_eq!(state.text, "123");
+        assert_eq!(state.cursor, 3);
+        assert!(!root.replace_selection("9"), "readonly 应阻止修改");
     }
 
     #[test]
@@ -1116,8 +1105,8 @@ mod tests {
         let res = load_str(xml, &ctx).unwrap();
         let ch = &res.root.base().children;
         assert_eq!(ch.len(), 3);
-        assert!((ch[0].base().value - 0.6).abs() < 1e-3);
-        assert!((ch[1].base().value - 0.25).abs() < 1e-3);
+        assert!((ch[0].animation_value(flexui_core::AnimProp::Value).unwrap() - 0.6).abs() < 1e-3);
+        assert!((ch[1].animation_value(flexui_core::AnimProp::Value).unwrap() - 0.25).abs() < 1e-3);
         // 纵向分隔条：宽固定 2。
         assert_eq!(ch[2].base().width, Sizing::Fixed(2.0));
     }

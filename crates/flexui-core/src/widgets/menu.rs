@@ -17,17 +17,17 @@ const HL_COLOR: Color = Color::rgba(0.28, 0.42, 0.70, 0.55);
 /// 菜单项：浮层菜单中的一行。text=标签，selected_index=行号，hover 高亮。
 pub struct MenuItem {
     base: Base,
+    index: usize,
 }
 
 impl MenuItem {
     pub fn new(label: impl Into<String>, index: usize) -> Self {
         let mut base = Base::new(WidgetRole::MenuItem);
         base.text = label.into();
-        base.selected_index = index;
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(28.0);
         base.padding = flexui_geometry::Insets::new(10.0, 0.0, 10.0, 0.0);
-        Self { base }
+        Self { base, index }
     }
 }
 
@@ -51,6 +51,7 @@ impl Widget for MenuItem {
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
         draw_aligned_text(cv, &self.base.text, content, &self.base.font, color, TextAlign::Left, true);
     }
+    fn selected_index(&self) -> Option<usize> { Some(self.index) }
 }
 
 common_builders!(MenuItem);
@@ -113,8 +114,8 @@ mod tests {
         let ch = &node.base().children;
         assert_eq!(ch.len(), 2);
         assert_eq!(ch[0].base().role, WidgetRole::MenuItem);
-        assert_eq!(ch[0].base().selected_index, 0);
-        assert_eq!(ch[1].base().selected_index, 1);
+        assert_eq!(ch[0].selected_index(), Some(0));
+        assert_eq!(ch[1].selected_index(), Some(1));
         assert_eq!(ch[0].base().name.as_deref(), Some("a"));
         assert_eq!(ch[1].base().name, None, "空 name 不具名");
     }

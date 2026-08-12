@@ -21,7 +21,7 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    find_mut_by_id, layout_node, paint_tree, Base, Dispatcher, Event, Mods, MouseButton, NewWindow,
+    find_mut_by_id, layout_node, paint_tree, Dispatcher, Event, Mods, MouseButton, NewWindow,
     Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowDragRegion,
     WindowHandle,
 };
@@ -283,29 +283,31 @@ define_class!(
 
         #[unsafe(method(selectedRange))]
         fn selected_range(&self) -> NSRange {
-            self.with_focused(|b| {
-                let (lo, hi) = b.sel_range().unwrap_or((b.cursor, b.cursor));
-                let loc = char_index_to_utf16(&b.text, lo);
-                let end = char_index_to_utf16(&b.text, hi);
-                NSRange::new(loc, end - loc)
-            }).unwrap_or(NSRange::new(0, 0))
+            self.with_focused_widget(|w| {
+                let state = w.text_input_state()?;
+                let (lo, hi) = state.selection.unwrap_or((state.cursor, state.cursor));
+                let loc = char_index_to_utf16(&state.text, lo);
+                let end = char_index_to_utf16(&state.text, hi);
+                Some(NSRange::new(loc, end - loc))
+            }).flatten().unwrap_or(NSRange::new(0, 0))
         }
 
         #[unsafe(method(markedRange))]
         fn marked_range(&self) -> NSRange {
-            self.with_focused(|b| {
-                if b.marked.is_empty() {
-                    NSRange::new(NSNotFound as NSUInteger, 0)
+            self.with_focused_widget(|w| {
+                let state = w.text_input_state()?;
+                if state.marked.is_empty() {
+                    Some(NSRange::new(NSNotFound as NSUInteger, 0))
                 } else {
-                    NSRange::new(char_index_to_utf16(&b.text, b.cursor), b.marked.encode_utf16().count())
+                    Some(NSRange::new(char_index_to_utf16(&state.text, state.cursor), state.marked.encode_utf16().count()))
                 }
             })
-            .unwrap_or(NSRange::new(NSNotFound as NSUInteger, 0))
+            .flatten().unwrap_or(NSRange::new(NSNotFound as NSUInteger, 0))
         }
 
         #[unsafe(method(hasMarkedText))]
         fn has_marked(&self) -> bool {
-            self.with_focused(|b| !b.marked.is_empty()).unwrap_or(false)
+            self.with_focused_widget(|w| w.text_input_state().is_some_and(|s| !s.marked.is_empty())).unwrap_or(false)
         }
 
         #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
@@ -682,14 +684,6 @@ impl FlexView {
     }
 
     /// 对当前焦点控件的 Base 执行闭包（IME 读写组合串/光标用）。
-    fn with_focused<R>(&self, f: impl FnOnce(&mut Base) -> R) -> Option<R> {
-        let mut st = self.ivars().state.borrow_mut();
-        let AppState { root, disp, .. } = &mut *st;
-        let id = disp.focus()?;
-        let w = find_mut_by_id(root.as_mut(), id)?;
-        Some(f(w.base_mut()))
-    }
-
     fn with_focused_widget<R>(&self, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, disp, .. } = &mut *st;
@@ -700,7 +694,7 @@ impl FlexView {
 
     /// IME 提交：清组合串并逐字符发 Char（回车转 ENTER）。
     fn ime_insert(&self, text: &str) {
-        self.with_focused(|b| b.marked.clear());
+        self.with_focused_widget(|w| { w.clear_marked_text(); });
         for ch in text.chars() {
             if ch == '\n' || ch == '\r' {
                 self.dispatch(Event::KeyDown {
@@ -715,9 +709,9 @@ impl FlexView {
 
     /// IME 设置组合串（marked text），只失效焦点控件区域。
     fn ime_set_marked(&self, text: &str) {
-        if let Some(r) = self.with_focused(|b| {
-            if !b.edit_read_only { b.marked = text.to_string(); }
-            b.rect
+        if let Some(r) = self.with_focused_widget(|w| {
+            w.set_marked_text(text.to_string());
+            w.base().rect
         }) {
             self.setNeedsDisplayInRect(to_nsrect(r));
         }
@@ -725,9 +719,9 @@ impl FlexView {
 
     /// IME 清除组合串。
     fn ime_clear_marked(&self) {
-        if let Some(r) = self.with_focused(|b| {
-            b.marked.clear();
-            b.rect
+        if let Some(r) = self.with_focused_widget(|w| {
+            w.clear_marked_text();
+            w.base().rect
         }) {
             self.setNeedsDisplayInRect(to_nsrect(r));
         }

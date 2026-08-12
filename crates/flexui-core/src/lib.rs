@@ -26,10 +26,10 @@ pub use sizing::{Align, Justify, Sizing};
 pub use style::{BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec, VisualState};
 pub use widget::{
     find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable, Container,
-    HitPolicy, Node, TextControl, Widget, WidgetId, WidgetRole,
+    HitPolicy, Node, TextControl, TextInputState, Widget, WidgetId, WidgetProperty, WidgetRole,
 };
 pub use widgets::{
-    build_menu, build_menu_labels, build_tooltip, Button, CheckBox, ComboBox, Edit, HBox, Image,
+    build_menu, build_menu_labels, build_tooltip, Button, CheckBox, ComboBox, Edit, EditConfig, HBox, Image,
     Label, ListView, MenuItem, Panel, Progress, Radio, ScrollView, Separator, Slider, TabBox, VBox,
 };
 pub use window::{

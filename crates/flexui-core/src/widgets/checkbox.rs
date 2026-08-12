@@ -6,20 +6,21 @@ use flexui_gfx::Canvas;
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Clickable, TextControl, Widget, WidgetRole};
+use crate::widget::{Base, Clickable, TextControl, Widget, WidgetProperty, WidgetRole};
 
 use super::paint_indicator_and_text;
 
 /// 勾选框：点击切换 selected。
 pub struct CheckBox {
     base: Base,
+    switch_style: bool,
 }
 
 impl CheckBox {
     pub fn new(text: impl Into<String>) -> Self {
         let mut base = Base::new(WidgetRole::CheckBox);
         base.text = text.into();
-        Self { base }
+        Self { base, switch_style: false }
     }
     pub fn checked(mut self, v: bool) -> Self {
         self.base.selected = v;
@@ -27,7 +28,7 @@ impl CheckBox {
     }
     /// 使用横向开关外观；默认仍为传统勾选框。
     pub fn switch(mut self, v: bool) -> Self {
-        self.base.switch_style = v;
+        self.switch_style = v;
         self
     }
 }
@@ -44,11 +45,14 @@ impl Widget for CheckBox {
         layout::size_from_content(&self.base, s.width + 26.0, s.height.max(18.0))
     }
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
-        if self.base.switch_style && style.bg_image.is_none() && style.fg_image.is_none() {
+        if self.switch_style && style.bg_image.is_none() && style.fg_image.is_none() {
             paint_switch_knob(&self.base, cv, style);
         } else {
             paint_indicator_and_text(&self.base, cv, style, false);
         }
+    }
+    fn apply_property(&mut self, property: WidgetProperty) -> bool {
+        if let WidgetProperty::SwitchStyle(v) = property { self.switch_style = v; true } else { false }
     }
 }
 

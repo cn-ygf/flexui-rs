@@ -16,6 +16,7 @@ use crate::widget::{Base, Widget, WidgetRole};
 pub struct ComboBox {
     base: Base,
     options: Vec<String>,
+    selected_index: usize,
 }
 
 impl ComboBox {
@@ -23,6 +24,7 @@ impl ComboBox {
         Self {
             base: Base::new(WidgetRole::ComboBox),
             options: Vec::new(),
+            selected_index: 0,
         }
     }
     /// 设置选项列表；默认选中第 0 项并回填文本。
@@ -31,7 +33,7 @@ impl ComboBox {
         if self.base.text.is_empty() {
             if let Some(first) = self.options.first() {
                 self.base.text = first.clone();
-                self.base.selected_index = 0;
+                self.selected_index = 0;
             }
         }
         self
@@ -44,13 +46,17 @@ impl ComboBox {
 
     /// 当前选中项索引。
     pub fn index(&self) -> usize {
-        self.base.selected_index
+        self.selected_index
     }
 
-    fn apply_selection(&mut self, i: usize) {
+    fn apply_selection(&mut self, i: usize) -> bool {
         if let Some(s) = self.options.get(i) {
-            self.base.selected_index = i;
+            let changed = self.selected_index != i;
+            self.selected_index = i;
             self.base.text = s.clone();
+            changed
+        } else {
+            false
         }
     }
 }
@@ -107,6 +113,8 @@ impl Widget for ComboBox {
     fn set_selected_item(&mut self, i: usize) {
         self.apply_selection(i);
     }
+    fn selected_index(&self) -> Option<usize> { Some(self.selected_index) }
+    fn set_selected_index(&mut self, index: usize) -> bool { self.apply_selection(index) }
 }
 
 common_builders!(ComboBox);

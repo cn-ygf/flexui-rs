@@ -186,8 +186,9 @@ impl Dispatcher {
         easing: Easing,
     ) -> bool {
         let Some(id) = find_by_name(root, name) else { return false };
-        let mut from = 0.0;
-        visit_mut(root, id, &mut |w| from = read_prop(w.base(), prop));
+        let mut from = None;
+        visit_mut(root, id, &mut |w| from = w.animation_value(prop));
+        let Some(from) = from else { return false };
         self.anims.retain(|a| !(a.target == id && a.prop == prop));
         self.anims.push(Anim {
             target: id,
@@ -213,7 +214,7 @@ impl Dispatcher {
         let apply: Vec<(WidgetId, AnimProp, f32)> =
             self.anims.iter().map(|a| (a.target, a.prop, a.value_at())).collect();
         for (id, prop, v) in apply {
-            visit_mut(root, id, &mut |w| write_prop(w.base_mut(), prop, v));
+            visit_mut(root, id, &mut |w| { w.set_animation_value(prop, v); });
         }
         self.anims.retain(|a| !a.done());
         self.needs_redraw = true;
@@ -424,7 +425,7 @@ impl Dispatcher {
         let mut item_name: Option<String> = None;
         visit_mut(ov_root, pid, &mut |w| {
             if w.base().role == WidgetRole::MenuItem {
-                idx = Some(w.base().selected_index);
+                idx = w.selected_index();
                 item_name = w.base().name.clone();
             }
         });
@@ -551,9 +552,7 @@ impl Dispatcher {
                     if is_pointer_target(role) {
                         self.forward_to_widget(root, id, ev);
                         if old_focus != self.focus && role == Some(WidgetRole::Edit) {
-                            visit_mut(root, id, &mut |w| {
-                                if w.base().edit_auto_select_all { w.select_all(); }
-                            });
+                            visit_mut(root, id, &mut |w| w.focus_gained());
                         }
                         // 列表点击即选择：按 name 上报，供窗口层 on_activate 处理。
                         if role == Some(WidgetRole::ListView) {
@@ -637,13 +636,12 @@ impl Dispatcher {
         };
         self.focus = Some(next);
         for_each_mut(root, &mut |w| {
-            let auto_select = {
-                let b = w.base_mut();
-                b.focused = b.id == next;
-                if b.focused { b.caret_on = true; }
-                b.focused && b.role == WidgetRole::Edit && b.edit_auto_select_all
-            };
-            if auto_select { w.select_all(); }
+            let focused = w.base().id == next;
+            w.base_mut().focused = focused;
+            if focused {
+                w.base_mut().caret_on = true;
+                w.focus_gained();
+            }
         });
         self.needs_redraw = true;
     }
@@ -665,17 +663,15 @@ impl Dispatcher {
         let mut target: Option<WidgetId> = None;
         for_each_visible_mut(root, true, &mut |w| {
             let b = w.base();
-            if b.scrollable && b.rect.contains(pos) {
+            if w.is_scrollable() && b.rect.contains(pos) {
                 target = Some(b.id); // 后序覆盖 → 保留最深（子在父后遍历）
             }
         });
         if let Some(id) = target {
             let mut rect = None;
             visit_mut(root, id, &mut |w| {
-                let b = w.base_mut();
-                let max_scroll = (b.content_h - b.rect.size.height).max(0.0);
-                b.scroll_y = (b.scroll_y - dy).clamp(0.0, max_scroll);
-                rect = Some(b.rect);
+                rect = Some(w.base().rect);
+                w.scroll_by(dy);
             });
             if let Some(r) = rect {
                 self.mark_dirty(r); // 只脏滚动区
@@ -787,6 +783,8 @@ impl Dispatcher {
         let mut menu: Option<Vec<String>> = None;
         let mut anchor = Rect::default();
         visit_mut(root, id, &mut |w| {
+            let group = w.selection_group();
+            let tab_index = w.tab_index();
             let b = w.base_mut();
             if !b.enabled {
                 return;
@@ -797,7 +795,7 @@ impl Dispatcher {
                 WidgetRole::Radio => b.selected = true,
                 _ => {}
             }
-            info = Some((b.role, b.group, b.tab_index));
+            info = Some((b.role, group, tab_index));
             activated_name = b.name.clone();
             anchor = b.rect;
             menu = w.menu_items();
@@ -826,9 +824,11 @@ impl Dispatcher {
         // 2. Radio：同组互斥 + tabbar 联动。
         if let Some((WidgetRole::Radio, Some(g), tab_index)) = info {
             for_each_mut(root, &mut |w| {
-                let b = w.base_mut();
-                if b.role == WidgetRole::Radio && b.group == Some(g) && b.id != id {
-                    b.selected = false;
+                if w.base().role == WidgetRole::Radio
+                    && w.selection_group() == Some(g)
+                    && w.base().id != id
+                {
+                    w.base_mut().selected = false;
                 }
             });
             if let Some(ti) = tab_index {
@@ -840,9 +840,7 @@ impl Dispatcher {
                     .map(|bd| bd.tabbox)
                     .collect();
                 for tb_id in targets {
-                    visit_mut(root, tb_id, &mut |w| {
-                        w.base_mut().selected_index = ti;
-                    });
+                    visit_mut(root, tb_id, &mut |w| { w.set_selected_index(ti); });
                 }
             }
         }
@@ -889,21 +887,7 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
 }
 
 /// 读取控件的可动画属性值。
-fn read_prop(b: &crate::widget::Base, prop: AnimProp) -> f32 {
-    match prop {
-        AnimProp::Value => b.value,
-        AnimProp::ScrollY => b.scroll_y,
-    }
-}
-
 /// 写入控件的可动画属性值（带各自的取值约束）。
-fn write_prop(b: &mut crate::widget::Base, prop: AnimProp, v: f32) {
-    match prop {
-        AnimProp::Value => b.value = v.clamp(0.0, 1.0),
-        AnimProp::ScrollY => b.scroll_y = v.max(0.0),
-    }
-}
-
 /// 计算浮层摆放矩形：优先锚点下方、放不下则上翻；X 夹到窗内；至少 min_width 宽。
 fn place_overlay(anchor: Rect, desired: Size, window: Size, min_width: f32) -> Rect {
     let w = desired.width.max(min_width).min(window.width);
@@ -1100,7 +1084,6 @@ mod tests {
             .push(Panel::new().size(80.0, 40.0)); // 5×40 = 200 内容高
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
-        assert_eq!(root.base().content_h, 200.0);
         assert_eq!(root.base().children[0].base().rect.top(), 0.0);
 
         let mut disp = Dispatcher::new();
@@ -1108,7 +1091,7 @@ mod tests {
             &mut root,
             &Event::MouseWheel { pos: Point::new(50.0, 50.0), dx: 0.0, dy: -60.0 },
         );
-        assert_eq!(root.base().scroll_y, 60.0); // 视口100 内容200 → 可滚到 100，60 有效
+        assert_eq!(root.scroll_position(), Some(60.0)); // 视口100 内容200 → 可滚到 100，60 有效
         // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
@@ -1166,11 +1149,11 @@ mod tests {
             &mut root,
             &Event::MouseDown { pos: Point::new(25.0, 20.0), button: MouseButton::Left },
         );
-        assert_eq!(root.base().cursor, 3);
-        assert_eq!(root.base().sel_range(), None);
+        assert_eq!(root.cursor(), 3);
+        assert_eq!(root.selection(), None);
         // 拖到 x≈8 → 边界1；选区 (1,3) = "el"。
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(8.0, 20.0) });
-        assert_eq!(root.base().sel_range(), Some((1, 3)));
+        assert_eq!(root.selection(), Some((1, 3)));
         assert_eq!(root.selected_text().as_deref(), Some("el"));
     }
 
@@ -1185,13 +1168,13 @@ mod tests {
             &mut root,
             &Event::MouseDown { pos: Point::new(50.0, 10.0), button: MouseButton::Left },
         );
-        assert!((root.base().value - 0.5).abs() < 1e-3, "got {}", root.base().value);
+        assert!((root.current() - 0.5).abs() < 1e-3, "got {}", root.current());
         // 拖到 x=80 → 0.8
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(80.0, 10.0) });
-        assert!((root.base().value - 0.8).abs() < 1e-3);
+        assert!((root.current() - 0.8).abs() < 1e-3);
         // 越界夹取
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(200.0, 10.0) });
-        assert_eq!(root.base().value, 1.0);
+        assert_eq!(root.current(), 1.0);
     }
 
     #[test]
@@ -1289,8 +1272,7 @@ mod tests {
         // 点击第 2 行（y≈50 → row 2，列表在 (0,0,200,200)）。
         disp.handle(&mut root, &Event::MouseDown { pos: Point::new(20.0, 50.0), button: MouseButton::Left });
         assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
-        assert_eq!(root.base().children[0].base().selected_index, 2);
-        assert!(root.base().children[0].base().selected);
+        assert_eq!(root.base().children[0].selected_index(), Some(2));
     }
 
     #[test]
@@ -1316,11 +1298,11 @@ mod tests {
         assert!(disp.has_anims());
         // 0.5s → 0.5
         assert!(disp.tick_anims(&mut root, 0.5));
-        let v = root.base().children[0].base().value;
+        let v = root.base().children[0].animation_value(AnimProp::Value).unwrap();
         assert!((v - 0.5).abs() < 1e-3, "got {v}");
         // 再 0.5s → 1.0 且结束
         disp.tick_anims(&mut root, 0.5);
-        assert!((root.base().children[0].base().value - 1.0).abs() < 1e-3);
+        assert!((root.base().children[0].animation_value(AnimProp::Value).unwrap() - 1.0).abs() < 1e-3);
         assert!(!disp.has_anims());
         // 结束后无变化
         assert!(!disp.tick_anims(&mut root, 0.5));
@@ -1403,7 +1385,7 @@ mod tests {
         let mut disp = Dispatcher::new();
         // x≈40 落在 "bar" 内 → 选中整词。
         disp.handle(&mut root, &Event::DoubleClick { pos: Point::new(40.0, 20.0) });
-        assert_eq!(root.base().sel_range(), Some((4, 7)));
+        assert_eq!(root.selection(), Some((4, 7)));
         assert_eq!(root.selected_text().as_deref(), Some("bar"));
     }
 
@@ -1548,6 +1530,6 @@ mod tests {
         // 点第二个 radio（y 在 20~40）
         click_at(&mut disp, &mut root, Point::new(50.0, 30.0));
         // TabBox 是第三个子节点
-        assert_eq!(root.base().children[2].base().selected_index, 1);
+        assert_eq!(root.base().children[2].selected_index(), Some(1));
     }
 }

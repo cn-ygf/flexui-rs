@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use flexui_geometry::{Insets, Rect, Size};
 use flexui_gfx::{Canvas, Font};
 
+use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow};
 use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
@@ -57,6 +58,32 @@ pub enum WidgetRole {
     ListView,
 }
 
+/// XML/构建器写入控件专属配置的类型安全入口。
+pub enum WidgetProperty {
+    Placeholder(String),
+    PlaceholderStyle(PlaceholderStyleSet),
+    Multiline(bool),
+    ReadOnly(bool),
+    NumberOnly(bool),
+    Password(bool),
+    PasswordChar(char),
+    MaxChars(Option<usize>),
+    AutoSelectAll(bool),
+    SwitchStyle(bool),
+    Group(Option<u32>),
+    TabIndex(Option<usize>),
+    SelectedIndex(usize),
+    Value(f32),
+}
+
+/// 平台文本输入协议需要的只读快照。
+pub struct TextInputState {
+    pub text: String,
+    pub cursor: usize,
+    pub selection: Option<(usize, usize)>,
+    pub marked: String,
+}
+
 /// 节点类型：装箱的 trait 对象。
 pub type Node = Box<dyn Widget>;
 
@@ -68,27 +95,8 @@ pub struct Base {
     pub role: WidgetRole,
     /// 文本内容（Label/Button/Edit/CheckBox/Radio 复用）。
     pub text: String,
-    /// 输入框内容为空时显示的占位文本，仅 Edit 使用。
-    pub placeholder: String,
-    /// 输入框占位文本的分状态字体样式，仅 Edit 使用。
-    pub placeholder_style: PlaceholderStyleSet,
-    /// 文本光标位置（字符索引，Edit 用）。
-    pub cursor: usize,
-    /// 选区锚点（字符索引）。选区在 anchor 与 cursor 之间；None 或与 cursor 相等表示无选区。
-    pub sel_anchor: Option<usize>,
-    /// 是否多行文本（Edit 用）：Enter 插入换行、按 \n 分行显示。
-    pub multiline: bool,
-    /// Edit 输入行为配置。
-    pub edit_read_only: bool,
-    pub edit_number_only: bool,
-    pub edit_password: bool,
-    pub edit_password_char: char,
-    pub edit_max_chars: Option<usize>,
-    pub edit_auto_select_all: bool,
     /// 悬停提示文本（Tooltip）；None 表示无提示。
     pub tooltip: Option<String>,
-    /// IME 组合中的预览文本（marked text），显示在光标处，未提交。
-    pub marked: String,
     pub font: Font,
     pub style: StyleSet,
 
@@ -105,13 +113,6 @@ pub struct Base {
 
     // —— 选择 / 分组（Radio/CheckBox/TabBox 用）——
     pub selected: bool,
-    /// CheckBox 是否使用开关外观；其它角色忽略。
-    pub switch_style: bool,
-    pub group: Option<u32>,
-    pub tab_index: Option<usize>,
-    pub selected_index: usize,
-    /// 归一化数值 0.0~1.0（Progress/Slider 用）。
-    pub value: f32,
 
     // —— 布局 ——
     /// 布局后的绝对矩形（窗口逻辑坐标）。
@@ -133,14 +134,6 @@ pub struct Base {
     /// 绝对定位（相对父内容区左上角）。设了则 Box 按此摆放，忽略叠放填充。
     pub pos: Option<(f32, f32)>,
 
-    // —— 滚动（ScrollView 用）——
-    /// 是否为可滚动容器（供分发器路由滚轮）。
-    pub scrollable: bool,
-    /// 纵向滚动偏移（内容向上卷起的像素）。
-    pub scroll_y: f32,
-    /// 内容总高（arrange 时算出，供滚动夹取）。
-    pub content_h: f32,
-
     // —— 子控件 ——
     pub children: Vec<Node>,
 
@@ -155,19 +148,7 @@ impl Base {
             name: None,
             role,
             text: String::new(),
-            placeholder: String::new(),
-            placeholder_style: PlaceholderStyleSet::new(),
-            cursor: 0,
-            sel_anchor: None,
-            multiline: false,
-            edit_read_only: false,
-            edit_number_only: false,
-            edit_password: false,
-            edit_password_char: '\u{2022}',
-            edit_max_chars: None,
-            edit_auto_select_all: false,
             tooltip: None,
-            marked: String::new(),
             font: Font::default(),
             style: StyleSet::new(),
             enabled: true,
@@ -186,11 +167,6 @@ impl Base {
             visible: true,
             hit: HitPolicy::Solid,
             selected: false,
-            switch_style: false,
-            group: None,
-            tab_index: None,
-            selected_index: 0,
-            value: 0.0,
             rect: Rect::default(),
             padding: Insets::default(),
             margin: Insets::default(),
@@ -201,9 +177,6 @@ impl Base {
             justify: Justify::Start,
             align: Align::Stretch,
             pos: None,
-            scrollable: false,
-            scroll_y: 0.0,
-            content_h: 0.0,
             children: Vec::new(),
             on_click: None,
         }
@@ -232,16 +205,6 @@ impl Base {
         self.style.resolve(self.visual_state())
     }
 
-    /// 当前有效选区 [lo, hi)（字符索引）。无选区（锚点为空或与光标重合）返回 None。
-    pub fn sel_range(&self) -> Option<(usize, usize)> {
-        let a = self.sel_anchor?;
-        let c = self.cursor;
-        if a == c {
-            None
-        } else {
-            Some((a.min(c), a.max(c)))
-        }
-    }
 }
 
 /// 所有控件实现的接口。默认实现覆盖「单子/叠放」布局与空内容，
@@ -268,6 +231,12 @@ pub trait Widget {
         EventFlow::Ignored
     }
 
+    /// 应用控件专属配置；不支持该属性时返回 false。
+    fn apply_property(&mut self, _property: WidgetProperty) -> bool { false }
+
+    /// 获得焦点后的控件专属行为。
+    fn focus_gained(&mut self) {}
+
     // —— 文本编辑钩子（供分发器统一驱动复制/剪切/粘贴/全选，Edit 覆写）——
     /// 当前选中的文本（无选区返回 None）。供复制/剪切读取。
     fn selected_text(&self) -> Option<String> {
@@ -289,6 +258,24 @@ pub trait Widget {
 
     /// 排版后的文本插入点，供平台输入法定位候选窗口。
     fn text_input_rect(&self) -> Option<Rect> { None }
+
+    /// 平台文本输入协议快照与组合串写入。
+    fn text_input_state(&self) -> Option<TextInputState> { None }
+    fn set_marked_text(&mut self, _text: String) -> bool { false }
+    fn clear_marked_text(&mut self) -> bool { false }
+
+    /// 控件专属选择/分组能力。
+    fn selection_group(&self) -> Option<u32> { None }
+    fn tab_index(&self) -> Option<usize> { None }
+    fn selected_index(&self) -> Option<usize> { None }
+    fn set_selected_index(&mut self, _index: usize) -> bool { false }
+
+    /// 滚动与动画能力。
+    fn is_scrollable(&self) -> bool { false }
+    fn scroll_by(&mut self, _dy: f32) -> bool { false }
+    fn scroll_position(&self) -> Option<f32> { None }
+    fn animation_value(&self, _prop: AnimProp) -> Option<f32> { None }
+    fn set_animation_value(&mut self, _prop: AnimProp, _value: f32) -> bool { false }
 
     // —— 下拉/菜单钩子（供分发器打开选项菜单，ComboBox 覆写）——
     /// 该控件点击时要弹出的菜单项文本；返回 None 表示不弹菜单。

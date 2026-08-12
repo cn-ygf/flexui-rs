@@ -1,4 +1,4 @@
-//! Slider：滑块（拖动改变 `Base.value`，归一化 0~1）。
+//! Slider：滑块（拖动改变控件自身的归一化值 0~1）。
 //!
 //! 交互事件（按下/拖动）由分发器转发到本控件（见 dispatch 的指针转发）。
 
@@ -6,15 +6,17 @@ use flexui_geometry::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::common_builders;
+use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::sizing::Sizing;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetRole};
+use crate::widget::{Base, Widget, WidgetProperty, WidgetRole};
 
 /// 滑块：轨道 + 已填充段 + 圆形拖柄。value 归一化 0~1。
 pub struct Slider {
     base: Base,
+    value: f32,
 }
 
 impl Slider {
@@ -22,11 +24,11 @@ impl Slider {
         let mut base = Base::new(WidgetRole::Slider);
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(24.0);
-        Self { base }
+        Self { base, value: 0.0 }
     }
     /// 设置初值（0~1，自动夹取）。
     pub fn value(mut self, v: f32) -> Self {
-        self.base.value = v.clamp(0.0, 1.0);
+        self.value = v.clamp(0.0, 1.0);
         self
     }
 
@@ -37,7 +39,7 @@ impl Slider {
             return;
         }
         let frac = ((x - content.left()) / content.size.width).clamp(0.0, 1.0);
-        self.base.value = frac;
+        self.value = frac;
     }
 }
 
@@ -71,7 +73,7 @@ impl Widget for Slider {
         let track = Rect::new(content.left(), ty, content.size.width, track_h);
         cv.fill_round_rect(track, Corners::all(track_h / 2.0), track_col);
 
-        let v = self.base.value.clamp(0.0, 1.0);
+        let v = self.value;
         let fill_w = content.size.width * v;
         if fill_w > 0.0 {
             cv.fill_round_rect(
@@ -85,6 +87,15 @@ impl Widget for Slider {
         let cx = content.left() + fill_w;
         let knob = Rect::new(cx - d / 2.0, content.top(), d, d);
         cv.fill_round_rect(knob, Corners::all(d / 2.0), knob_col);
+    }
+    fn apply_property(&mut self, property: WidgetProperty) -> bool {
+        if let WidgetProperty::Value(v) = property { self.value = v.clamp(0.0, 1.0); true } else { false }
+    }
+    fn animation_value(&self, prop: AnimProp) -> Option<f32> {
+        (prop == AnimProp::Value).then_some(self.value)
+    }
+    fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
+        if prop == AnimProp::Value { self.value = value.clamp(0.0, 1.0); true } else { false }
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         match ev {
@@ -107,6 +118,6 @@ common_builders!(Slider);
 impl Slider {
     /// 当前值（0~1）。
     pub fn current(&self) -> f32 {
-        self.base.value
+        self.value
     }
 }
