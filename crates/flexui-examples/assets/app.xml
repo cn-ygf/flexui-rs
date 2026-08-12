@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Window title="UU 加速器 · flexui XML 示例" width="1000" height="688" resizable="false"
-        titlebar="none" system-corners="true" system-shadow="true" drag-region="0 0 1000 30">
+        titlebar="none" system-corners="true" system-shadow="true" drag-region="0 0 1000 94">
 <Panel normal-bgcolor="#181D42" mouse="transparent" font-family="Microsoft YaHei">
   <VBox spacing="0" normal-bgcolor="#181D42" mouse="transparent">
     <VBox height="94" spacing="0" mouse="transparent">
@@ -16,7 +16,7 @@
                 normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
                 pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
       </HBox>
-      <HBox height="67" padding="2 38" spacing="18" align="center">
+      <HBox height="67" padding="2 38" spacing="18" align="center" mouse="transparent">
         <Image src="label/uu_logo@2.00x.png" width="40" height="46"/>
         <Button tooltip="返回" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
                 hot-bgimage="button/back_hover@2.00x.png" normal-bgfit="center"/>
