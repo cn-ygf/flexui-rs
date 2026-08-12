@@ -131,6 +131,17 @@ pub struct NewWindow {
     pub root: crate::widget::Node,
     pub disp: crate::dispatch::Dispatcher,
     pub delegate: Box<dyn WindowDelegate>,
+    pub presentation: WindowPresentation,
+}
+
+/// 动态窗口的呈现方式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowPresentation {
+    /// 独立的普通顶层窗口。
+    #[default]
+    Normal,
+    /// 以当前窗口为 owner 的模态工具窗口，不创建新的任务栏入口。
+    ModalDialog,
 }
 
 /// 传给窗口钩子的上下文：既能按 name 访问控件树，也能控制窗口、弹出菜单。
@@ -158,6 +169,12 @@ impl<'a> WindowCtx<'a> {
 
     /// 在回调里打开一个新窗口（接入共享事件循环）。用 `flexui::build_window(imp)` 构造规格。
     pub fn open_window(&mut self, spec: NewWindow) {
+        self.new_windows.push(spec);
+    }
+
+    /// 打开以当前窗口为 owner 的模态对话框。
+    pub fn open_modal(&mut self, mut spec: NewWindow) {
+        spec.presentation = WindowPresentation::ModalDialog;
         self.new_windows.push(spec);
     }
 

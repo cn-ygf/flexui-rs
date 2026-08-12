@@ -241,6 +241,7 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
         root,
         disp,
         delegate: Box::new(ImplDelegate { imp }),
+        presentation: WindowPresentation::Normal,
     })
 }
 

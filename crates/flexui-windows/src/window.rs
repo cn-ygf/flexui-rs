@@ -9,7 +9,7 @@ use flexui_core::event::keys;
 use flexui_core::{
     hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher, Event, Mods, MouseButton,
     NewWindow, Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
-    WindowDragRegion, WindowHandle, Widget, WidgetRole,
+    WindowDragRegion, WindowHandle, WindowPresentation, Widget, WidgetRole,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -32,7 +32,9 @@ use windows_sys::Win32::UI::Input::Ime::{
     ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT,
     COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, GetKeyState, VK_CONTROL, VK_SHIFT,
+};
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -67,6 +69,8 @@ struct AppState {
     back_buffer_size: (i32, i32),
     /// 控件几何是否需要在下一帧重新布局；纯 hot 切换可复用现有布局。
     layout_dirty: bool,
+    /// 模态子窗口的 owner；销毁时恢复 owner 的输入与激活状态。
+    modal_owner: HWND,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -110,6 +114,7 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         root,
         disp,
         delegate,
+        presentation: WindowPresentation::Normal,
     }]);
 }
 
@@ -145,7 +150,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         RegisterClassW(&wc);
 
         for spec in windows {
-            create_window(spec);
+            create_window(spec, null_mut());
         }
 
         // 消息循环（所有窗口共享；最后一个窗口关闭时 PostQuitMessage 退出）。
@@ -207,12 +212,13 @@ unsafe fn configure_frameless_dwm(hwnd: HWND, corners: bool, shadow: bool) {
 }
 
 /// 创建一个原生窗口并接入共享事件循环（窗口类须已注册）。
-unsafe fn create_window(spec: NewWindow) -> HWND {
+unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     let NewWindow {
         config,
         root,
         disp,
         delegate,
+        presentation,
     } = spec;
     let hinstance = GetModuleHandleW(null());
     let class_name = wide("FlexUiWindowClass");
@@ -242,7 +248,12 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
 
     // `WindowConfig` 使用逻辑像素；Per-Monitor V2 下 CreateWindowExW 接收物理像素。
     // 同时补偿系统标题栏/边框，确保首次布局的客户区仍等于配置尺寸。
-    let dpi = GetDpiForSystem().max(96);
+    let is_modal = presentation == WindowPresentation::ModalDialog && !owner.is_null();
+    let dpi = if is_modal {
+        GetDpiForWindow(owner).max(96)
+    } else {
+        GetDpiForSystem().max(96)
+    };
     let scale = dpi as f32 / 96.0;
     let mut outer = RECT {
         left: 0,
@@ -257,8 +268,9 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
     let outer_height = (outer.bottom - outer.top).max(1);
 
     let title = wide(&config.title);
+    let ex_style = if is_modal { WS_EX_TOOLWINDOW } else { 0 };
     let hwnd = CreateWindowExW(
-        0,
+        ex_style,
         class_name.as_ptr(),
         title.as_ptr(),
         style,
@@ -266,13 +278,16 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         CW_USEDEFAULT,
         outer_width,
         outer_height,
-        null_mut(),
+        if is_modal { owner } else { null_mut() },
         null_mut(),
         hinstance,
         null(),
     );
     if hwnd.is_null() {
         eprintln!("[flexui] CreateWindowExW 失败");
+        if is_modal && IsWindow(owner) != 0 {
+            EnableWindow(owner, 1);
+        }
         return hwnd;
     }
 
@@ -295,6 +310,7 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         back_buffer: None,
         back_buffer_size: (0, 0),
         layout_dirty: true,
+        modal_owner: if is_modal { owner } else { null_mut() },
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -314,6 +330,16 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         );
     }
 
+    if is_modal {
+        // owned tool window 不出现在任务栏；相对 owner 居中，并阻止 owner 接收输入。
+        let mut owner_rect: RECT = std::mem::zeroed();
+        if GetWindowRect(owner, &mut owner_rect) != 0 {
+            let x = owner_rect.left + ((owner_rect.right - owner_rect.left) - outer_width) / 2;
+            let y = owner_rect.top + ((owner_rect.bottom - owner_rect.top) - outer_height) / 2;
+            SetWindowPos(hwnd, HWND_TOP, x, y, outer_width, outer_height, SWP_NOACTIVATE);
+        }
+        EnableWindow(owner, 0);
+    }
     DragAcceptFiles(hwnd, 1);
     ShowWindow(hwnd, SW_SHOW);
     SetTimer(hwnd, 1, 530, None);
@@ -345,7 +371,7 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         nw
     };
     for w in new_wins {
-        create_window(w);
+        create_window(w, hwnd);
     }
     hwnd
 }
@@ -417,7 +443,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
         );
     }
     for w in new_wins {
-        create_window(w);
+        create_window(w, hwnd);
     }
     // 最小化期间保留 DWM 的最后一帧，不积累恢复后立即触发的绘制请求。
     if st.minimized {
@@ -1067,8 +1093,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_DESTROY => {
             if !state.is_null() {
+                let owner = (*state).modal_owner;
                 drop(Box::from_raw(state));
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                if !owner.is_null() && IsWindow(owner) != 0 {
+                    EnableWindow(owner, 1);
+                    SetForegroundWindow(owner);
+                }
             }
             // 仅在最后一个窗口关闭时退出消息循环（多窗口）。
             if WINDOW_COUNT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) <= 1 {

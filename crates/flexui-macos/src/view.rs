@@ -51,7 +51,11 @@ impl WindowHandle for MacWindowHandle {
         self.window.setTitle(&NSString::from_str(title));
     }
     fn close(&mut self) {
-        self.window.close();
+        if let Some(owner) = self.window.sheetParent() {
+            owner.endSheet(&self.window);
+        } else {
+            self.window.close();
+        }
     }
     fn minimize(&mut self) {
         self.window.miniaturize(None);
@@ -77,6 +81,8 @@ pub struct AppState {
     pub image_cache: SharedImageCache,
     /// 内容区精确拖动范围；平台默认策略由 NSWindow 自己处理。
     pub drag_region: WindowDragRegion,
+    /// owned modal 的 owner；关闭时恢复 owner 输入。
+    pub modal_owner: Option<Retained<NSWindow>>,
 }
 
 pub struct FlexViewIvars {
@@ -238,7 +244,23 @@ define_class!(
     unsafe impl NSWindowDelegate for FlexView {
         #[unsafe(method(windowShouldClose:))]
         fn window_should_close(&self, _sender: &AnyObject) -> bool {
-            self.fire_close()
+            let allow = self.fire_close();
+            if allow {
+                if let Some(window) = self.window() {
+                    if let Some(owner) = window.sheetParent() {
+                        owner.endSheet(&window);
+                        return false.into();
+                    }
+                }
+            }
+            allow
+        }
+
+        #[unsafe(method(windowWillClose:))]
+        fn window_will_close(&self, _notification: &objc2_foundation::NSNotification) {
+            if let Some(owner) = self.ivars().state.borrow().modal_owner.as_ref() {
+                owner.makeKeyAndOrderFront(None);
+            }
         }
     }
 
@@ -450,6 +472,7 @@ impl FlexView {
         disp: Dispatcher,
         delegate: Box<dyn WindowDelegate>,
         drag_region: WindowDragRegion,
+        modal_owner: Option<Retained<NSWindow>>,
     ) -> Retained<Self> {
         let ivars = FlexViewIvars {
             state: RefCell::new(AppState {
@@ -459,6 +482,7 @@ impl FlexView {
                 child_windows: Vec::new(),
                 image_cache: Rc::new(RefCell::new(ImageCache::default())),
                 drag_region,
+                modal_owner,
             }),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -516,7 +540,7 @@ impl FlexView {
         let mtm = self.mtm();
         let mut created = Vec::with_capacity(specs.len());
         for spec in specs {
-            created.push(crate::make_window(mtm, spec));
+            created.push(crate::make_window(mtm, spec, self.window().as_deref()));
         }
         self.ivars()
             .state

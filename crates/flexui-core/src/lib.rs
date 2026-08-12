@@ -34,6 +34,7 @@ pub use widgets::{
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
+    WindowPresentation,
     WindowDelegate, WindowDragRegion, WindowHandle,
 };
 

@@ -11,20 +11,35 @@ use crate::widget::Widget;
 
 /// 递归绘制整棵控件树。
 pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
-    paint_tree_impl(node, cv, None);
+    paint_tree_impl(node, cv, None, false);
 }
 
 /// 只绘制与脏矩形相交的控件分支；画布仍应由后端裁剪到同一区域。
 pub fn paint_tree_in_rect(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Rect) {
-    paint_tree_impl(node, cv, Some(dirty));
+    paint_tree_impl(node, cv, Some(dirty), false);
 }
 
-fn paint_tree_impl(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Option<Rect>) {
+fn subtree_focused(node: &dyn Widget) -> bool {
+    node.base().focused || node.base().children.iter().any(|child| subtree_focused(child.as_ref()))
+}
+
+fn paint_tree_impl(
+    node: &dyn Widget,
+    cv: &mut dyn Canvas,
+    dirty: Option<Rect>,
+    inherited_focus: bool,
+) {
     let b = node.base();
     if !b.visible {
         return;
     }
-    let style = b.resolved_style();
+    let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_focused(node));
+    let state = crate::style::VisualState::with_selected(
+        b.effective_base(),
+        focus_active,
+        b.selected,
+    );
+    let style = b.style.resolve(state);
     let rect = b.rect;
     if let Some(dirty) = dirty {
         let visual_rect = style.shadow.map_or(rect, |shadow| {
@@ -100,7 +115,7 @@ fn paint_tree_impl(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Option<Rect>) 
         cv.save();
         cv.clip_rect(rect);
         for child in b.children.iter() {
-            paint_tree_impl(child.as_ref(), cv, dirty);
+            paint_tree_impl(child.as_ref(), cv, dirty, focus_active && b.focus_within);
         }
         cv.restore();
     }
@@ -212,6 +227,7 @@ mod tests {
     #[derive(Default)]
     struct Recorder {
         fills: Vec<(Rect, Color)>,
+        strokes: Vec<Color>,
         texts: Vec<String>,
         round_clips: Vec<(Rect, flexui_geometry::Corners)>,
     }
@@ -219,11 +235,15 @@ mod tests {
         fn fill_rect(&mut self, r: Rect, c: Color) {
             self.fills.push((r, c));
         }
-        fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+        fn stroke_rect(&mut self, _r: Rect, c: Color, _w: f32) {
+            self.strokes.push(c);
+        }
         fn fill_round_rect(&mut self, r: Rect, _rad: flexui_geometry::Corners, c: Color) {
             self.fills.push((r, c));
         }
-        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: Color, _w: f32) {}
+        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, c: Color, _w: f32) {
+            self.strokes.push(c);
+        }
         fn draw_text(&mut self, t: &str, _o: flexui_geometry::Point, _f: &Font, _c: Color) {
             self.texts.push(t.to_string());
         }
@@ -339,6 +359,37 @@ mod tests {
         paint_tree_in_rect(&root, &mut rec, Rect::new(45.0, 0.0, 5.0, 30.0));
 
         assert!(!rec.fills.is_empty(), "阴影与脏区相交时不能跳过控件");
+    }
+
+    #[test]
+    fn focus_within_后代焦点驱动容器及子树样式() {
+        let normal = Color::from_u8(20, 20, 20, 255);
+        let focused = Color::from_u8(0, 210, 196, 255);
+        let mut styles = StyleSet::new().with_normal(StyleSpec {
+            border_color: Some(normal),
+            border_width: Some(1.0),
+            ..Default::default()
+        });
+        styles.set(
+            VisualState::new(BaseState::Normal, true),
+            StyleSpec {
+                border_color: Some(focused),
+                border_width: Some(1.0),
+                ..Default::default()
+            },
+        );
+        let mut container = Panel::new().style(styles).size(100.0, 40.0);
+        container.base_mut().focus_within = true;
+        let mut child = button_with_states();
+        child.base_mut().focused = true;
+        container.base_mut().children.push(Box::new(child));
+        let mut root = VBox::new().push(container);
+        let mut rec = Recorder::default();
+        layout_node(&mut root, Rect::new(0.0, 0.0, 120.0, 60.0), &rec);
+
+        paint_tree(&root, &mut rec);
+
+        assert!(rec.strokes.contains(&focused), "后代获焦时容器应使用 focus 样式");
     }
 
     #[test]

@@ -106,6 +106,8 @@ pub struct Base {
     pub pressed: bool,
     pub focused: bool,
     pub focusable: bool,
+    /// 任一后代获得焦点时，本节点及其子树使用 focus 状态样式。
+    pub focus_within: bool,
     /// 光标闪烁相位（true=显示），由分发器的 blink 定时切换；Edit 绘制光标用。
     pub caret_on: bool,
     pub visible: bool,
@@ -155,6 +157,7 @@ impl Base {
             hover: false,
             pressed: false,
             focused: false,
+            focus_within: false,
             caret_on: true,
             focusable: matches!(
                 role,

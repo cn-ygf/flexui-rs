@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Window title="UU 登录" width="580" height="416" resizable="false" titlebar="none"
+        system-corners="true" system-shadow="true" drag-region="0 0 580 40">
+<Panel normal-bgcolor="#2E3465" normal-bgimage="label/phone_and_wechat_login_bk@2.00x.png"
+       normal-bgfit="stretch" font-family="Microsoft YaHei">
+  <VBox spacing="0">
+    <HBox height="40" padding="6 8" mouse="transparent">
+      <Panel flex="1" mouse="transparent"/>
+      <Button name="close_login" tooltip="关闭登录" width="28" height="28"
+              normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
+              pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
+    </HBox>
+    <HBox height="346" spacing="18" padding="32 24 0 24" align="start">
+      <VBox width="252" spacing="20" align="center">
+        <Label text="扫码登录" height="24" normal-fgcolor="#FFFFFF" font-size="16" bold="true"
+               normal-textalign="center"/>
+        <Image src="label/uu_qrcode@2.00x.png" width="160" height="160"/>
+        <HBox height="24" spacing="5" align="center" justify="center">
+          <Label text="使用" width="32" normal-fgcolor="#B7BBD9" font-size="14"/>
+          <Image src="label/wechat_logo.svg" width="20" height="20"/>
+          <Label text="微信 扫码登录" width="106" normal-fgcolor="#B7BBD9" font-size="14"/>
+        </HBox>
+      </VBox>
+      <VBox width="256" spacing="20" align="center">
+        <Label text="短信登录" height="24" normal-fgcolor="#FFFFFF" font-size="16" bold="true"
+               normal-textalign="center"/>
+        <HBox name="phone_num_area" width="256" height="44" focus-within="true"
+              normal-bgcolor="#222857" normal-bordercolor="#222857" focus-bordercolor="#00D2C4"
+              border-width="1" corner-radius="6">
+          <Panel width="36" height="44" normal-bgimage="label/phone_normal@2.00x.png"
+                 focus-bgimage="label/phone_hover@2.00x.png" normal-bgfit="center" focus-bgfit="center"/>
+          <Button name="nation_code" text="+86  ▾" width="68" height="44" padding="0 0 0 4"
+                  normal-fgcolor="#9095BB" hot-fgcolor="#FFFFFF" focus-fgcolor="#FFFFFF"
+                  font-size="14" normal-textalign="left"/>
+          <Separator width="1" height="28" orientation="vertical" normal-bgcolor="#424894"/>
+          <Edit name="edit_phone" placeholder="请输入手机号" flex="1" height="44" padding="0 10"
+                number-only="true" max-length="15" normal-fgcolor="#FFFFFF"
+                placeholder-fgcolor="#9095BB" focus-placeholder-fgcolor="#9095BB" font-size="14"/>
+        </HBox>
+        <HBox name="auth_code_area" width="256" height="44" focus-within="true"
+              normal-bgcolor="#222857" normal-bordercolor="#222857" focus-bordercolor="#00D2C4"
+              border-width="1" corner-radius="6">
+          <Panel width="36" height="44" normal-bgimage="label/password_normal@2.00x.png"
+                 focus-bgimage="label/password_hover@2.00x.png" normal-bgfit="center" focus-bgfit="center"/>
+          <Edit name="edit_code" placeholder="请输入验证码" flex="1" height="44" padding="0 8"
+                number-only="true" max-length="6" normal-fgcolor="#FFFFFF"
+                placeholder-fgcolor="#9095BB" focus-placeholder-fgcolor="#9095BB" font-size="14"/>
+          <Separator width="1" height="28" orientation="vertical" normal-bgcolor="#424894"/>
+          <Button name="get_code" text="获取验证码" width="110" height="44" normal-fgcolor="#00D2C4"
+                  hot-fgcolor="#73D3CB" pushed-fgcolor="#40A098" font-size="14"/>
+        </HBox>
+        <Panel height="16" mouse="transparent"/>
+        <Button name="btn_login" text="登录" width="256" height="40" normal-bgcolor="#00CFC4"
+                hot-bgcolor="#28DED2" pushed-bgcolor="#00A79F" normal-fgcolor="#FFFFFF"
+                corner-radius="6" font-size="14" bold="true"/>
+        <Label name="login_status" text="" width="256" height="20" normal-fgcolor="#FF276C"
+               font-size="12" normal-textalign="center"/>
+      </VBox>
+    </HBox>
+  </VBox>
+</Panel>
+</Window>

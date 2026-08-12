@@ -15,14 +15,16 @@ pub use view::{FlexView, MacWindowHandle};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, MainThreadOnly};
+use objc2::{AnyThread, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSImage, NSWindow,
     NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSData, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
-use flexui_core::{Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate};
+use flexui_core::{
+    Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate, WindowPresentation,
+};
 
 /// 设置当前进程的应用图标（Dock、应用切换器）。
 pub fn set_application_icon(bytes: &[u8]) {
@@ -41,6 +43,7 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         root,
         disp,
         delegate,
+        presentation: WindowPresentation::Normal,
     }]);
 }
 
@@ -53,7 +56,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     // 保活：AppKit 的 ordered windows 会 retain 窗口，这里再存一份以防万一。
     let mut kept: Vec<Retained<NSWindow>> = Vec::new();
     for spec in windows {
-        kept.push(make_window(mtm, spec));
+        kept.push(make_window(mtm, spec, None));
     }
 
     #[allow(deprecated)]
@@ -64,13 +67,23 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 }
 
 /// 创建一个原生窗口并接入事件循环（定时器由 run loop 保活）。返回窗口句柄。
-pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NSWindow> {
+pub(crate) fn make_window(
+    mtm: MainThreadMarker,
+    spec: NewWindow,
+    owner: Option<&NSWindow>,
+) -> Retained<NSWindow> {
     let NewWindow {
         config,
         root,
         disp,
         delegate,
+        presentation,
     } = spec;
+    let modal_owner = if presentation == WindowPresentation::ModalDialog {
+        owner
+    } else {
+        None
+    };
     let content = NSRect::new(
         NSPoint::new(0.0, 0.0),
         NSSize::new(config.width as f64, config.height as f64),
@@ -136,7 +149,14 @@ pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NS
         window.setMovableByWindowBackground(true);
     }
 
-    let view = FlexView::new(mtm, root, disp, delegate, config.drag_region);
+    let view = FlexView::new(
+        mtm,
+        root,
+        disp,
+        delegate,
+        config.drag_region,
+        modal_owner.map(Message::retain),
+    );
     // 注册文件拖放类型（接收拖入的文件路径 → on_drop_files）。
     view.registerForDraggedTypes(&NSArray::from_slice(&[view::filenames_pboard_type()]));
     window.setContentView(Some(&view));
@@ -171,7 +191,17 @@ pub(crate) fn make_window(mtm: MainThreadMarker, spec: NewWindow) -> Retained<NS
         )
     };
 
-    window.center();
-    window.makeKeyAndOrderFront(None);
+    if let Some(owner) = modal_owner {
+        let owner_frame = owner.frame();
+        let frame = window.frame();
+        window.setFrameOrigin(NSPoint::new(
+            owner_frame.origin.x + (owner_frame.size.width - frame.size.width) / 2.0,
+            owner_frame.origin.y + (owner_frame.size.height - frame.size.height) / 2.0,
+        ));
+        owner.beginSheet_completionHandler(&window, None);
+    } else {
+        window.center();
+        window.makeKeyAndOrderFront(None);
+    }
     window
 }
