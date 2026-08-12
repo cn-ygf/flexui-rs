@@ -90,8 +90,9 @@
 
   <!-- 登录弹层：点击遮罩、右上角关闭按钮均可收起。 -->
   <Panel name="login_overlay" visible="false" normal-bgcolor="#80070A1B">
+    <!-- 带模糊滤镜的 SVG 已预栅格化为 @2x PNG，避免首次打开时阻塞 UI 线程。 -->
     <VBox x="210" y="136" width="580" height="416" spacing="0" normal-bgcolor="#2E3465"
-          normal-bgimage="label/phone_and_wechat_login_bk.svg" normal-bgfit="stretch" corner-radius="8"
+          normal-bgimage="label/phone_and_wechat_login_bk@2.00x.png" normal-bgfit="stretch" corner-radius="8"
           normal-shadow="0 8 #66000000">
       <HBox height="36" padding="4 8">
         <Panel flex="1" mouse="transparent"/>
