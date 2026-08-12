@@ -18,11 +18,12 @@ use objc2::AllocAnyThread;
 use objc2_app_kit::{
     NSBezierPath, NSBitmapImageRep, NSColor, NSCompositingOperation, NSDeviceRGBColorSpace, NSFont,
     NSFontAttributeName, NSFontManager, NSFontTraitMask, NSForegroundColorAttributeName,
-    NSGradient, NSGraphicsContext, NSImage, NSImageInterpolation, NSStringDrawing,
-    NSUnderlineStyleAttributeName,
+    NSGradient, NSGraphicsContext, NSImage, NSImageInterpolation, NSImageResizingMode,
+    NSStringDrawing, NSUnderlineStyleAttributeName,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSData, NSDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString,
+    MainThreadMarker, NSData, NSDictionary, NSEdgeInsets, NSNumber, NSPoint, NSRect, NSSize,
+    NSString,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -268,8 +269,6 @@ fn tinted_image(img: &NSImage, color: Color) -> Retained<NSImage> {
 fn draw_nsimage(img: &NSImage, rect: Rect, fit: &ImageFit) {
     let size = img.size();
     let (iw, ih) = (size.width as f32, size.height as f32);
-    let full_src = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
-    let op = NSCompositingOperation::SourceOver;
     match fit {
         ImageFit::Stretch => img.drawInRect(to_nsrect(rect)),
         ImageFit::Center => {
@@ -289,63 +288,25 @@ fn draw_nsimage(img: &NSImage, rect: Rect, fit: &ImageFit) {
             }
         }
         ImageFit::NinePatch(ins) => {
-            draw_ninepatch(img, rect, *ins, iw, ih, full_src, op);
+            draw_ninepatch(img, rect, *ins);
         }
     }
 }
 
-/// 九宫格绘制（源图坐标为 NSImage 左下原点，故行按底部映射）。
-#[allow(clippy::too_many_arguments)]
-fn draw_ninepatch(
-    img: &NSImage,
-    rect: Rect,
-    ins: Insets,
-    iw: f32,
-    ih: f32,
-    _full: NSRect,
-    op: NSCompositingOperation,
-) {
-    // 目标 3x3 边界（左上原点）。
-    let cd = [
-        rect.left(),
-        rect.left() + ins.left,
-        rect.right() - ins.right,
-        rect.right(),
-    ];
-    let rd = [
-        rect.top(),
-        rect.top() + ins.top,
-        rect.bottom() - ins.bottom,
-        rect.bottom(),
-    ];
-    // 源列边界（左→右）。
-    let cs = [0.0, ins.left, iw - ins.right, iw];
-    // 源行边界（NSImage 底部原点；视觉 top→bottom 对应源 y 从高到低）。
-    let rs_bottom = [ih, ih - ins.top, ins.bottom, 0.0]; // 每视觉行的顶边（源 y）
-    for r in 0..3usize {
-        for c in 0..3usize {
-            let dx = cd[c];
-            let dw = cd[c + 1] - cd[c];
-            let dy = rd[r];
-            let dh = rd[r + 1] - rd[r];
-            let sx = cs[c];
-            let sw = cs[c + 1] - cs[c];
-            let s_top = rs_bottom[r];
-            let s_h = s_top - rs_bottom[r + 1];
-            let s_y = s_top - s_h;
-            if dw > 0.0 && dh > 0.0 && sw > 0.0 && s_h > 0.0 {
-                img.drawInRect_fromRect_operation_fraction(
-                    to_nsrect(Rect::new(dx, dy, dw, dh)),
-                    NSRect::new(
-                        NSPoint::new(sx as f64, s_y as f64),
-                        NSSize::new(sw as f64, s_h as f64),
-                    ),
-                    op,
-                    1.0,
-                );
-            }
-        }
-    }
+/// 使用 AppKit 原生 cap insets 一次绘制九宫格，避免九个切片分别插值时互相采样。
+fn draw_ninepatch(img: &NSImage, rect: Rect, ins: Insets) {
+    let old_insets = img.capInsets();
+    let old_mode = img.resizingMode();
+    img.setCapInsets(NSEdgeInsets {
+        top: ins.top as f64,
+        left: ins.left as f64,
+        bottom: ins.bottom as f64,
+        right: ins.right as f64,
+    });
+    img.setResizingMode(NSImageResizingMode::Stretch);
+    img.drawInRect(to_nsrect(rect));
+    img.setCapInsets(old_insets);
+    img.setResizingMode(old_mode);
 }
 
 /// 构造四角独立圆角的矩形路径（用 arcTo 逐角连接）。
