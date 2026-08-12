@@ -63,7 +63,7 @@ impl<'a> EventCtx<'a> {
     /// 便捷：设置某控件的文本。
     pub fn set_text(&mut self, name: &str, text: impl Into<String>) {
         let text = text.into();
-        self.with(name, move |w| w.base_mut().text = text);
+        self.with(name, move |w| w.set_text_value(text));
     }
 
     /// 便捷：读取某控件的 selected（CheckBox/Radio）。
@@ -470,6 +470,9 @@ impl Dispatcher {
             out = w.selected_text();
             if out.is_some() {
                 deleted = w.delete_selection();
+                if !deleted {
+                    out = None;
+                }
             }
         });
         if deleted {
@@ -540,12 +543,18 @@ impl Dispatcher {
                 button: MouseButton::Left,
             } => {
                 let hit = hit_test(root, *pos);
+                let old_focus = self.focus;
                 self.press(root, hit);
                 // 命中指针型控件（Edit/Slider/ListView）：转发按下，让其按坐标定位/选中。
                 if let Some(id) = self.pressed {
                     let role = role_of(root, id);
                     if is_pointer_target(role) {
                         self.forward_to_widget(root, id, ev);
+                        if old_focus != self.focus && role == Some(WidgetRole::Edit) {
+                            visit_mut(root, id, &mut |w| {
+                                if w.base().edit_auto_select_all { w.select_all(); }
+                            });
+                        }
                         // 列表点击即选择：按 name 上报，供窗口层 on_activate 处理。
                         if role == Some(WidgetRole::ListView) {
                             if let Some(name) = name_of(root, id) {
@@ -628,11 +637,13 @@ impl Dispatcher {
         };
         self.focus = Some(next);
         for_each_mut(root, &mut |w| {
-            let b = w.base_mut();
-            b.focused = b.id == next;
-            if b.focused {
-                b.caret_on = true;
-            }
+            let auto_select = {
+                let b = w.base_mut();
+                b.focused = b.id == next;
+                if b.focused { b.caret_on = true; }
+                b.focused && b.role == WidgetRole::Edit && b.edit_auto_select_all
+            };
+            if auto_select { w.select_all(); }
         });
         self.needs_redraw = true;
     }
@@ -1368,6 +1379,20 @@ mod tests {
         assert_eq!(root.base().text, "hi");
         // 无选区复制返回 None。
         assert_eq!(disp.copy_selection(&mut root), None);
+    }
+
+    #[test]
+    fn edit_只读剪切不泄露到剪贴板() {
+        let mut root = Edit::new().text("secret").read_only(true);
+        root.base_mut().rect = Rect::new(0.0, 0.0, 120.0, 30.0);
+        let mut disp = Dispatcher::new();
+        disp.handle(&mut root, &Event::MouseDown {
+            pos: Point::new(2.0, 10.0), button: MouseButton::Left,
+        });
+        disp.select_all_focused(&mut root);
+        assert_eq!(disp.copy_selection(&mut root).as_deref(), Some("secret"));
+        assert_eq!(disp.cut_selection(&mut root), None);
+        assert_eq!(root.base().text, "secret");
     }
 
     #[test]

@@ -36,6 +36,11 @@ fn to_nsrect(r: Rect) -> NSRect {
     )
 }
 
+/// core 使用 Unicode scalar 索引，AppKit 的 NSRange 使用 UTF-16 code unit。
+fn char_index_to_utf16(text: &str, char_index: usize) -> NSUInteger {
+    text.chars().take(char_index).map(char::len_utf16).sum()
+}
+
 /// macOS 窗口控制句柄（实现平台无关的 WindowHandle）。
 pub struct MacWindowHandle {
     window: Retained<NSWindow>,
@@ -278,8 +283,12 @@ define_class!(
 
         #[unsafe(method(selectedRange))]
         fn selected_range(&self) -> NSRange {
-            let loc = self.with_focused(|b| b.cursor).unwrap_or(0);
-            NSRange::new(loc, 0)
+            self.with_focused(|b| {
+                let (lo, hi) = b.sel_range().unwrap_or((b.cursor, b.cursor));
+                let loc = char_index_to_utf16(&b.text, lo);
+                let end = char_index_to_utf16(&b.text, hi);
+                NSRange::new(loc, end - loc)
+            }).unwrap_or(NSRange::new(0, 0))
         }
 
         #[unsafe(method(markedRange))]
@@ -288,7 +297,7 @@ define_class!(
                 if b.marked.is_empty() {
                     NSRange::new(NSNotFound as NSUInteger, 0)
                 } else {
-                    NSRange::new(b.cursor, b.marked.chars().count())
+                    NSRange::new(char_index_to_utf16(&b.text, b.cursor), b.marked.encode_utf16().count())
                 }
             })
             .unwrap_or(NSRange::new(NSNotFound as NSUInteger, 0))
@@ -313,10 +322,10 @@ define_class!(
             NSArray::from_slice(&[])
         }
 
-        // 组合窗口定位：返回焦点控件矩形（屏幕坐标）。
+        // 组合窗口定位：返回排版后的真实插入点矩形（屏幕坐标）。
         #[unsafe(method(firstRectForCharacterRange:actualRange:))]
         fn first_rect(&self, _range: NSRange, _actual: NSRangePointer) -> NSRect {
-            let rect = self.with_focused(|b| b.rect);
+            let rect = self.with_focused_widget(|w| w.text_input_rect().unwrap_or(w.base().rect));
             let Some(r) = rect else {
                 return NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
             };
@@ -372,7 +381,7 @@ pub(crate) fn filenames_pboard_type() -> &'static objc2_app_kit::NSPasteboardTyp
 
 /// 命中测试：光标下最上层控件是否为文本输入（Edit）。用于切换 I-beam 光标。
 fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
-    fn topmost(node: &dyn Widget, p: Point) -> Option<WidgetRole> {
+    fn topmost(node: &dyn Widget, p: Point) -> Option<bool> {
         let b = node.base();
         if !b.visible || !b.rect.contains(p) {
             return None;
@@ -382,9 +391,9 @@ fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
                 return Some(r);
             }
         }
-        Some(b.role)
+        Some(b.role == WidgetRole::Edit && b.enabled)
     }
-    topmost(root, p) == Some(WidgetRole::Edit)
+    topmost(root, p) == Some(true)
 }
 
 /// 把 NSString / NSAttributedString 参数转成 Rust String。
@@ -681,6 +690,14 @@ impl FlexView {
         Some(f(w.base_mut()))
     }
 
+    fn with_focused_widget<R>(&self, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
+        let mut st = self.ivars().state.borrow_mut();
+        let AppState { root, disp, .. } = &mut *st;
+        let id = disp.focus()?;
+        let w = find_mut_by_id(root.as_mut(), id)?;
+        Some(f(w))
+    }
+
     /// IME 提交：清组合串并逐字符发 Char（回车转 ENTER）。
     fn ime_insert(&self, text: &str) {
         self.with_focused(|b| b.marked.clear());
@@ -699,7 +716,7 @@ impl FlexView {
     /// IME 设置组合串（marked text），只失效焦点控件区域。
     fn ime_set_marked(&self, text: &str) {
         if let Some(r) = self.with_focused(|b| {
-            b.marked = text.to_string();
+            if !b.edit_read_only { b.marked = text.to_string(); }
             b.rect
         }) {
             self.setNeedsDisplayInRect(to_nsrect(r));

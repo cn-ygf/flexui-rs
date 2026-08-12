@@ -275,6 +275,8 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
 
     let mut node = make_node(&tag, el, env.res)?;
     apply_attrs(node.base_mut(), &tag, &el.attrs, env.res);
+    let initial_text = node.base().text.clone();
+    node.set_text_value(initial_text);
 
     // TabBox 的 tabbar 绑定。
     if tag == "tabbox" {
@@ -450,6 +452,14 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             "visible" => base.visible = parse_bool(v),
             "switch" => base.switch_style = tag == "checkbox" && parse_bool(v),
             "multiline" => base.multiline = parse_bool(v),
+            "readonly" | "read-only" => base.edit_read_only = parse_bool(v),
+            "numberonly" | "number-only" => base.edit_number_only = parse_bool(v),
+            "password" => base.edit_password = parse_bool(v),
+            "passwordchar" | "password-char" | "mask-char" => {
+                if let Some(ch) = v.chars().next() { base.edit_password_char = ch; }
+            }
+            "maxchar" | "max-chars" | "max-length" => base.edit_max_chars = v.parse().ok(),
+            "autoselall" | "auto-select-all" | "select-all-on-focus" => base.edit_auto_select_all = parse_bool(v),
             "mouse" => {
                 base.hit = if v.eq_ignore_ascii_case("transparent") {
                     HitPolicy::Transparent
@@ -1079,6 +1089,20 @@ mod tests {
         assert_eq!((focused.italic, focused.font_size), (Some(true), Some(14.0)));
         let disabled = base.placeholder_style.resolve(VisualState::new(BaseState::Disabled, false));
         assert_eq!((disabled.bold, disabled.underline), (Some(false), Some(true)));
+    }
+
+    #[test]
+    fn xml_edit输入行为属性() {
+        let xml = r#"<Edit text="12a34" readonly="true" number-only="true"
+            password="true" password-char="*" max-length="3" auto-select-all="true"/>"#;
+        let root = load_str(xml, &Context::new()).unwrap().root;
+        let base = root.base();
+        assert_eq!(base.text, "123");
+        assert_eq!(base.cursor, 3);
+        assert!(base.edit_read_only && base.edit_number_only && base.edit_password);
+        assert_eq!(base.edit_password_char, '*');
+        assert_eq!(base.edit_max_chars, Some(3));
+        assert!(base.edit_auto_select_all);
     }
 
     #[test]

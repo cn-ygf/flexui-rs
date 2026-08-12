@@ -116,11 +116,11 @@
           <HBox width="256" height="44" normal-bgcolor="#222857" corner-radius="6">
             <Label text="+86  ▾" width="76" height="44" normal-fgcolor="#B7BBD9" font-size="14"
                    normal-textalign="center"/>
-            <Edit name="edit_phone" placeholder="请输入手机号" flex="1" height="44" padding="0 6"
+            <Edit name="edit_phone" placeholder="请输入手机号" flex="1" height="44" padding="0 6" number-only="true" max-length="11"
                   normal-bgcolor="#222857" normal-fgcolor="#FFFFFF" placeholder-fgcolor="#9095BB" font-size="14"/>
           </HBox>
           <HBox width="256" height="44" normal-bgcolor="#222857" corner-radius="6">
-            <Edit name="edit_code" placeholder="请输入验证码" flex="1" height="44" padding="0 6"
+            <Edit name="edit_code" placeholder="请输入验证码" flex="1" height="44" padding="0 6" number-only="true" max-length="6"
                   normal-bgcolor="#222857" normal-fgcolor="#FFFFFF" placeholder-fgcolor="#9095BB" font-size="14"/>
             <Button text="获取验证码" width="104" height="44" normal-bgcolor="#222857"
                     normal-fgcolor="#00D2C4" hot-fgcolor="#73D3CB" font-size="14"/>

@@ -78,6 +78,13 @@ pub struct Base {
     pub sel_anchor: Option<usize>,
     /// 是否多行文本（Edit 用）：Enter 插入换行、按 \n 分行显示。
     pub multiline: bool,
+    /// Edit 输入行为配置。
+    pub edit_read_only: bool,
+    pub edit_number_only: bool,
+    pub edit_password: bool,
+    pub edit_password_char: char,
+    pub edit_max_chars: Option<usize>,
+    pub edit_auto_select_all: bool,
     /// 悬停提示文本（Tooltip）；None 表示无提示。
     pub tooltip: Option<String>,
     /// IME 组合中的预览文本（marked text），显示在光标处，未提交。
@@ -153,6 +160,12 @@ impl Base {
             cursor: 0,
             sel_anchor: None,
             multiline: false,
+            edit_read_only: false,
+            edit_number_only: false,
+            edit_password: false,
+            edit_password_char: '\u{2022}',
+            edit_max_chars: None,
+            edit_auto_select_all: false,
             tooltip: None,
             marked: String::new(),
             font: Font::default(),
@@ -271,6 +284,12 @@ pub trait Widget {
     /// 全选文本。
     fn select_all(&mut self) {}
 
+    /// 统一设置文本，Edit 可覆写以同步内部编辑状态。
+    fn set_text_value(&mut self, text: String) { self.base_mut().text = text; }
+
+    /// 排版后的文本插入点，供平台输入法定位候选窗口。
+    fn text_input_rect(&self) -> Option<Rect> { None }
+
     // —— 下拉/菜单钩子（供分发器打开选项菜单，ComboBox 覆写）——
     /// 该控件点击时要弹出的菜单项文本；返回 None 表示不弹菜单。
     fn menu_items(&self) -> Option<Vec<String>> {
@@ -297,7 +316,7 @@ pub trait TextControl: Widget {
     where
         Self: Sized,
     {
-        self.base_mut().text = text.into();
+        self.set_text_value(text.into());
     }
 }
 

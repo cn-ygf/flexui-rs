@@ -1,5 +1,7 @@
 //! Edit：文本输入（选区、复制/剪切/粘贴、IME；单行/多行）。
 
+use std::cell::Cell;
+
 use flexui_geometry::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
@@ -31,6 +33,10 @@ pub struct Edit {
     line_h: f32,
     /// 缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
     cache_dirty: bool,
+    /// 单行内容向左卷起的逻辑像素。
+    scroll_x: Cell<f32>,
+    /// 最近一次排版/绘制得到的真实插入点矩形。
+    caret_rect: Cell<Option<Rect>>,
 }
 
 impl Edit {
@@ -40,11 +46,12 @@ impl Edit {
             lines: Vec::new(),
             line_h: 0.0,
             cache_dirty: true,
+            scroll_x: Cell::new(0.0),
+            caret_rect: Cell::new(None),
         }
     }
     pub fn text(mut self, t: impl Into<String>) -> Self {
-        self.base.text = t.into();
-        self.base.cursor = self.base.text.chars().count();
+        self.set_text_value(t.into());
         self
     }
     /// 设置内容为空时显示的占位文本。
@@ -62,9 +69,41 @@ impl Edit {
         self.base.multiline = on;
         self
     }
+    pub fn read_only(mut self, on: bool) -> Self { self.base.edit_read_only = on; self }
+    pub fn number_only(mut self, on: bool) -> Self { self.base.edit_number_only = on; self.normalize_text(); self }
+    pub fn password(mut self, on: bool) -> Self { self.base.edit_password = on; self.cache_dirty = true; self }
+    pub fn password_char(mut self, ch: char) -> Self { self.base.edit_password_char = ch; self.cache_dirty = true; self }
+    pub fn max_chars(mut self, max: usize) -> Self { self.base.edit_max_chars = Some(max); self.normalize_text(); self }
+    pub fn auto_select_all(mut self, on: bool) -> Self { self.base.edit_auto_select_all = on; self }
 
     fn char_count(&self) -> usize {
         self.base.text.chars().count()
+    }
+
+    fn normalize_text(&mut self) {
+        let mut text: String = self.base.text.chars()
+            .filter(|ch| !self.base.edit_number_only || ch.is_ascii_digit()).collect();
+        if let Some(max) = self.base.edit_max_chars { text = text.chars().take(max).collect(); }
+        self.base.text = text;
+        self.base.cursor = self.base.cursor.min(self.char_count());
+        self.base.sel_anchor = self.base.sel_anchor.map(|a| a.min(self.char_count()));
+        self.cache_dirty = true;
+    }
+
+    fn accepted_input(&self, s: &str) -> String {
+        let selected = self.base.sel_range().map_or(0, |(lo, hi)| hi - lo);
+        let available = self.base.edit_max_chars
+            .map(|max| max.saturating_sub(self.char_count().saturating_sub(selected)))
+            .unwrap_or(usize::MAX);
+        s.chars().filter(|ch| (!self.base.edit_number_only || ch.is_ascii_digit())
+            && (self.base.multiline || (*ch != '\n' && *ch != '\r')))
+            .take(available).collect()
+    }
+
+    fn display_slice(&self, s: &str) -> String {
+        if self.base.edit_password {
+            std::iter::repeat_n(self.base.edit_password_char, s.chars().count()).collect()
+        } else { s.to_string() }
     }
 
     /// 移动光标到 idx；extend=true 时按住 Shift 扩展选区（保留/建立锚点），否则清锚点。
@@ -96,7 +135,13 @@ impl Edit {
     }
 
     /// 在光标处插入字符串；若有选区则先替换掉选区。
-    fn insert_str(&mut self, s: &str) {
+    fn insert_str(&mut self, s: &str) -> bool {
+        if self.base.edit_read_only { return false; }
+        let original_empty = s.is_empty();
+        let s = self.accepted_input(s);
+        let had_selection = self.base.sel_range().is_some();
+        if !original_empty && s.is_empty() { return false; }
+        if s.is_empty() && !had_selection { return false; }
         if let Some((lo, hi)) = self.base.sel_range() {
             self.delete_range(lo, hi);
         }
@@ -111,16 +156,12 @@ impl Edit {
         self.base.cursor = idx + n;
         self.base.sel_anchor = None;
         self.cache_dirty = true;
-    }
-
-    /// 在光标处插入单个字符（选区替换语义同 insert_str）。
-    fn insert(&mut self, ch: char) {
-        let mut buf = [0u8; 4];
-        self.insert_str(ch.encode_utf8(&mut buf));
+        true
     }
 
     /// 退格：有选区删选区，否则删光标前一个字符。
     fn backspace(&mut self) {
+        if self.base.edit_read_only { return; }
         if let Some((lo, hi)) = self.base.sel_range() {
             self.delete_range(lo, hi);
             return;
@@ -134,6 +175,7 @@ impl Edit {
 
     /// Delete：有选区删选区，否则删光标处字符。
     fn delete_forward(&mut self) {
+        if self.base.edit_read_only { return; }
         if let Some((lo, hi)) = self.base.sel_range() {
             self.delete_range(lo, hi);
             return;
@@ -173,7 +215,8 @@ impl Edit {
     /// 绝对坐标 → 字符索引（多行按 y 定位行，再按 x 定位列）。
     fn hit_index(&self, pos: Point) -> usize {
         let content = layout::content_rect(&self.base);
-        let local_x = pos.x - content.left();
+        let local_x = pos.x - content.left()
+            + if self.base.multiline { 0.0 } else { self.scroll_x.get() };
         if self.lines.is_empty() {
             let cw = (self.base.font.size * 0.6).max(1.0);
             return ((local_x / cw).round().max(0.0) as usize).min(self.char_count());
@@ -272,8 +315,10 @@ impl Edit {
                 let s = lo.max(ls);
                 let e = hi.min(le);
                 if s < e {
-                    let pre: String = line.chars().take(s - ls).collect();
-                    let mid: String = line.chars().skip(s - ls).take(e - s).collect();
+                    let pre = self.display_slice(&line.chars().take(s - ls).collect::<String>());
+                    let mid = self.display_slice(
+                        &line.chars().skip(s - ls).take(e - s).collect::<String>(),
+                    );
                     let x0 = content.left() + cv.measure_text_advance(&pre, &self.base.font);
                     let w = cv.measure_text_advance(&mid, &self.base.font);
                     cv.fill_rect(Rect::new(x0, y, w.max(1.0), line_h), SEL_COLOR);
@@ -281,13 +326,15 @@ impl Edit {
             }
             // 文字。
             let line_rect = Rect::new(content.left(), y, content.size.width, line_h);
-            Self::draw_input_text(cv, line, line_rect, &self.base.font, color);
+            Self::draw_input_text(cv, &self.display_slice(line), line_rect, &self.base.font, color);
             // 光标（仅当前行）。
             if self.base.focused && self.base.caret_on && i == cur_line {
-                let pre: String = line.chars().take(cur_col).collect();
+                let pre = self.display_slice(&line.chars().take(cur_col).collect::<String>());
                 let cx = content.left() + cv.measure_text_advance(&pre, &self.base.font) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
-                cv.fill_rect(Rect::new(cx, cyc.max(y), 1.5, caret_h), color);
+                let caret = Rect::new(cx, cyc.max(y), 1.5, caret_h);
+                self.caret_rect.set(Some(caret));
+                cv.fill_rect(caret, color);
             }
             y += line_h;
             base_idx += ll + 1;
@@ -312,6 +359,15 @@ impl Edit {
         let height = cv.measure_text(text, font).height;
         let y = rect.top() + (rect.size.height - height) / 2.0;
         cv.draw_text_advance(text, Point::new(rect.left(), y.max(rect.top())), font, color);
+    }
+
+    fn update_single_line_scroll(&self, caret: f32, total: f32, content: Rect) {
+        let width = content.size.width.max(0.0);
+        if width <= 1.0 || total <= width { self.scroll_x.set(0.0); return; }
+        let mut scroll = self.scroll_x.get();
+        if caret < scroll { scroll = caret; }
+        else if caret + 2.0 > scroll + width { scroll = caret + 2.0 - width; }
+        self.scroll_x.set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
     }
 }
 
@@ -345,9 +401,10 @@ impl Widget for Edit {
         let mut start = 0usize;
         for line in text.split('\n') {
             let n = line.chars().count();
+            let display_line = self.display_slice(line);
             let mut offs = Vec::with_capacity(n + 1);
             for i in 0..=n {
-                let pre: String = line.chars().take(i).collect();
+                let pre: String = display_line.chars().take(i).collect();
                 offs.push(cv.measure_text_advance(&pre, &self.base.font));
             }
             lines.push(LineCache { start, offsets: offs });
@@ -356,6 +413,19 @@ impl Widget for Edit {
         self.lines = lines;
         self.line_h = cv.measure_text("Ag", &self.base.font).height;
         self.cache_dirty = false;
+        let content = layout::content_rect(&self.base);
+        let (line, col) = self.pos_of(self.base.cursor);
+        let x = self.lines.get(line).and_then(|l| l.offsets.get(col)).copied().unwrap_or(0.0);
+        if self.base.multiline {
+            self.caret_rect.set(Some(Rect::new(content.left() + x + 1.0,
+                content.top() + line as f32 * self.line_h, 1.5, self.base.font.size)));
+        } else {
+            let total = self.lines.first().and_then(|l| l.offsets.last()).copied().unwrap_or(0.0);
+            self.update_single_line_scroll(x, total, content);
+            let y = content.top() + (content.size.height - self.base.font.size) / 2.0;
+            self.caret_rect.set(Some(Rect::new(content.left() - self.scroll_x.get() + x + 1.0,
+                y.max(content.top()), 1.5, self.base.font.size)));
+        }
     }
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         if self.base.multiline {
@@ -367,6 +437,8 @@ impl Widget for Edit {
         let caret_h = self.base.font.size;
         let cy = content.top() + (content.size.height - caret_h) / 2.0;
         if self.shows_placeholder() {
+            self.scroll_x.set(0.0);
+            self.caret_rect.set(Some(Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h)));
             let style = self.base.placeholder_style.resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
             draw_aligned_text(cv, &self.base.placeholder, content, &font,
@@ -376,12 +448,25 @@ impl Widget for Edit {
             }
             return;
         }
+        let before: String = self.base.text.chars().take(self.base.cursor).collect();
+        let after: String = self.base.text.chars().skip(self.base.cursor).collect();
+        let display_before = self.display_slice(&before);
+        let display_after = self.display_slice(&after);
+        let display_marked = self.display_slice(&self.base.marked);
+        let display = format!("{display_before}{display_marked}{display_after}");
+        let before_w = cv.measure_text_advance(&display_before, &self.base.font);
+        let marked_w = cv.measure_text_advance(&display_marked, &self.base.font);
+        let total_w = cv.measure_text_advance(&display, &self.base.font);
+        self.update_single_line_scroll(before_w + marked_w, total_w, content);
+        let origin_x = content.left() - self.scroll_x.get();
+        cv.save();
+        cv.clip_rect(content);
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
         if self.base.marked.is_empty() {
             if let Some((lo, hi)) = self.base.sel_range() {
-                let pre: String = self.base.text.chars().take(lo).collect();
-                let sel: String = self.base.text.chars().skip(lo).take(hi - lo).collect();
-                let x0 = content.left() + cv.measure_text_advance(&pre, &self.base.font);
+                let pre = self.display_slice(&self.base.text.chars().take(lo).collect::<String>());
+                let sel = self.display_slice(&self.base.text.chars().skip(lo).take(hi - lo).collect::<String>());
+                let x0 = origin_x + cv.measure_text_advance(&pre, &self.base.font);
                 let w = cv.measure_text_advance(&sel, &self.base.font);
                 cv.fill_rect(
                     Rect::new(x0, cy.max(content.top()), w.max(1.0), caret_h),
@@ -390,33 +475,28 @@ impl Widget for Edit {
             }
         }
         // 显示串 = 光标前文本 + IME 组合串 + 光标后文本；组合串加下划线以示未提交。
-        let before: String = self.base.text.chars().take(self.base.cursor).collect();
-        let after: String = self.base.text.chars().skip(self.base.cursor).collect();
-        let display = format!("{before}{}{after}", self.base.marked);
-        Self::draw_input_text(cv, &display, content, &self.base.font, color);
+        let text_rect = Rect::new(origin_x, content.top(), total_w.max(content.size.width), content.size.height);
+        Self::draw_input_text(cv, &display, text_rect, &self.base.font, color);
 
-        let before_w = cv.measure_text_advance(&before, &self.base.font);
         // 组合串下划线。
         if !self.base.marked.is_empty() {
-            let marked_w = cv.measure_text_advance(&self.base.marked, &self.base.font);
             let uy = (cy + caret_h - 1.0).min(content.bottom() - 1.0);
             cv.fill_rect(
-                Rect::new(content.left() + before_w, uy, marked_w.max(1.0), 1.0),
+                Rect::new(origin_x + before_w, uy, marked_w.max(1.0), 1.0),
                 color,
             );
         }
         // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与字号一致、垂直居中。
-        if self.base.focused && self.base.caret_on {
-            let marked_w = cv.measure_text_advance(&self.base.marked, &self.base.font);
-            let cx = content.left() + before_w + marked_w + 1.0;
-            cv.fill_rect(Rect::new(cx, cy.max(content.top()), 1.5, caret_h), color);
-        }
+        let caret = Rect::new(origin_x + before_w + marked_w + 1.0,
+            cy.max(content.top()), 1.5, caret_h);
+        self.caret_rect.set(Some(caret));
+        if self.base.focused && self.base.caret_on { cv.fill_rect(caret, color); }
+        cv.restore();
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         match ev {
             Event::Char { ch } if !ch.is_control() => {
-                self.insert(*ch);
-                EventFlow::Consumed
+                if self.insert_str(&ch.to_string()) { EventFlow::Consumed } else { EventFlow::Ignored }
             }
             // 鼠标按下：光标定位到点击处，并把锚点也置于此（拖动即从这里起选）。
             Event::MouseDown { pos, button: MouseButton::Left } => {
@@ -440,10 +520,12 @@ impl Widget for Edit {
             }
             Event::KeyDown { key, mods } => match *key {
                 keys::BACKSPACE => {
+                    if self.base.edit_read_only { return EventFlow::Ignored; }
                     self.backspace();
                     EventFlow::Consumed
                 }
                 keys::DELETE => {
+                    if self.base.edit_read_only { return EventFlow::Ignored; }
                     self.delete_forward();
                     EventFlow::Consumed
                 }
@@ -497,8 +579,7 @@ impl Widget for Edit {
                     EventFlow::Consumed
                 }
                 keys::ENTER if self.base.multiline => {
-                    self.insert_str("\n");
-                    EventFlow::Consumed
+                    if self.insert_str("\n") { EventFlow::Consumed } else { EventFlow::Ignored }
                 }
                 keys::UP if self.base.multiline => {
                     self.move_vertical(-1, mods.shift);
@@ -515,18 +596,15 @@ impl Widget for Edit {
     }
 
     fn selected_text(&self) -> Option<String> {
+        if self.base.edit_password { return None; }
         let (lo, hi) = self.base.sel_range()?;
         Some(self.base.text.chars().skip(lo).take(hi - lo).collect())
     }
     fn replace_selection(&mut self, s: &str) -> bool {
-        let had = self.base.sel_range().is_some();
-        if !had && s.is_empty() {
-            return false;
-        }
-        self.insert_str(s);
-        true
+        self.insert_str(s)
     }
     fn delete_selection(&mut self) -> bool {
+        if self.base.edit_read_only || self.base.edit_password { return false; }
         if let Some((lo, hi)) = self.base.sel_range() {
             self.delete_range(lo, hi);
             true
@@ -538,6 +616,14 @@ impl Widget for Edit {
         self.base.sel_anchor = Some(0);
         self.base.cursor = self.char_count();
     }
+    fn set_text_value(&mut self, text: String) {
+        self.base.text = text;
+        self.base.cursor = self.base.text.chars().count();
+        self.base.sel_anchor = None;
+        self.base.marked.clear();
+        self.normalize_text();
+    }
+    fn text_input_rect(&self) -> Option<Rect> { self.caret_rect.get().or(Some(self.base.rect)) }
 }
 
 common_builders!(Edit);
@@ -730,5 +816,40 @@ mod tests {
         e.on_event(&kd(keys::RIGHT, true)); // cursor 回到 2 == anchor
         assert_eq!(e.base().sel_range(), None, "锚点与光标重合视为无选区");
         assert_eq!(e.selected_text(), None);
+    }
+
+    #[test]
+    fn 输入约束统一作用于键盘和粘贴() {
+        let mut e = Edit::new().number_only(true).max_chars(4);
+        assert!(e.replace_selection("1a23中45"));
+        assert_eq!(e.base().text, "1234");
+        assert_eq!(e.on_event(&Event::Char { ch: '6' }), EventFlow::Ignored);
+        e.select_all();
+        assert!(!e.replace_selection("abc"));
+        assert_eq!(e.base().text, "1234", "被过滤的输入不应删除当前选区");
+    }
+
+    #[test]
+    fn 只读与密码保护剪贴板内容() {
+        let mut readonly = Edit::new().text("hello").read_only(true);
+        readonly.select_all();
+        assert_eq!(readonly.selected_text().as_deref(), Some("hello"));
+        assert!(!readonly.replace_selection("x"));
+        let mut password = Edit::new().text("secret").password(true);
+        password.select_all();
+        assert_eq!(password.selected_text(), None);
+        assert!(!password.delete_selection());
+    }
+
+    #[test]
+    fn 长文本滚动后光标保持可见且命中考虑滚动() {
+        let cv = FakeCanvas;
+        let mut e = Edit::new().text("abcdefghij");
+        layout_node(&mut e, Rect::new(0.0, 0.0, 40.0, 30.0), &cv);
+        assert!(e.scroll_x.get() > 0.0);
+        let content = layout::content_rect(e.base());
+        let caret = e.text_input_rect().unwrap();
+        assert!(caret.left() >= content.left() && caret.right() <= content.right() + 2.0);
+        assert!(e.hit_index(Point::new(content.right() - 1.0, content.top() + 2.0)) >= 8);
     }
 }

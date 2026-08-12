@@ -500,7 +500,9 @@ unsafe fn with_focus_base(
 /// 设置焦点控件的 IME 组合串并失效其区域。
 unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
     let owned = text.to_string();
-    if let Some(r) = with_focus_base(state, move |b| b.marked = owned) {
+    if let Some(r) = with_focus_base(state, move |b| {
+        if !b.edit_read_only { b.marked = owned; }
+    }) {
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -524,7 +526,7 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
         return;
     };
-    let r = w.base().rect;
+    let r = w.text_input_rect().unwrap_or(w.base().rect);
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
     let himc = ImmGetContext(hwnd);
@@ -1080,13 +1082,13 @@ fn point_over_edit(root: &dyn Widget, point: Point) -> bool {
     let Some(hit) = hit_test(root, point) else {
         return false;
     };
-    fn role_by_id(node: &dyn Widget, id: flexui_core::WidgetId) -> Option<WidgetRole> {
+    fn is_enabled_edit(node: &dyn Widget, id: flexui_core::WidgetId) -> Option<bool> {
         if node.base().id == id {
-            return Some(node.base().role);
+            return Some(node.base().role == WidgetRole::Edit && node.base().enabled);
         }
-        node.base().children.iter().find_map(|child| role_by_id(child.as_ref(), id))
+        node.base().children.iter().find_map(|child| is_enabled_edit(child.as_ref(), id))
     }
-    role_by_id(root, hit) == Some(WidgetRole::Edit)
+    is_enabled_edit(root, hit) == Some(true)
 }
 
 /// WM_PAINT 期间：双缓冲 + DPI 缩放绘制整棵控件树。
@@ -1205,6 +1207,8 @@ mod cursor_tests {
 
         assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
         assert!(!point_over_edit(&root, Point::new(180.0, 80.0)));
+        root.base_mut().children[0].base_mut().enabled = false;
+        assert!(!point_over_edit(&root, Point::new(30.0, 30.0)));
     }
 
     #[test]
