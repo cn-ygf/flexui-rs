@@ -21,7 +21,7 @@ pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
 pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};
-pub use paint::paint_tree;
+pub use paint::{paint_tree, paint_tree_in_rect};
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{BaseState, Gradient, Shadow, StyleSet, StyleSpec, VisualState};
 pub use widget::{

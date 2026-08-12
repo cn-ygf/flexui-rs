@@ -691,12 +691,12 @@ impl Canvas for GdiCanvas<'_> {
 
     fn clip_rect(&mut self, rect: Rect) {
         unsafe {
-            gp::GdipSetClipRectI(
+            gp::GdipSetClipRect(
                 self.g,
-                ri(rect.left()),
-                ri(rect.top()),
-                ri(rect.size.width),
-                ri(rect.size.height),
+                rect.left(),
+                rect.top(),
+                rect.size.width,
+                rect.size.height,
                 COMBINE_INTERSECT,
             );
         }

@@ -171,6 +171,11 @@ impl StyleSet {
         }
         effective.fill_from(&self.normal)
     }
+
+    /// 所有状态槽可能产生的阴影，用于计算状态切换时的完整视觉脏区。
+    pub(crate) fn shadows(&self) -> impl Iterator<Item = Shadow> + '_ {
+        std::iter::once(self.normal.shadow).chain(self.slots.values().map(|slot| slot.shadow)).flatten()
+    }
 }
 
 #[cfg(test)]

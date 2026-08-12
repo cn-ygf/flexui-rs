@@ -966,7 +966,18 @@ fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
 /// 按 id 找控件的绝对矩形。
 fn rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
     if node.base().id == id {
-        return Some(node.base().rect);
+        let base = node.base();
+        return Some(base.style.shadows().fold(base.rect, |visual, shadow| {
+            union_rect(
+                visual,
+                Rect::new(
+                    base.rect.left() + shadow.dx,
+                    base.rect.top() + shadow.dy,
+                    base.rect.size.width,
+                    base.rect.size.height,
+                ),
+            )
+        }));
     }
     for child in node.base().children.iter() {
         if let Some(r) = rect_of(child.as_ref(), id) {
@@ -1450,6 +1461,33 @@ mod tests {
         assert!(root.base().children[0].base().hover);
         disp.handle(&mut root, &Event::MouseMove { pos: Point::new(150.0, 150.0) });
         assert!(!root.base().children[0].base().hover);
+    }
+
+    #[test]
+    fn hover_脏区包含所有状态阴影() {
+        use crate::style::{BaseState, Shadow, StyleSet, StyleSpec};
+        use flexui_geometry::Color;
+
+        let style = StyleSet::new()
+            .with_normal(StyleSpec::default())
+            .with_state(
+                BaseState::Hot,
+                StyleSpec {
+                    shadow: Some(Shadow {
+                        dx: 8.0,
+                        dy: 6.0,
+                        color: Color::BLACK,
+                    }),
+                    ..Default::default()
+                },
+            );
+        let mut root = VBox::new().push(Button::new("b").size(100.0, 40.0).style(style));
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &FakeCanvas);
+        let mut disp = Dispatcher::new();
+
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 20.0) });
+
+        assert_eq!(disp.take_dirty(), Some(Rect::new(0.0, 0.0, 208.0, 46.0)));
     }
 
     #[test]

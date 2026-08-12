@@ -11,12 +11,37 @@ use crate::widget::Widget;
 
 /// 递归绘制整棵控件树。
 pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
+    paint_tree_impl(node, cv, None);
+}
+
+/// 只绘制与脏矩形相交的控件分支；画布仍应由后端裁剪到同一区域。
+pub fn paint_tree_in_rect(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Rect) {
+    paint_tree_impl(node, cv, Some(dirty));
+}
+
+fn paint_tree_impl(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Option<Rect>) {
     let b = node.base();
     if !b.visible {
         return;
     }
     let style = b.resolved_style();
     let rect = b.rect;
+    if let Some(dirty) = dirty {
+        let visual_rect = style.shadow.map_or(rect, |shadow| {
+            union_rect(
+                rect,
+                Rect::new(
+                    rect.left() + shadow.dx,
+                    rect.top() + shadow.dy,
+                    rect.size.width,
+                    rect.size.height,
+                ),
+            )
+        });
+        if !rects_intersect(visual_rect, dirty) {
+            return;
+        }
+    }
     let radius = style.corner_radius.unwrap_or_default();
     let rounded = !is_zero_corners(radius);
     // 控件自身透明度：乘进本控件绘制用到的所有颜色的 alpha（不含子控件）。
@@ -75,13 +100,25 @@ pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
         cv.save();
         cv.clip_rect(rect);
         for child in b.children.iter() {
-            paint_tree(child.as_ref(), cv);
+            paint_tree_impl(child.as_ref(), cv, dirty);
         }
         cv.restore();
     }
     if rounded {
         cv.restore();
     }
+}
+
+fn rects_intersect(a: Rect, b: Rect) -> bool {
+    a.left() < b.right() && a.right() > b.left() && a.top() < b.bottom() && a.bottom() > b.top()
+}
+
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    let left = a.left().min(b.left());
+    let top = a.top().min(b.top());
+    let right = a.right().max(b.right());
+    let bottom = a.bottom().max(b.bottom());
+    Rect::new(left, top, right - left, bottom - top)
 }
 
 fn is_zero_corners(c: Corners) -> bool {
@@ -265,6 +302,43 @@ mod tests {
         paint_tree(&root, &mut rec);
         assert_eq!(rec.round_clips.len(), 1);
         assert_eq!(rec.round_clips[0].1, radius);
+    }
+
+    #[test]
+    fn 区域绘制_跳过脏区外控件() {
+        let mut root = VBox::new()
+            .push(button_with_states())
+            .push(button_with_states());
+        let layout = Recorder::default();
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &layout);
+
+        let mut rec = Recorder::default();
+        paint_tree_in_rect(&root, &mut rec, Rect::new(0.0, 0.0, 100.0, 40.0));
+
+        assert_eq!(rec.texts, ["hi"], "只应绘制与脏区相交的第一个按钮");
+    }
+
+    #[test]
+    fn 区域绘制_保留与脏区相交的阴影控件() {
+        let panel = Panel::new()
+            .style(StyleSet::new().with_normal(StyleSpec {
+                bg_color: Some(Color::BLACK),
+                shadow: Some(crate::style::Shadow {
+                    dx: 10.0,
+                    dy: 0.0,
+                    color: Color::BLACK,
+                }),
+                ..Default::default()
+            }))
+            .size(40.0, 30.0);
+        let mut root = VBox::new().push(panel);
+        let layout = Recorder::default();
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &layout);
+
+        let mut rec = Recorder::default();
+        paint_tree_in_rect(&root, &mut rec, Rect::new(45.0, 0.0, 5.0, 30.0));
+
+        assert!(!rec.fills.is_empty(), "阴影与脏区相交时不能跳过控件");
     }
 
     #[test]

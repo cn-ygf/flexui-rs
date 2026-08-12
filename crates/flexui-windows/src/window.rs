@@ -7,9 +7,9 @@ use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    hit_test, layout_node, paint_tree, Color, Dispatcher, Event, Mods, MouseButton, NewWindow,
-    Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion,
-    WindowHandle,
+    hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher, Event, Mods, MouseButton,
+    NewWindow, Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
+    WindowDragRegion, WindowHandle,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -18,7 +18,8 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, ValidateRect, HDC, PAINTSTRUCT,
+    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, ValidateRect, HDC,
+    PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -36,7 +37,7 @@ use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW,
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::{GdiCanvas, ImageCache};
-use crate::gdiplus::{Gdiplus, OffscreenBitmap};
+use crate::gdiplus::{Gdiplus, OffscreenBitmap, UNIT_PIXEL};
 
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
@@ -61,6 +62,11 @@ struct AppState {
     client_size: (u16, u16),
     /// 最小化期间内容发生变化，恢复动画结束后需要异步补画。
     redraw_after_restore: bool,
+    /// 窗口级持久离屏缓冲；普通局部重绘不再反复分配整窗位图。
+    back_buffer: Option<OffscreenBitmap>,
+    back_buffer_size: (i32, i32),
+    /// 控件几何是否需要在下一帧重新布局；纯 hot 切换可复用现有布局。
+    layout_dirty: bool,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -286,6 +292,9 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
             (client_rect.bottom - client_rect.top).max(0) as u16,
         ),
         redraw_after_restore: false,
+        back_buffer: None,
+        back_buffer_size: (0, 0),
+        layout_dirty: true,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -356,11 +365,12 @@ unsafe fn mouse_pos(hwnd: HWND, lparam: LPARAM) -> flexui_core::Point {
 }
 
 /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
-unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
+unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     if state.is_null() {
-        return;
+        return false;
     }
     let st = &mut *state;
+    let visual_only = matches!(ev, Event::MouseMove { .. });
     st.disp.handle(st.root.as_mut(), &ev);
     let need = st.disp.take_redraw();
     let dirty = st.disp.take_dirty();
@@ -413,14 +423,20 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     if st.minimized {
         st.redraw_after_restore |=
             need || opened || !acts.is_empty() || !doubles.is_empty() || dirty.is_some();
-        return;
+        return false;
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
     if need || opened || !acts.is_empty() || !doubles.is_empty() {
+        st.layout_dirty = true;
         InvalidateRect(hwnd, null(), 0);
+        true
     } else if let Some(r) = dirty {
+        st.layout_dirty |= !visual_only;
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
+        true
+    } else {
+        false
     }
 }
 
@@ -535,6 +551,7 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
 /// 失效焦点控件被标脏的区域（剪贴板操作后重绘）。
 unsafe fn invalidate_dirty(hwnd: HWND, st: &mut AppState) {
     if let Some(r) = st.disp.take_dirty() {
+        st.layout_dirty = true;
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -586,6 +603,7 @@ unsafe fn fire_drop(hwnd: HWND, state: *mut AppState, paths: Vec<String>) {
     let delegate = &mut st.delegate;
     let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
     delegate.on_drop_files(&paths, &mut ctx);
+    st.layout_dirty = true;
     InvalidateRect(hwnd, null(), 0);
 }
 
@@ -613,7 +631,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
             let hdc = BeginPaint(hwnd, &mut ps);
             if !state.is_null() {
-                paint_window(hwnd, hdc, &mut *state);
+                paint_window(hwnd, hdc, ps.rcPaint, &mut *state);
             }
             EndPaint(hwnd, &ps);
             0
@@ -629,13 +647,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_MOUSEMOVE => {
-            dispatch(
+            let invalidated = dispatch(
                 hwnd,
                 state,
                 Event::MouseMove {
                     pos: mouse_pos(hwnd, lparam),
                 },
             );
+            // WM_PAINT 优先级低于连续鼠标消息；立即提交已失效的 hot 区域，避免快速跨项时视觉滞后。
+            if invalidated {
+                UpdateWindow(hwnd);
+            }
             0
         }
         WM_LBUTTONDOWN => {
@@ -854,6 +876,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 return 0;
             }
             if size_changed {
+                if !state.is_null() {
+                    (*state).layout_dirty = true;
+                }
                 dispatch(
                     hwnd,
                     state,
@@ -910,6 +935,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         if st.minimized {
                             st.redraw_after_restore = true;
                         } else {
+                            st.layout_dirty = true;
                             InvalidateRect(hwnd, null(), 0);
                         }
                     }
@@ -917,6 +943,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let blink = st.disp.blink(st.root.as_mut());
                     st.disp.tooltip_tick(st.root.as_mut());
                     if st.disp.take_redraw() {
+                        st.layout_dirty = true;
                         InvalidateRect(hwnd, null(), 0);
                     } else if let Some(r) = blink {
                         let rc = to_physical_rect(hwnd, r);
@@ -1011,6 +1038,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let dpi = (wparam & 0xFFFF) as u32;
             let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
             dispatch(hwnd, state, Event::ScaleChanged { scale });
+            if !state.is_null() {
+                (*state).layout_dirty = true;
+            }
             InvalidateRect(hwnd, null(), 0);
             0
         }
@@ -1033,7 +1063,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 ///
 /// 先画到 32bpp 离屏位图（抗锯齿/ClearType 在位图上效果最佳），再整块 blit 到窗口，
 /// 既消除 resize 闪烁，也保证边缘平滑。逻辑坐标经 world transform 按 DPI 放大到物理像素。
-unsafe fn paint_window(hwnd: HWND, hdc: HDC, state: &mut AppState) {
+unsafe fn paint_window(hwnd: HWND, hdc: HDC, paint: RECT, state: &mut AppState) {
     let mut rc: RECT = std::mem::zeroed();
     GetClientRect(hwnd, &mut rc);
     let w = (rc.right - rc.left).max(1);
@@ -1043,31 +1073,88 @@ unsafe fn paint_window(hwnd: HWND, hdc: HDC, state: &mut AppState) {
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
 
-    // 离屏位图按物理像素尺寸；绘制经 DPI 缩放后填满它。
-    let Some(off) = OffscreenBitmap::new(w, h) else {
+    // 尺寸不变时复用整窗位图，避免 hot 切换反复分配和释放约 width*height*4 字节。
+    let rebuilt = state.back_buffer_size != (w, h);
+    if rebuilt {
+        state.back_buffer = OffscreenBitmap::new(w, h);
+        state.back_buffer_size = if state.back_buffer.is_some() {
+            (w, h)
+        } else {
+            (0, 0)
+        };
+    }
+    let Some(off) = state.back_buffer.as_ref() else {
         return;
     };
-    let AppState {
-        root,
-        disp,
-        image_cache,
-        ..
-    } = state;
-    let mut cv = GdiCanvas::with_cache(off.graphics(), image_cache);
-    cv.clear(Color::WHITE); // 不透明底，供未覆盖区域与 ClearType 使用
+
+    // 持久 Graphics 每帧先恢复基础状态，避免 DPI 变换和裁剪逐次累积。
+    gp::GdipResetWorldTransform(off.graphics());
+    gp::GdipResetClip(off.graphics());
+    let mut cv = GdiCanvas::with_cache(off.graphics(), &mut state.image_cache);
     cv.set_dpi_scale(scale);
 
-    // 布局用逻辑像素（= 物理 / scale）。
     let lw = w as f32 / scale;
     let lh = h as f32 / scale;
-    layout_node(root.as_mut(), Rect::new(0.0, 0.0, lw, lh), &cv);
-    paint_tree(root.as_ref(), &mut cv);
-    disp.paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
+    let physical_dirty = if rebuilt {
+        RECT {
+            left: 0,
+            top: 0,
+            right: w,
+            bottom: h,
+        }
+    } else {
+        RECT {
+            left: paint.left.clamp(0, w),
+            top: paint.top.clamp(0, h),
+            right: paint.right.clamp(0, w),
+            bottom: paint.bottom.clamp(0, h),
+        }
+    };
+    if physical_dirty.right <= physical_dirty.left || physical_dirty.bottom <= physical_dirty.top {
+        return;
+    }
+    let dirty = Rect::new(
+        physical_dirty.left as f32 / scale,
+        physical_dirty.top as f32 / scale,
+        (physical_dirty.right - physical_dirty.left) as f32 / scale,
+        (physical_dirty.bottom - physical_dirty.top) as f32 / scale,
+    );
 
-    // 整块 blit 到窗口（1:1 物理像素）。
+    // 先恢复脏区背景，再绘制相交的父链和控件分支；画布裁剪防止越界覆盖缓存。
+    cv.save();
+    cv.clip_rect(dirty);
+    cv.fill_rect(dirty, Color::WHITE);
+    if rebuilt || state.layout_dirty {
+        layout_node(state.root.as_mut(), Rect::new(0.0, 0.0, lw, lh), &cv);
+        state.layout_dirty = false;
+    }
+    paint_tree_in_rect(state.root.as_ref(), &mut cv, dirty);
+    state
+        .disp
+        .paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
+    cv.restore();
+
+    // 只把 rcPaint 对应区域从缓存提交到窗口。
+    let pw = physical_dirty.right - physical_dirty.left;
+    let ph = physical_dirty.bottom - physical_dirty.top;
     let mut gw: *mut gp::GpGraphics = null_mut();
     if gp::GdipCreateFromHDC(hdc, &mut gw) == 0 && !gw.is_null() {
-        gp::GdipDrawImageRectI(gw, off.image(), 0, 0, w, h);
+        gp::GdipDrawImageRectRectI(
+            gw,
+            off.image(),
+            physical_dirty.left,
+            physical_dirty.top,
+            pw,
+            ph,
+            physical_dirty.left,
+            physical_dirty.top,
+            pw,
+            ph,
+            UNIT_PIXEL,
+            null(),
+            0,
+            null_mut(),
+        );
         gp::GdipDeleteGraphics(gw);
     }
 }
