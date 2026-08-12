@@ -18,7 +18,7 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, HDC, PAINTSTRUCT,
+    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, HDC, PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -53,6 +53,8 @@ struct AppState {
     resizable: bool,
     /// 内容区的窗口拖动范围。
     drag_region: WindowDragRegion,
+    /// 用于在最小化还原时同步绘制第一帧，避免 DWM 先合成未更新的客户区。
+    minimized: bool,
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -264,6 +266,7 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
         frameless,
         resizable: config.resizable,
         drag_region: config.drag_region,
+        minimized: false,
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -774,6 +777,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_SIZE => {
+            if wparam == SIZE_MINIMIZED as usize {
+                if !state.is_null() {
+                    (*state).minimized = true;
+                }
+                // 最小化会携带 0 x 0 客户区，不能用它破坏当前布局。
+                return 0;
+            }
+            if wparam != SIZE_RESTORED as usize && wparam != SIZE_MAXIMIZED as usize {
+                // WS_POPUP 还可能收到其他窗口触发的 SIZE_MAXSHOW / SIZE_MAXHIDE 广播。
+                return 0;
+            }
+
+            let restored_from_minimized = if state.is_null() {
+                false
+            } else {
+                std::mem::replace(&mut (*state).minimized, false)
+            };
             let w = (lparam & 0xFFFF) as u16 as f32;
             let h = ((lparam >> 16) & 0xFFFF) as u16 as f32;
             dispatch(
@@ -785,6 +805,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 },
             );
             InvalidateRect(hwnd, null(), 0);
+            if restored_from_minimized {
+                // ShowWindow(SW_RESTORE) 返回前提交完整客户区，避免短暂透出后方窗口。
+                UpdateWindow(hwnd);
+            }
             0
         }
         // 定时器：id=1 光标闪烁 + Tooltip 延时；id=2 帧定时器驱动动画。
