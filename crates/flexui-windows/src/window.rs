@@ -688,7 +688,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_LBUTTONUP => {
-            dispatch(
+            let invalidated = dispatch(
                 hwnd,
                 state,
                 Event::MouseUp {
@@ -696,6 +696,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     button: MouseButton::Left,
                 },
             );
+            // 点击回调可能显示大面积弹层。同步提交本轮更新，避免 WM_PAINT 被后续鼠标消息推迟，
+            // 造成用户需要再次点击才看到弹层的错觉。
+            if invalidated {
+                UpdateWindow(hwnd);
+            }
             0
         }
         // 方向/Home/End/Delete 等特殊键（不产生 WM_CHAR）→ 平台无关键码。
