@@ -34,11 +34,7 @@ pub fn application_localizer() -> Option<Localizer> {
 
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
 #[cfg(target_os = "macos")]
-use flexui_macos::run as backend_run;
-#[cfg(target_os = "macos")]
 use flexui_macos::run_multi as backend_run_multi;
-#[cfg(target_os = "windows")]
-use flexui_windows::run as backend_run;
 #[cfg(target_os = "windows")]
 use flexui_windows::run_multi as backend_run_multi;
 
@@ -304,6 +300,7 @@ impl<W: WindowImpl> Window<W> {
                 return;
             }
         };
-        backend_run(spec.config, spec.root, spec.disp, spec.delegate);
+        // 保留完整 NewWindow，确保主窗口与后续窗口共享本地化环境及其修订号。
+        backend_run_multi(vec![spec]);
     }
 }

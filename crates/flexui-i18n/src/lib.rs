@@ -269,16 +269,47 @@ fn fallback_locales(locale: &LanguageIdentifier, development: &LanguageIdentifie
     let mut result = Vec::new();
     for candidate in [locale, development] {
         let candidate = candidate.to_string();
-        let mut parts: Vec<&str> = candidate.split('-').collect();
-        while !parts.is_empty() {
-            let value = parts.join("-");
-            if value.parse::<LanguageIdentifier>().is_ok() && !result.contains(&value) {
-                result.push(value);
-            }
-            parts.pop();
-        }
+        push_locale_fallback(&mut result, &candidate);
     }
     result
+}
+
+fn push_locale_fallback(result: &mut Vec<String>, candidate: &str) {
+    let mut parts: Vec<&str> = candidate.split('-').collect();
+    while parts.len() > 1 {
+        push_valid_locale(result, &parts.join("-"));
+        parts.pop();
+    }
+    if let Some(script) = inferred_chinese_script(candidate) {
+        push_valid_locale(result, script);
+    }
+    if let Some(language) = parts.first() {
+        push_valid_locale(result, language);
+    }
+}
+
+fn push_valid_locale(result: &mut Vec<String>, locale: &str) {
+    if locale.parse::<LanguageIdentifier>().is_ok() && !result.iter().any(|item| item == locale) {
+        result.push(locale.to_owned());
+    }
+}
+
+fn inferred_chinese_script(locale: &str) -> Option<&'static str> {
+    let mut subtags = locale.split('-');
+    if subtags.next()? != "zh" {
+        return None;
+    }
+    let subtags: Vec<&str> = subtags.collect();
+    if subtags.iter().any(|subtag| *subtag == "Hans" || *subtag == "Hant") {
+        return None;
+    }
+    if subtags.iter().any(|subtag| matches!(*subtag, "TW" | "HK" | "MO")) {
+        Some("zh-Hant")
+    } else if subtags.iter().any(|subtag| matches!(*subtag, "CN" | "SG")) {
+        Some("zh-Hans")
+    } else {
+        None
+    }
 }
 
 fn parse_message(value: Value) -> Result<Message, I18nError> {
@@ -430,6 +461,21 @@ mod tests {
         assert_eq!(localizer.text("name"), "繁體中文");
         localizer.set_locale("zh-Hans-CN").unwrap();
         assert_eq!(localizer.text("name"), "中文");
+    }
+
+    #[test]
+    fn chinese_regions_infer_simplified_or_traditional_script() {
+        let localizer = Localizer::new("en").unwrap();
+        localizer.load_json_str(r#"{"locale":"zh-Hans","strings":{"name":"简体中文"}}"#).unwrap();
+        localizer.load_json_str(r#"{"locale":"zh-Hant","strings":{"name":"繁體中文"}}"#).unwrap();
+        for locale in ["zh-TW", "zh-HK", "zh-MO"] {
+            localizer.set_locale(locale).unwrap();
+            assert_eq!(localizer.text("name"), "繁體中文");
+        }
+        for locale in ["zh-CN", "zh-SG"] {
+            localizer.set_locale(locale).unwrap();
+            assert_eq!(localizer.text("name"), "简体中文");
+        }
     }
 
     #[test]

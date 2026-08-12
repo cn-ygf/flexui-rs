@@ -1,0 +1,1645 @@
+<?xml version="1.0" ?>
+<root>
+ <rlang id="1000" text="載入中···"/>
+ <rlang id="1001" text="抱歉，UU加速器登入伺服器失敗！"/>
+ <rlang id="1002" text="保持網路通暢，並點選下方修復網路；如果修復仍然未啟動，請重新啟動電腦後嘗試。"/>
+ <rlang id="1003" text="修復網路"/>
+ <rlang id="1004" text="提交反饋"/>
+ <rlang id="1005" text="驗證當前手機號"/>
+ <rlang id="1006" text="驗證電子信箱"/>
+ <rlang id="1007" text="修改完成"/>
+ <rlang id="1008" text="已向你的手機傳送驗證碼"/>
+ <rlang id="1009" text="輸入你收到的驗證碼"/>
+ <rlang id="1010" text="取得驗證碼"/>
+ <rlang id="1011" text="伺服器未知錯誤"/>
+ <rlang id="1012" text="確定"/>
+ <rlang id="1013" text="請輸入你要繫結的電子信箱地址"/>
+ <rlang id="1014" text="輸入電子信箱地址"/>
+ <rlang id="1015" text="提交"/>
+ <rlang id="1016" text="等待電子信箱驗證"/>
+ <rlang id="1017" text="已向你的電子信箱發送一封確認郵件"/>
+ <rlang id="1018" text="立即前往"/>
+ <rlang id="1019" text="電子信箱地址修改成功！"/>
+ <rlang id="1020" text="繫結你的微信"/>
+ <rlang id="1021" text="繫結完成"/>
+ <rlang id="1022" text="微信繫結成功！"/>
+ <rlang id="1023" text="修改手機號需要驗證你的真實身份，請選擇驗證方式："/>
+ <rlang id="1024" text="手機號驗證"/>
+ <rlang id="1025" text="電子信箱驗證"/>
+ <rlang id="1026" text="修改新手機號"/>
+ <rlang id="1027" text="請輸入新的手機號並驗證："/>
+ <rlang id="1028" text="請輸入新的手機號"/>
+ <rlang id="1029" text="手機號修改成功！"/>
+ <rlang id="1030" text="已加速，請在PS按以下步驟進行設定"/>
+ <rlang id="1031" text="1. 將 Xbox 與電腦連線在同一路由器或交換機下「有線/無線均可」；"/>
+ <rlang id="1032" text="2. 設定 → 網路 → 設定網際網路連線 → 使用 LAN 連線 → 自訂 → 手動；"/>
+ <rlang id="1033" text="3. 正確填寫，PS4聯機網路可達NAT型別2，流暢聯機；"/>
+ <rlang id="1034" text="IP地址："/>
+ <rlang id="1035" text="預設閘道："/>
+ <rlang id="1036" text="子網路遮罩："/>
+ <rlang id="1037" text="DNS："/>
+ <rlang id="1038" text="4. 完成設定，如設定成功則自動進入加速頁，如無法跳轉請檢視"/>
+ <rlang id="1039" text="詳細文字教程"/>
+ <rlang id="1040" text="隱藏到工作列托盤"/>
+ <rlang id="1041" text="退出主程式"/>
+ <rlang id="1042" text="不再提醒我"/>
+ <rlang id="1043" text="問題中心"/>
+ <rlang id="1044" text="問題詳細描述"/>
+ <rlang id="1045" text="附件上限1M"/>
+ <rlang id="1046" text="網路型別"/>
+ <rlang id="1047" text="電信"/>
+ <rlang id="1048" text="網通"/>
+ <rlang id="1049" text="行動"/>
+ <rlang id="1050" text="教育網"/>
+ <rlang id="1051" text="其他"/>
+ <rlang id="1052" text="微信號/QQ號："/>
+ <rlang id="1053" text="方便我們聯絡你快速解決問題"/>
+ <rlang id="1054" text="問題型別"/>
+ <rlang id="1055" text="加速效果問題"/>
+ <rlang id="1056" text="錯誤碼"/>
+ <rlang id="1057" text="缺少遊戲/區服"/>
+ <rlang id="1058" text="使用問題諮詢"/>
+ <rlang id="1059" text="其他問題"/>
+ <rlang id="1060" text="請選擇問題型別"/>
+ <rlang id="1061" text="問題單提交後，我們會在2-3個工作日內回覆，請勿重複提交相同問題，以免影響問題處理進度！"/>
+ <rlang id="1062" text="你也可以【點選此處教程】手動處理。"/>
+ <rlang id="1063" text="中國(+86)"/>
+ <rlang id="1064" text="香港特別行政區(+852)"/>
+ <rlang id="1065" text="澳門特別行政區(+853)"/>
+ <rlang id="1066" text="中國臺灣省(+886)"/>
+ <rlang id="1067" text="韓國(+82)"/>
+ <rlang id="1068" text="日本(+81)"/>
+ <rlang id="1069" text="美國(+1)"/>
+ <rlang id="1070" text="澳大利亞(+61)"/>
+ <rlang id="1071" text="阿爾巴尼亞(+355)"/>
+ <rlang id="1072" text="阿爾及利亞(+213)"/>
+ <rlang id="1073" text="阿富汗(+93)"/>
+ <rlang id="1074" text="阿根廷(+54)"/>
+ <rlang id="1075" text="阿拉伯聯合大公國(+971)"/>
+ <rlang id="1076" text="阿魯巴(+297)"/>
+ <rlang id="1077" text="阿曼(+968)"/>
+ <rlang id="1078" text="亞塞拜然(+994)"/>
+ <rlang id="1079" text="埃及(+20)"/>
+ <rlang id="1080" text="衣索比亞(+251)"/>
+ <rlang id="1081" text="愛爾蘭(+353)"/>
+ <rlang id="1082" text="愛沙尼亞(+372)"/>
+ <rlang id="1083" text="安道爾(+376)"/>
+ <rlang id="1084" text="安哥拉(+244)"/>
+ <rlang id="1085" text="安圭拉(+1264)"/>
+ <rlang id="1086" text="安地卡及巴布達(+1268)"/>
+ <rlang id="1087" text="奧地利(+43)"/>
+ <rlang id="1088" text="巴貝多(+1246)"/>
+ <rlang id="1089" text="巴布亞紐幾內亞(+675)"/>
+ <rlang id="1090" text="巴哈馬(+1242)"/>
+ <rlang id="1091" text="巴基斯坦(+92)"/>
+ <rlang id="1092" text="巴拉圭(+595)"/>
+ <rlang id="1093" text="巴勒斯坦領土(+970)"/>
+ <rlang id="1094" text="巴林(+973)"/>
+ <rlang id="1095" text="巴拿馬(+507)"/>
+ <rlang id="1096" text="巴西(+55)"/>
+ <rlang id="1097" text="白俄羅斯(+375)"/>
+ <rlang id="1098" text="百慕大(+1441)"/>
+ <rlang id="1099" text="保加利亞(+359)"/>
+ <rlang id="1100" text="貝南(+229)"/>
+ <rlang id="1101" text="比利時(+32)"/>
+ <rlang id="1102" text="冰島(+354)"/>
+ <rlang id="1103" text="波多黎各(+1787)"/>
+ <rlang id="1104" text="波蘭(+48)"/>
+ <rlang id="1105" text="波斯尼亞和黑塞哥維那(+387)"/>
+ <rlang id="1106" text="玻利維亞(+591)"/>
+ <rlang id="1107" text="貝里斯(+501)"/>
+ <rlang id="1108" text="波札那(+267)"/>
+ <rlang id="1109" text="不丹(+975)"/>
+ <rlang id="1110" text="布吉納法索(+226)"/>
+ <rlang id="1111" text="蒲隆地(+257)"/>
+ <rlang id="1112" text="朝鮮(+850)"/>
+ <rlang id="1113" text="赤道幾內亞(+240)"/>
+ <rlang id="1114" text="丹麥(+45)"/>
+ <rlang id="1115" text="德國(+49)"/>
+ <rlang id="1116" text="東帝汶(+670)"/>
+ <rlang id="1117" text="多哥(+228)"/>
+ <rlang id="1118" text="多明尼加(+1767)"/>
+ <rlang id="1119" text="多明尼加共和國(+1809)"/>
+ <rlang id="1120" text="俄羅斯(+7)"/>
+ <rlang id="1121" text="厄瓜多(+593)"/>
+ <rlang id="1122" text="厄利垂亞(+291)"/>
+ <rlang id="1123" text="法國(+33)"/>
+ <rlang id="1124" text="法羅群島(+298)"/>
+ <rlang id="1125" text="法屬波利尼西亞(+689)"/>
+ <rlang id="1126" text="法屬蓋亞那(+594)"/>
+ <rlang id="1127" text="菲律賓(+63)"/>
+ <rlang id="1128" text="斐濟(+679)"/>
+ <rlang id="1129" text="芬蘭(+358)"/>
+ <rlang id="1130" text="維德角(+238)"/>
+ <rlang id="1131" text="甘比亞(+220)"/>
+ <rlang id="1132" text="剛果共和國(+242)"/>
+ <rlang id="1133" text="剛果民主共和國(+243)"/>
+ <rlang id="1134" text="哥倫比亞(+57)"/>
+ <rlang id="1135" text="哥斯大黎加(+506)"/>
+ <rlang id="1136" text="格瑞那達(+1473)"/>
+ <rlang id="1137" text="格陵蘭(+299)"/>
+ <rlang id="1138" text="喬治亞(+995)"/>
+ <rlang id="1139" text="古巴(+53)"/>
+ <rlang id="1140" text="瓜德羅普島(+590)"/>
+ <rlang id="1141" text="關島(+1671)"/>
+ <rlang id="1142" text="蓋亞那(+592)"/>
+ <rlang id="1143" text="哈薩克(+7)"/>
+ <rlang id="1144" text="海地(+509)"/>
+ <rlang id="1145" text="荷蘭(+31)"/>
+ <rlang id="1146" text="荷屬安的列斯群島(+599)"/>
+ <rlang id="1147" text="黑山(+382)"/>
+ <rlang id="1148" text="宏都拉斯(+504)"/>
+ <rlang id="1149" text="吉布提(+253)"/>
+ <rlang id="1150" text="吉爾吉斯斯坦(+996)"/>
+ <rlang id="1151" text="幾內亞(+224)"/>
+ <rlang id="1152" text="幾內亞比索(+245)"/>
+ <rlang id="1153" text="加拿大(+1)"/>
+ <rlang id="1154" text="迦納(+233)"/>
+ <rlang id="1155" text="加彭(+241)"/>
+ <rlang id="1156" text="柬埔寨(+855)"/>
+ <rlang id="1157" text="捷克共和國(+420)"/>
+ <rlang id="1158" text="辛巴威(+263)"/>
+ <rlang id="1159" text="喀麥隆(+237)"/>
+ <rlang id="1160" text="卡達(+974)"/>
+ <rlang id="1161" text="開曼群島(+1345)"/>
+ <rlang id="1162" text="葛摩(+269)"/>
+ <rlang id="1163" text="科威特(+965)"/>
+ <rlang id="1164" text="克羅埃西亞(+385)"/>
+ <rlang id="1165" text="肯亞(+254)"/>
+ <rlang id="1166" text="庫克群島(+682)"/>
+ <rlang id="1167" text="拉脫維亞(+371)"/>
+ <rlang id="1168" text="賴索托(+266)"/>
+ <rlang id="1169" text="寮國(+856)"/>
+ <rlang id="1170" text="黎巴嫩(+961)"/>
+ <rlang id="1171" text="立陶宛(+370)"/>
+ <rlang id="1172" text="賴比瑞亞(+231)"/>
+ <rlang id="1173" text="利比亞(+218)"/>
+ <rlang id="1174" text="列支敦斯登(+423)"/>
+ <rlang id="1175" text="留尼旺島(+262)"/>
+ <rlang id="1176" text="盧森堡(+352)"/>
+ <rlang id="1177" text="盧安達(+250)"/>
+ <rlang id="1178" text="羅馬尼亞(+40)"/>
+ <rlang id="1179" text="馬達加斯加(+261)"/>
+ <rlang id="1180" text="馬爾地夫(+960)"/>
+ <rlang id="1181" text="馬耳他(+356)"/>
+ <rlang id="1182" text="馬拉維(+265)"/>
+ <rlang id="1183" text="馬來西亞(+60)"/>
+ <rlang id="1184" text="馬裡(+223)"/>
+ <rlang id="1185" text="馬其頓(+389)"/>
+ <rlang id="1186" text="馬提尼克(+596)"/>
+ <rlang id="1187" text="模里西斯(+230)"/>
+ <rlang id="1188" text="茅利塔尼亞(+222)"/>
+ <rlang id="1189" text="蒙古(+976)"/>
+ <rlang id="1190" text="蒙特塞拉特(+1664)"/>
+ <rlang id="1191" text="孟加拉國(+880)"/>
+ <rlang id="1192" text="秘魯(+51)"/>
+ <rlang id="1193" text="摩爾多瓦(+373)"/>
+ <rlang id="1194" text="摩洛哥(+212)"/>
+ <rlang id="1195" text="摩納哥(+377)"/>
+ <rlang id="1196" text="莫三比克(+258)"/>
+ <rlang id="1197" text="墨西哥(+52)"/>
+ <rlang id="1198" text="緬甸(+95)"/>
+ <rlang id="1199" text="奈米比亞(+264)"/>
+ <rlang id="1200" text="南非(+27)"/>
+ <rlang id="1201" text="南蘇丹(+211)"/>
+ <rlang id="1202" text="尼泊爾(+977)"/>
+ <rlang id="1203" text="尼加拉瓜(+505)"/>
+ <rlang id="1204" text="尼日(+227)"/>
+ <rlang id="1205" text="奈及利亞(+234)"/>
+ <rlang id="1206" text="挪威(+47)"/>
+ <rlang id="1207" text="葡萄牙(+351)"/>
+ <rlang id="1208" text="瑞典(+46)"/>
+ <rlang id="1209" text="瑞士(+41)"/>
+ <rlang id="1210" text="薩爾瓦多(+503)"/>
+ <rlang id="1211" text="薩摩亞(+685)"/>
+ <rlang id="1212" text="塞爾維亞(+381)"/>
+ <rlang id="1213" text="獅子山(+232)"/>
+ <rlang id="1214" text="塞內加爾(+221)"/>
+ <rlang id="1215" text="塞普勒斯(+357)"/>
+ <rlang id="1216" text="塞席爾(+248)"/>
+ <rlang id="1217" text="沙烏地阿拉伯(+966)"/>
+ <rlang id="1218" text="聖多美和普林西比(+239)"/>
+ <rlang id="1219" text="聖克里斯多福及尼維斯(+1869)"/>
+ <rlang id="1220" text="聖露西亞(+1758)"/>
+ <rlang id="1221" text="聖馬利諾(+378)"/>
+ <rlang id="1222" text="聖皮埃爾和密克隆群島(+508)"/>
+ <rlang id="1223" text="聖文森及格瑞那丁(+1784)"/>
+ <rlang id="1224" text="斯里蘭卡(+94)"/>
+ <rlang id="1225" text="斯洛伐克(+421)"/>
+ <rlang id="1226" text="斯洛維尼亞(+386)"/>
+ <rlang id="1227" text="史瓦濟蘭(+268)"/>
+ <rlang id="1228" text="蘇丹(+249)"/>
+ <rlang id="1229" text="蘇利南(+597)"/>
+ <rlang id="1230" text="索馬利亞(+252)"/>
+ <rlang id="1231" text="塔吉克(+992)"/>
+ <rlang id="1232" text="泰國(+66)"/>
+ <rlang id="1233" text="坦尚尼亞(+255)"/>
+ <rlang id="1234" text="湯加(+676)"/>
+ <rlang id="1235" text="特克斯和凱科斯群島(+1649)"/>
+ <rlang id="1236" text="特里尼達和多巴哥(+1868)"/>
+ <rlang id="1237" text="突尼西亞(+216)"/>
+ <rlang id="1238" text="土耳其(+90)"/>
+ <rlang id="1239" text="土庫曼(+993)"/>
+ <rlang id="1240" text="萬那杜(+678)"/>
+ <rlang id="1241" text="瓜地馬拉(+502)"/>
+ <rlang id="1242" text="委內瑞拉(+58)"/>
+ <rlang id="1243" text="汶萊(+673)"/>
+ <rlang id="1244" text="烏干達(+256)"/>
+ <rlang id="1245" text="烏克蘭(+380)"/>
+ <rlang id="1246" text="烏拉圭(+598)"/>
+ <rlang id="1247" text="烏茲別克(+998)"/>
+ <rlang id="1248" text="西班牙(+34)"/>
+ <rlang id="1249" text="希臘(+30)"/>
+ <rlang id="1250" text="象牙海岸(+225)"/>
+ <rlang id="1251" text="新加坡(+65)"/>
+ <rlang id="1252" text="新喀里多尼亞(+687)"/>
+ <rlang id="1253" text="紐西蘭(+64)"/>
+ <rlang id="1254" text="匈牙利(+36)"/>
+ <rlang id="1255" text="敘利亞(+963)"/>
+ <rlang id="1256" text="牙買加(+1876)"/>
+ <rlang id="1257" text="亞美尼亞(+374)"/>
+ <rlang id="1258" text="葉門(+967)"/>
+ <rlang id="1259" text="伊拉克(+964)"/>
+ <rlang id="1260" text="伊朗(+98)"/>
+ <rlang id="1261" text="以色列(+972)"/>
+ <rlang id="1262" text="義大利(+39)"/>
+ <rlang id="1263" text="印度(+91)"/>
+ <rlang id="1264" text="印尼(+62)"/>
+ <rlang id="1265" text="英國(+44)"/>
+ <rlang id="1266" text="英屬維爾京群島(+1340)"/>
+ <rlang id="1267" text="約旦(+962)"/>
+ <rlang id="1268" text="越南(+84)"/>
+ <rlang id="1269" text="尚比亞(+260)"/>
+ <rlang id="1270" text="澤西島(+44)"/>
+ <rlang id="1271" text="查德(+235)"/>
+ <rlang id="1272" text="直布羅陀(+350)"/>
+ <rlang id="1273" text="智利(+56)"/>
+ <rlang id="1274" text="中非共和國(+236)"/>
+ <rlang id="1275" text="選擇你要加速的本地遊戲："/>
+ <rlang id="1276" text="進入首頁"/>
+ <rlang id="1277" text="啟動遊戲"/>
+ <rlang id="1278" text="設定網路"/>
+ <rlang id="1279" text="停止加速"/>
+ <rlang id="1280" text="遊戲百寶箱"/>
+ <rlang id="1281" text="切換戰網地區"/>
+ <rlang id="1282" text="同步加速YY"/>
+ <rlang id="1283" text="正在檢查你是否已設定成功…"/>
+ <rlang id="1284" text="恭喜！你的PS4已設定成功"/>
+ <rlang id="1285" text="詳情"/>
+ <rlang id="1286" text="有線"/>
+ <rlang id="1287" text="所有區服 所有伺服器"/>
+ <rlang id="1288" text="中國香港2603"/>
+ <rlang id="1289" text="切換"/>
+ <rlang id="1290" text="設定"/>
+ <rlang id="1291" text="即時延遲"/>
+ <rlang id="1292" text="丟包率"/>
+ <rlang id="1293" text="綜合最佳化"/>
+ <rlang id="1294" text="NAT型別"/>
+ <rlang id="1295" text="裝置連線"/>
+ <rlang id="1296" text="加速走勢"/>
+ <rlang id="1297" text="電腦"/>
+ <rlang id="1298" text="路由器"/>
+ <rlang id="1299" text="遊戲伺服器"/>
+ <rlang id="1300" text="立即加速"/>
+ <rlang id="1301" text="加速詳情"/>
+ <rlang id="1302" text="區服/節點"/>
+ <rlang id="1303" text="新增到首頁"/>
+ <rlang id="1304" text="關注上線"/>
+ <rlang id="1305" text="取消關注"/>
+ <rlang id="1306" text="| 遊戲名字 | 伺服器名字 |"/>
+ <rlang id="1307" text="搜尋伺服器"/>
+ <rlang id="1308" text="收起"/>
+ <rlang id="1309" text="| 遊戲名字 |"/>
+ <rlang id="1310" text="當前區服："/>
+ <rlang id="1311" text="沒有找到區服"/>
+ <rlang id="1312" text="還沒有加速遊戲"/>
+ <rlang id="1313" text="如需加速遊戲，輸入遊戲名或關鍵字"/>
+ <rlang id="1314" text="我的遊戲"/>
+ <rlang id="1315" text="我的卡券"/>
+ <rlang id="1316" text="關閉視窗"/>
+ <rlang id="1317" text="登入"/>
+ <rlang id="1318" text="請輸入手機號碼"/>
+ <rlang id="1319" text="請輸入驗證碼"/>
+ <rlang id="1320" text="1.將以電話的形式發放"/>
+ <rlang id="1321" text="2.電話可能會被手機攔截或標記為騷擾，請注意接聽"/>
+ <rlang id="1322" text="3.將在2分鐘內撥通，請耐心等待一會兒"/>
+ <rlang id="1323" text="請輸入語音驗證碼"/>
+ <rlang id="1324" text="返回簡訊驗證"/>
+ <rlang id="1325" text="長時間收不到驗證碼？"/>
+ <rlang id="1326" text="微信登入"/>
+ <rlang id="1327" text="中國香港特別行政區(+852)"/>
+ <rlang id="1328" text="中國澳門特別行政區(+853)"/>
+ <rlang id="1329" text="中國臺灣地區(+886)"/>
+ <rlang id="1330" text="長時間收不到驗證碼?"/>
+ <rlang id="1331" text="修復 LSP"/>
+ <rlang id="1332" text="修復失敗！建議你嘗試以下操作："/>
+ <rlang id="1333" text="1. 暫時關閉防毒軟體以及管家類軟體，重新進行修復操作。"/>
+ <rlang id="1334" text="2. 在命令列執行netsh winsock reset嘗試修復。"/>
+ <rlang id="1335" text="重新啟動電腦"/>
+ <rlang id="1336" text="暫不重新啟動"/>
+ <rlang id="1337" text="關閉"/>
+ <rlang id="1338" text="我的遊戲"/>
+ <rlang id="1339" text="已安裝遊戲%d"/>
+ <rlang id="1340" text="偵測到新的本地遊戲："/>
+ <rlang id="1341" text="實名登記"/>
+ <rlang id="1342" text="儲值會員"/>
+ <rlang id="1343" text="頁面載入超時，建議你透過UU官方公眾號進行儲值"/>
+ <rlang id="1344" text="1.微信掃描下方二維碼，或搜尋公眾號「網易UU加速器」"/>
+ <rlang id="1345" text="2.關注並進入公眾號，輸入關鍵字："/>
+ <rlang id="1346" text="儲值"/>
+ <rlang id="1347" text="3.點選回覆的儲值入口，選擇「高級會員」進行儲值"/>
+ <rlang id="1348" text="4.儲值前，請注意確認需儲值的手機號！"/>
+ <rlang id="1349" text="使用微信掃一掃"/>
+ <rlang id="1350" text="搜尋結果"/>
+ <rlang id="1351" text="共0個搜尋結果"/>
+ <rlang id="1352" text="未找到遊戲？"/>
+ <rlang id="1353" text="聯絡U妹"/>
+ <rlang id="1354" text="東南亞服"/>
+ <rlang id="1355" text="荒野行動PC版"/>
+ <rlang id="1356" text="先鋒內測"/>
+ <rlang id="1357" text="絕地求生"/>
+ <rlang id="1358" text="支援所有服務"/>
+ <rlang id="1359" text="Xbox-絕地求生"/>
+ <rlang id="1360" text="Xbox專用"/>
+ <rlang id="1361" text="PS-絕地求生"/>
+ <rlang id="1362" text="檢視更多結果"/>
+ <rlang id="1363" text="系統設定"/>
+ <rlang id="1364" text="加速設定"/>
+ <rlang id="1365" text="帳號設定"/>
+ <rlang id="1366" text="網路工具"/>
+ <rlang id="1367" text="本機網路出現無法連網的情況，可嘗試透過該選項進行修復。"/>
+ <rlang id="1368" text="修復"/>
+ <rlang id="1369" text="解除安裝虛擬網路卡"/>
+ <rlang id="1370" text="當不需要虛擬網路卡時，自動解除安裝虛擬網路卡。"/>
+ <rlang id="1371" text="解除安裝"/>
+ <rlang id="1372" text="開啟加速日誌"/>
+ <rlang id="1373" text="向UU提交反饋時自動上傳，便於定位加速問題。"/>
+ <rlang id="1374" text="開啟"/>
+ <rlang id="1375" text="啟用ClearType顯示（測試）"/>
+ <rlang id="1376" text="讓字型顯示更加清晰"/>
+ <rlang id="1377" text="加速設定"/>
+ <rlang id="1378" text="動態多線（UU獨家）"/>
+ <rlang id="1379" text="TUN網路卡相容"/>
+ <rlang id="1380" text="主機遊戲ICMP測速"/>
+ <rlang id="1381" text="本地域名解析"/>
+ <rlang id="1382" text="加速後智慧最佳化記憶體"/>
+ <rlang id="1383" text="節點選擇方式"/>
+ <rlang id="1384" text="按速度自動選擇"/>
+ <rlang id="1385" text="記住手動選擇的節點"/>
+ <rlang id="1386" text="常用設定"/>
+ <rlang id="1387" text="啟動後自動加速"/>
+ <rlang id="1388" text="開機自動執行"/>
+ <rlang id="1389" text="自動建立桌面捷徑"/>
+ <rlang id="1390" text="加速時休眠不斷網"/>
+ <rlang id="1391" text="ClearType字型"/>
+ <rlang id="1392" text="開啟 UU 音效"/>
+ <rlang id="1393" text="切換英文"/>
+ <rlang id="1394" text="當關閉視窗時"/>
+ <rlang id="1395" text="使用者協議"/>
+ <rlang id="1396" text="許可協議"/>
+ <rlang id="1397" text="隱私政策"/>
+ <rlang id="1398" text="兒童保護及監護人須知"/>
+ <rlang id="1399" text="版本:v4.0"/>
+ <rlang id="1400" text="客服"/>
+ <rlang id="1401" text="訊息"/>
+ <rlang id="1402" text="登出"/>
+ <rlang id="1403" text="問題百科"/>
+ <rlang id="1404" text="建立問題單"/>
+ <rlang id="1405" text="我的問題"/>
+ <rlang id="1406" text="線上客服"/>
+ <rlang id="1407" text="最小化"/>
+ <rlang id="1408" text="返回"/>
+ <rlang id="1409" text="首頁"/>
+ <rlang id="1410" text="搜尋"/>
+ <rlang id="1411" text="顯示主介面"/>
+ <rlang id="1412" text="退出UU加速器"/>
+ <rlang id="1413" text="解綁完成"/>
+ <rlang id="1414" text="微信解綁成功！"/>
+ <rlang id="1415" text="解綁你的微信"/>
+ <rlang id="1416" text="請選擇一種解綁方式："/>
+ <rlang id="1417" text="簡訊解綁"/>
+ <rlang id="1418" text="掃碼解綁"/>
+ <rlang id="1419" text="編輯"/>
+ <rlang id="1420" text="高級會員"/>
+ <rlang id="1421" text="天"/>
+ <rlang id="1422" text="全球遊戲加速，全平台加速，電競專線，優享客服。"/>
+ <rlang id="1423" text="手遊會員"/>
+ <rlang id="1424" text="預計**天後結束"/>
+ <rlang id="1425" text="| 遊戲名字 | 分區 | 伺服器 |"/>
+ <rlang id="1426" text="模式選擇"/>
+ <rlang id="1427" text="節點記錄"/>
+ <rlang id="1428" text="搜尋節點"/>
+ <rlang id="1429" text="全部節點"/>
+ <rlang id="1430" text="遊戲延遲"/>
+ <rlang id="1431" text="丟包"/>
+ <rlang id="1432" text="狀態"/>
+ <rlang id="1433" text="模式"/>
+ <rlang id="1434" text="顯示更多節點"/>
+ <rlang id="1435" text="未發現節點，請檢視「模式選擇」是否有勾選。"/>
+ <rlang id="1436" text="重新整理"/>
+ <rlang id="1437" text="模式一"/>
+ <rlang id="1438" text="模式二"/>
+ <rlang id="1439" text="模式三"/>
+ <rlang id="1440" text="模式四"/>
+ <rlang id="1441" text="路由模式"/>
+ <rlang id="1442" text="程式模式"/>
+ <rlang id="1443" text="請選擇你要進行的操作："/>
+ <rlang id="1444" text="修改"/>
+ <rlang id="1445" text="解綁"/>
+ <rlang id="1446" text="區服、節點選擇"/>
+ <rlang id="1447" text="區服"/>
+ <rlang id="1448" text="節點"/>
+ <rlang id="1449" text="點選"/>
+ <rlang id="1450" text="檢視UU百科"/>
+ <rlang id="1451" text="重新加速"/>
+ <rlang id="1452" text="快速反饋"/>
+ <rlang id="1453" text="取消"/>
+ <rlang id="1454" text="模擬器加速僅保證對國服手遊有穩定效果"/>
+ <rlang id="1455" text="推薦UU行動版，手機加速更精彩！"/>
+ <rlang id="1456" text="掃碼下載，暢玩國內國外熱門手遊"/>
+ <rlang id="1457" text="不再提示"/>
+ <rlang id="1458" text="提交失敗"/>
+ <rlang id="1459" text="請稍後重試，如果你是會員可聯絡線上客服"/>
+ <rlang id="1460" text="啟動平台"/>
+ <rlang id="1461" text="啟動路徑"/>
+ <rlang id="1462" text="瀏覽"/>
+ <rlang id="1463" text="戰網地區選擇"/>
+ <rlang id="1464" text="Xbox網路修復"/>
+ <rlang id="1465" text="延遲穩定模式"/>
+ <rlang id="1466" text="關"/>
+ <rlang id="1467" text="遊戲介面漢化"/>
+ <rlang id="1468" text="美洲"/>
+ <rlang id="1469" text="歐洲"/>
+ <rlang id="1470" text="亞洲"/>
+ <rlang id="1471" text="限時服務已到期，你已被迫下線"/>
+ <rlang id="1472" text="建議你開通會員服務，無限制暢玩"/>
+ <rlang id="1473" text="更多額外優惠活動"/>
+ <rlang id="1474" text="點選這裡！"/>
+ <rlang id="1475" text="立即開通"/>
+ <rlang id="1476" text="請閱讀並同意以下協議"/>
+ <rlang id="1477" text="隱私協議"/>
+ <rlang id="1478" text="及"/>
+ <rlang id="1479" text="同意"/>
+ <rlang id="1480" text="退出"/>
+ <rlang id="1481" text="恭喜你儲值成功！"/>
+ <rlang id="1482" text="關閉視窗（%ds）"/>
+ <rlang id="1483" text="為保證加速生效，正在為你關閉以下程式："/>
+ <rlang id="1484" text="等"/>
+ <rlang id="1485" text="關閉後，你可以重新開啟或直接開始遊戲"/>
+ <rlang id="1486" text="繼續"/>
+ <rlang id="1487" text="該遊戲上線後，自動新增至「首頁」"/>
+ <rlang id="1488" text="不再提醒"/>
+ <rlang id="1489" text="關注成功"/>
+ <rlang id="1490" text="重新取得"/>
+ <rlang id="1491" text="修復成功，如果問題依然存在請嘗試以下操作："/>
+ <rlang id="1492" text="1. 修復成功後重新啟動電腦（優先嘗試）。"/>
+ <rlang id="1493" text="2. 在命令列執行 netsh winsock reset 後重新啟動電腦。"/>
+ <rlang id="1494" text="驗證碼已傳送到手機，請注意查收"/>
+ <rlang id="1495" text="驗證失敗"/>
+ <rlang id="1496" text="伺服器錯誤"/>
+ <rlang id="1497" text="請輸入正確的驗證碼"/>
+ <rlang id="1498" text="%d秒後重新取得"/>
+ <rlang id="1499" text="60秒後重新取得"/>
+ <rlang id="1500" text="已向你的手機%s傳送驗證碼"/>
+ <rlang id="1501" text="開"/>
+ <rlang id="1502" text="自訂"/>
+ <rlang id="1503" text="提示"/>
+ <rlang id="1504" text="加速過程中不能修復LSP"/>
+ <rlang id="1505" text="停止加速過程中不能修復LSP"/>
+ <rlang id="1506" text="電子信箱為空"/>
+ <rlang id="1507" text="電子信箱格式錯誤"/>
+ <rlang id="1508" text="取得驗證碼失敗"/>
+ <rlang id="1509" text="返回資料錯誤"/>
+ <rlang id="1510" text="微信繫結失敗"/>
+ <rlang id="1511" text="取得失敗"/>
+ <rlang id="1512" text="微信解綁失敗"/>
+ <rlang id="1513" text="更換區服，遊戲可能會重連，建議先退出遊戲。"/>
+ <rlang id="1514" text="沒有選擇記錄"/>
+ <rlang id="1515" text="智能匹配"/>
+ <rlang id="1516" text="所有服务器"/>
+ <rlang id="1517" text="該遊戲不支援這種模式"/>
+ <rlang id="1518" text="發現已安裝銳捷客戶端，模式三加速可能會斷網"/>
+ <rlang id="1519" text="逾時"/>
+ <rlang id="1520" text="當前加速區服已下線"/>
+ <rlang id="1521" text="請重新選擇區服進行加速"/>
+ <rlang id="1522" text="當前加速遊戲已下線"/>
+ <rlang id="1523" text="請選擇其他遊戲進行加速"/>
+ <rlang id="1524" text="無法登入UU加速器"/>
+ <rlang id="1525" text="%d秒後可以重試"/>
+ <rlang id="1526" text="點選重試"/>
+ <rlang id="1527" text="Xbox設定教程"/>
+ <rlang id="1528" text="已加速，請在Xbox按以下步驟進行設定"/>
+ <rlang id="1529" text="1. 將 Xbox 與電腦連線在同一路由器或交換機下「電腦有線連線更穩定」；"/>
+ <rlang id="1530" text="2. 設定 → 網路 → 網路設定（ → 設定無線網路 → 返回上一級介面 ）→ 進階設定；"/>
+ <rlang id="1531" text="3. 正確填寫，XBOX 聯機網路可達NAT型別Open，流暢聯機；"/>
+ <rlang id="1532" text="PS設定教程"/>
+ <rlang id="1533" text="1. 將 PS 與電腦連線在同一路由器或交換機下「電腦有線連線更穩定」；"/>
+ <rlang id="1534" text="2. 設定 → 網路 → 設定網際網路連線 → 使用LAN連線線/使用WiFi → 自訂 → 手動；"/>
+ <rlang id="1535" text="3. 正確填寫，PS 聯機網路可達NAT型別2，流暢聯機；"/>
+ <rlang id="1536" text="Switch設定教程"/>
+ <rlang id="1537" text="已加速，請在Switch按以下步驟進行設定"/>
+ <rlang id="1538" text="1. 將 Switch 與電腦連線在同一路由器或交換機下「電腦有線連線更穩定」；"/>
+ <rlang id="1539" text="2. 網際網路 → 網際網路設定 → 有線連線/連線WiFi → 更改設定；"/>
+ <rlang id="1540" text="3. 正確填寫，Switch 聯機網路可達NAT型別A，流暢聯機；"/>
+ <rlang id="1541" text="閘道："/>
+ <rlang id="1542" text="首選DNS："/>
+ <rlang id="1543" text="請填寫問題描述"/>
+ <rlang id="1544" text="請僅填寫你所希望加速的遊戲名"/>
+ <rlang id="1545" text="客戶端當機了"/>
+ <rlang id="1546" text="上傳已達到上限"/>
+ <rlang id="1547" text="停止加速可能導致遊戲重連，是否停止加速？"/>
+ <rlang id="1548" text="該遊戲正在加速，此時刪除會停止加速導致遊戲掉線！"/>
+ <rlang id="1549" text="關注即將上線遊戲，請先登入UU"/>
+ <rlang id="1550" text="立即登入"/>
+ <rlang id="1551" text="遊戲上線後，UU不會主動通知你"/>
+ <rlang id="1552" text="使用頂部搜尋，立即加速"/>
+ <rlang id="1553" text="新增更多遊戲"/>
+ <rlang id="1554" text="剩餘%d天"/>
+ <rlang id="1555" text="剩餘%d小時"/>
+ <rlang id="1556" text="取消置頂"/>
+ <rlang id="1557" text="置頂"/>
+ <rlang id="1558" text="刪除"/>
+ <rlang id="1559" text="Xbox網路修復已完成，如問題仍存在\n請重新啟動電腦嘗試"/>
+ <rlang id="1560" text="抱歉，手機號碼已修改，請重新取得驗證碼"/>
+ <rlang id="1561" text="抱歉，請先取得驗證碼"/>
+ <rlang id="1562" text="抱歉，驗證碼錯誤，請重新輸入"/>
+ <rlang id="1563" text="抱歉，手機號碼無效，請重新輸入"/>
+ <rlang id="1564" text="掃描成功，請透過手機完成登入"/>
+ <rlang id="1565" text="登入UU"/>
+ <rlang id="1566" text="帳號已經在另一台電腦登入，需強制登入\n是否繼續？"/>
+ <rlang id="1567" text="強制登入失敗"/>
+ <rlang id="1568" text="抱歉，驗證失敗，請重新驗證，錯誤碼 %d"/>
+ <rlang id="1569" text="抱歉，你的操作頻率太快，請稍候再試"/>
+ <rlang id="1570" text="抱歉，取得驗證碼失敗，錯誤碼 %d"/>
+ <rlang id="1571" text="語音驗證"/>
+ <rlang id="1572" text="抱歉，網路返回資料錯誤"/>
+ <rlang id="1573" text="提交新增需求"/>
+ <rlang id="1574" text="加速遊戲"/>
+ <rlang id="1575" text="瞭解詳情"/>
+ <rlang id="1576" text="你已在多個平台安裝了該遊戲\n請先設定遊戲啟動平台"/>
+ <rlang id="1577" text="前往設定"/>
+ <rlang id="1578" text="在UU外啟動遊戲不影響加速效果。\n你也可以點選下方按鈕，手動設定啟動路徑。"/>
+ <rlang id="1579" text="設定%s網路"/>
+ <rlang id="1580" text="設定Xbox網路"/>
+ <rlang id="1581" text="恭喜，Xbox設定正確，連線成功"/>
+ <rlang id="1582" text="設定PS網路"/>
+ <rlang id="1583" text="恭喜，PS設定正確，連線成功"/>
+ <rlang id="1584" text="設定Switch網路"/>
+ <rlang id="1585" text="恭喜，Switch設定正確，連線成功"/>
+ <rlang id="1586" text="偵測到你已安裝《%s》，是否重新下載？"/>
+ <rlang id="1587" text="遊戲所屬%s平台均已加速"/>
+ <rlang id="1588" text="網路為有線連線"/>
+ <rlang id="1589" text="網路為 Wi-Fi 連線"/>
+ <rlang id="1590" text="加速%s"/>
+ <rlang id="1591" text="不停止該遊戲加速的同時加速%s"/>
+ <rlang id="1592" text="正在加速%s"/>
+ <rlang id="1593" text="已加速%s"/>
+ <rlang id="1594" text="同時加速%s"/>
+ <rlang id="1595" text="全部(%d)"/>
+ <rlang id="1596" text="共%d個搜尋結果"/>
+ <rlang id="1597" text="[公告]"/>
+ <rlang id="1598" text="[活動]"/>
+ <rlang id="1599" text="[反饋]"/>
+ <rlang id="1600" text="繼續(%d)"/>
+ <rlang id="1601" text="未開通會員"/>
+ <rlang id="1602" text="高級試用會員"/>
+ <rlang id="1603" text="高級會員"/>
+ <rlang id="1604" text="全球會員"/>
+ <rlang id="1605" text="小時"/>
+ <rlang id="1606" text="天"/>
+ <rlang id="1607" text="%d年%d月%d日到期"/>
+ <rlang id="1608" text="預計%d年%d月%d日到期，在高級會員結束後開始計算。"/>
+ <rlang id="1609" text="預計%d年%d月%d日到期，在全球會員結束後開始計算。"/>
+ <rlang id="1610" text="空閒"/>
+ <rlang id="1611" text="正常"/>
+ <rlang id="1612" text="繁忙"/>
+ <rlang id="1613" text="更換節點，遊戲可能會重連，建議先退出遊戲。"/>
+ <rlang id="1614" text="請先選擇遊戲區服！"/>
+ <rlang id="1615" text="儲值失敗"/>
+ <rlang id="1616" text="自動重新啟動失敗，你可以稍候手動重新啟動"/>
+ <rlang id="1617" text="收到新訊息"/>
+ <rlang id="1618" text="修復 LSP 會中止當前加速，確定繼續嗎？"/>
+ <rlang id="1619" text="加速過程中不能解除安裝虛擬網路卡"/>
+ <rlang id="1620" text="停止加速過程中不能解除安裝虛擬網路卡"/>
+ <rlang id="1621" text="解除安裝虛擬網路卡可能會導致加速停止，你確定繼續操作嗎？"/>
+ <rlang id="1622" text="錯誤"/>
+ <rlang id="1623" text="沒有找到日誌檔案"/>
+ <rlang id="1624" text="UU虛擬網路卡已解除安裝。"/>
+ <rlang id="1625" text="沒有安裝虛擬網路卡"/>
+ <rlang id="1626" text="軟體當機，請點選「重新啟動」按鈕"/>
+ <rlang id="1627" text="重新啟動"/>
+ <rlang id="1628" text="重新啟動失敗"/>
+ <rlang id="1629" text="當前版本過低，請到官網下載最新版本"/>
+ <rlang id="1630" text="立即下載"/>
+ <rlang id="1631" text="UU加速器"/>
+ <rlang id="1632" text="會員加速過程中請勿更換手機號"/>
+ <rlang id="1633" text="退出失敗"/>
+ <rlang id="1634" text="加速過程中退出UU可能導致網路異常！"/>
+ <rlang id="1635" text="退出 UU，會停止當前加速，是否繼續？"/>
+ <rlang id="1636" text="是"/>
+ <rlang id="1637" text="否"/>
+ <rlang id="1638" text="發現短時間內頻繁異地登入\n請繫結微信登入，確保帳號安全！"/>
+ <rlang id="1639" text="繫結微信"/>
+ <rlang id="1640" text="不登入了"/>
+ <rlang id="1641" text="只有登入使用者才能進行加速！"/>
+ <rlang id="1642" text="其他遊戲正在加速！"/>
+ <rlang id="1643" text="其他遊戲正在停止加速！"/>
+ <rlang id="1644" text="你的加速遊戲已達上限，\r\n請手動停止已加速遊戲！"/>
+ <rlang id="1645" text="重新加速，將斷開正在加速遊戲連線"/>
+ <rlang id="1646" text="其他遊戲正在加速，是否繼續加速該遊戲？"/>
+ <rlang id="1647" text="取得加速節點失敗，請重新加速！"/>
+ <rlang id="1648" text="網路測速失敗，請重新加速！"/>
+ <rlang id="1649" text="選取節點失敗，請重新加速！"/>
+ <rlang id="1650" text="發現已安裝銳捷客戶端，路由模式加速可能會斷網"/>
+ <rlang id="1651" text="取得最佳節點失敗，請重新加速！"/>
+ <rlang id="1652" text="節點權限驗證網路出錯，請重新加速！"/>
+ <rlang id="1653" text="成為會員"/>
+ <rlang id="1654" text="只有登入使用者才能進行加速試用"/>
+ <rlang id="1655" text="你已試用過會員加速，不能再次試用"/>
+ <rlang id="1656" text="前往儲值"/>
+ <rlang id="1657" text="會員加速服務已過期"/>
+ <rlang id="1658" text="請儲值後，繼續進行加速"/>
+ <rlang id="1659" text="快速儲值"/>
+ <rlang id="1660" text="偵測到你的網路存在異常"/>
+ <rlang id="1661" text="請確保本地網路通暢後，重新啟動UU進行加速"/>
+ <rlang id="1662" text="你沒有加速該節點的權限"/>
+ <rlang id="1663" text="建議你儲值全球會員或選擇其他節點進行加速"/>
+ <rlang id="1664" text="立即儲值"/>
+ <rlang id="1665" text="如需加速該遊戲，請先登入UU加速器"/>
+ <rlang id="1666" text="該帳號頻繁異地登入，已停止加速服務"/>
+ <rlang id="1667" text="該帳號存在違反服務協議情況，已停止加速服務"/>
+ <rlang id="1668" text="未成年防沈迷提示"/>
+ <rlang id="1669" text="親愛的玩家，你當前登入的帳號實名登記為\n未成年人，無法購買和使用會員服務。"/>
+ <rlang id="1670" text="未實名帳號登記提示"/>
+ <rlang id="1671" text="親愛的玩家，你的帳號狀態為未實名驗證，為了擁有完整加速體驗，請確保你已滿18歲並儘快登記實名資訊。"/>
+ <rlang id="1672" text="通訊錯誤，請嘗試重新加速或重新啟動UU"/>
+ <rlang id="1673" text="未知錯誤，請嘗試重新加速或重新啟動UU"/>
+ <rlang id="1674" text="加速斷開，發現 %d 錯誤"/>
+ <rlang id="1675" text="節點人數已滿，請更換節點"/>
+ <rlang id="1676" text="系統問題，請點選[立即修復]，修復過程會為你重新啟動防火牆"/>
+ <rlang id="1677" text="立即修復"/>
+ <rlang id="1678" text="會員加速服務已到期！\n為了不影響你的加速，請在60分鐘內儲值"/>
+ <rlang id="1679" text="你加速的限免遊戲即將到期"/>
+ <rlang id="1680" text="帳號在其他地方登入，當前已進入匿名狀態。\n加速前，請重新登入。"/>
+ <rlang id="1681" text="儲值到期，你已被迫下線"/>
+ <rlang id="1682" text="限時服務已到期，你已被迫下線\n建議你開通會員服務，無限制暢玩！"/>
+ <rlang id="1683" text="該遊戲暫未上線，你可以對其關注，\n遊戲新增後將新增至首頁。"/>
+ <rlang id="1684" text="前往關注"/>
+ <rlang id="1685" text="自動重新登入失敗，請手動登入"/>
+ <rlang id="1686" text="會員加速過程中請勿退出"/>
+ <rlang id="1687" text="退出將斷開加速，是否繼續？"/>
+ <rlang id="1688" text="確定登出當前帳號嗎？"/>
+ <rlang id="1689" text="你的帳號在別的地方登入，需重新驗證帳號。"/>
+ <rlang id="1690" text="帳號認證錯誤，需重新登入帳號"/>
+ <rlang id="1691" text="當前系統不支援連線該節點，將自動匹配其他節點加速"/>
+ <rlang id="1692" text="恭喜，你獲得了新的時長卡/優惠券！"/>
+ <rlang id="1693" text="你有%d張會員卡券即將到期！"/>
+ <rlang id="1694" text="立即檢視"/>
+ <rlang id="1695" text="當前區服已下線，請選擇其他區服進行加速！"/>
+ <rlang id="1696" text="當前遊戲已下線，請選擇其他遊戲進行加速！"/>
+ <rlang id="1697" text="發現網路異常，請檢查本地網路是否正常。"/>
+ <rlang id="1698" text="無匹配遊戲，點選反饋"/>
+ <rlang id="1699" text="非常抱歉"/>
+ <rlang id="1700" text="當前試用使用者已達上限，無法進行加速"/>
+ <rlang id="1701" text="加速停止"/>
+ <rlang id="1702" text="加速時長 %s"/>
+ <rlang id="1703" text="加速中斷"/>
+ <rlang id="1704" text="加速時長 %s"/>
+ <rlang id="1705" text="預約遊戲上線，已新增至首頁"/>
+ <rlang id="1706" text="傳送失敗"/>
+ <rlang id="1707" text="UU加速器其他版本正在執行，如需切換，請退出當前執行版本"/>
+ <rlang id="1708" text="執行檔案遺失，點選「確定」進行更新修復！"/>
+ <rlang id="1709" text="執行檔案遺失，點選「確定」前往官網下載最新安裝包！"/>
+ <rlang id="1710" text="更換節點、區服"/>
+ <rlang id="1711" text="更換節點"/>
+ <rlang id="1712" text="更換區服"/>
+ <rlang id="1713" text="分"/>
+ <rlang id="1714" text="電子信箱："/>
+ <rlang id="1715" text="方便我們聯絡你快速解決問題"/>
+ <rlang id="1716" text="路由模式"/>
+ <rlang id="1717" text="程式模式"/>
+ <rlang id="1718" text="反饋"/>
+ <rlang id="1719" text="啟動UU加速器"/>
+ <rlang id="1720" text="English"/>
+ <rlang id="1721" text="Русский"/>
+ <rlang id="1722" text="切換語言，UU將重新啟動。是否繼續？"/>
+ <rlang id="1723" text="切換語言，UU將停止加速並重新啟動。是否繼續？"/>
+ <rlang id="1724" text="目前有新版本"/>
+ <rlang id="1725" text="立即升級"/>
+ <rlang id="1726" text="再等等"/>
+ <rlang id="1727" text="你的UU可以變得更好"/>
+ <rlang id="1728" text="語言設定"/>
+ <rlang id="1730" text="試用"/>
+ <rlang id="1731" text="立即儲值"/>
+ <rlang id="1732" text="即時熱搜"/>
+ <rlang id="1733" text="UU Discord"/>
+ <rlang id="1734" text="UU Game Booster"/>
+ <rlang id="1735" text="Seem like you didn't boost any game yet…Having trouble?"/>
+ <rlang id="1736" text="I cannot login"/>
+ <rlang id="1737" text="I cannot find my game/server"/>
+ <rlang id="1738" text="Boosting always fails"/>
+ <rlang id="1739" text="I don't know how to boost a game"/>
+ <rlang id="1740" text="I don't play games on PC"/>
+ <rlang id="1741" text="Other issue"/>
+ <rlang id="1742" text="Please select one reason above."/>
+ <rlang id="1743" text="Troubleshoot sooner!"/>
+ <rlang id="1744" text="Talk to us"/>
+ <rlang id="1745" text="Submit only"/>
+ <rlang id="1746" text="UU will quit after you submit."/>
+ <rlang id="1747" text="未找到遊戲的啟動路徑"/>
+ <rlang id="1748" text="剩餘會員時長不足%d天，請讓 UU 繼續為你提供優質服務。"/>
+ <rlang id="1749" text="Please fill in your Discord username / Email"/>
+ <rlang id="1750" text="Send us feedback!"/>
+ <rlang id="1751" text="Send feedback in our Discord, and we will\nhelp you in no time!"/>
+ <rlang id="1752" text="Join Our Discord"/>
+ <rlang id="1753" text="No, I'll submit a ticket."/>
+ <rlang id="1754" text="Sending feedback grants UU access to your"/>
+ <rlang id="1755" text="for better troubleshooting."/>
+ <rlang id="1756" text="boost log"/>
+ <rlang id="1757" text="為確保本次加速生效，需要重新啟動UU。\r\n重新啟動後，會自動為你加速該遊戲。"/>
+ <rlang id="1758" text="未設定"/>
+ <rlang id="1759" text="美國西部"/>
+ <rlang id="1760" text="美國東部"/>
+ <rlang id="1761" text="歐洲中部"/>
+ <rlang id="1762" text="歐洲西部"/>
+ <rlang id="1763" text="南美"/>
+ <rlang id="1765" text="圖片(*.png;*.jpg;*.jpeg;)/*.png;*.jpg;*.jpeg/"/>
+ <rlang id="1766" text="當前遊戲區服"/>
+ <rlang id="1767" text="為了保證此次加速生效，請升級至最新版本。"/>
+ <rlang id="1768" text="請升級至最新版本，以獲得最好的加速效果。"/>
+ <rlang id="1769" text="升級"/>
+ <rlang id="1770" text="跳過"/>
+ <rlang id="1771" text="已加速，請在Steam Deck按以下步驟進行設定"/>
+ <rlang id="1772" text="1. 將Steam Deck與電腦連線在同一路由器或交換機下「電腦有線連線更穩定」；"/>
+ <rlang id="1773" text="2. 在Steam Deck中按「STEAM」鍵進入選單，選擇「設定」-「網際網路」；"/>
+ <rlang id="1774" text="3. 選擇網路後，點選「進階設定」分別填寫IP、子網路遮罩、閘道、DNS："/>
+ <rlang id="1775" text="設定Steam Deck網路"/>
+ <rlang id="1776" text="Steam Deck設定教程"/>
+ <rlang id="1777" text="恭喜，Steam Deck設定正確，連線成功"/>
+ <rlang id="1778" text="已加速，請在Oculus按以下步驟進行設定"/>
+ <rlang id="1779" text="1. 將Oculus與電腦連線在同一路由器或交換機下「電腦有線連線更穩定」；"/>
+ <rlang id="1780" text="2. 選擇「設定」-「Wi-Fi」，在IP設定處，選擇為「靜態IP」；"/>
+ <rlang id="1781" text="3. 按下方分別填寫IP、子網路遮罩（對應網路前綴，長度填16）、閘道、DNS："/>
+ <rlang id="1782" text="設定Oculus網路"/>
+ <rlang id="1783" text="Oculus設定教程"/>
+ <rlang id="1784" text="恭喜，Oculus設定正確，連線成功"/>
+ <rlang id="1785" text="設定教程"/>
+ <rlang id="1786" text="註銷UU帳號"/>
+ <rlang id="1787" text="進入註銷流程後將進行二次驗證，同時退出當前登入狀態"/>
+ <rlang id="1788" text="繼續註銷"/>
+ <rlang id="1789" text="偵測到本地網路異常波動，影響加速效果。"/>
+ <rlang id="1790" text="偵測到本地網路異常波動，影響加速效果。"/>
+ <rlang id="1791" text="一鍵斷線"/>
+ <rlang id="1792" text="正在斷線…"/>
+ <rlang id="1793" text="優惠兌換"/>
+ <rlang id="1794" text="已定位遊戲路徑，點選「下一步」生效："/>
+ <rlang id="1795" text="選擇遊戲安裝目錄中的資料夾，名字為：%s"/>
+ <rlang id="1796" text="下一步"/>
+ <rlang id="1797" text="正在開啟，請耐心等待"/>
+ <rlang id="1798" text="正在更新："/>
+ <rlang id="1799" text="重試"/>
+ <rlang id="1800" text="功能已開啟"/>
+ <rlang id="1801" text="點選「關閉」可停用此功能。"/>
+ <rlang id="1802" text="功能已關閉"/>
+ <rlang id="1803" text="已為你還原到初始狀態"/>
+ <rlang id="1804" text="- 遊戲工具 -"/>
+ <rlang id="1805" text="社群"/>
+ <rlang id="1806" text="資訊/教程"/>
+ <rlang id="1807" text="已啟用"/>
+ <rlang id="1808" text="未啟用"/>
+ <rlang id="1809" text="帳號封禁說明"/>
+ <rlang id="1810" text="因該帳號多次異常行為，現根據使用者協議約定終止會員服務並停用帳號。"/>
+ <rlang id="1811" text="人工申訴"/>
+ <rlang id="1812" text="帳號使用異常提醒"/>
+ <rlang id="1813" text="系統偵測該帳號登入異常，為保障會員權益和帳號安全，請妥善保管帳號、勿分享他人。如多次觸發提醒，將根據使用者協議約定採取限制措施。"/>
+ <rlang id="1814" text="敬請期待"/>
+ <rlang id="1815" text="下載遊戲"/>
+ <rlang id="1816" text="手動設定"/>
+ <rlang id="1817" text="在UU外啟動遊戲不影響遊戲加速效果。也可透過下方按鈕，下載遊戲或手動設定啟動項。"/>
+ <rlang id="1818" text="該遊戲暫時無法與%s同時加速，請嘗試單獨加速此遊戲。"/>
+ <rlang id="1819" text="有更新"/>
+ <rlang id="1820" text="正在更新，馬上就好"/>
+ <rlang id="1821" text="開啟失敗，請重試"/>
+ <rlang id="1822" text="更換"/>
+ <rlang id="1823" text="PS"/>
+ <rlang id="1824" text="Switch"/>
+ <rlang id="1825" text="Xbox"/>
+ <rlang id="1826" text="SteamDeck"/>
+ <rlang id="1827" text="Oculus"/>
+ <rlang id="1828" text="遊戲平台"/>
+ <rlang id="1829" text="Pico"/>
+ <rlang id="1830" text="其他"/>
+ <rlang id="1831" text="保持開啟"/>
+ <rlang id="1832" text="未發現安裝目錄，請根據提示手動選擇資料夾："/>
+ <rlang id="1833" text="專網延遲"/>
+ <rlang id="1834" text="遊戲服：%s"/>
+ <rlang id="1835" text="高速專網"/>
+ <rlang id="1836" text="智慧計算最快專線路徑，突破最低延遲。"/>
+ <rlang id="1837" text="已為你建立最快專線網路。"/>
+ <rlang id="1838" text="為本次加速進階最佳化：%dms"/>
+ <rlang id="1839" text="最佳化詳情："/>
+ <rlang id="1840" text="專網延遲已從%dms，下降至%dms"/>
+ <rlang id="1841" text="動態多線"/>
+ <rlang id="1842" text="精準定位遊戲匹配伺服器，全球專線直達，無懼匹配地區變化。"/>
+ <rlang id="1843" text="請先進入遊戲戰局"/>
+ <rlang id="1844" text="遊戲服匹配記錄（近%d次）："/>
+ <rlang id="1845" text="遊戲服匹配記錄："/>
+ <rlang id="1846" text="自助修復"/>
+ <rlang id="1847" text="桌面圖示修復"/>
+ <rlang id="1848" text="UU 加速器桌面圖示顯示異常時，可透過此功能恢復。"/>
+ <rlang id="1849" text="修復成功"/>
+ <rlang id="1850" text="UU 加速器桌面圖示已恢復，可正常顯示。"/>
+ <rlang id="1851" text="修復失敗"/>
+ <rlang id="1852" text="請重試或點選其他方法進行修復。"/>
+ <rlang id="1853" text="其他方法"/>
+ <rlang id="1854" text="正在識別你的主機裝置…"/>
+ <rlang id="1855" text="沒有識別到主機裝置"/>
+ <rlang id="1856" text="請透過反饋或線上客服聯絡我們，來幫助你解決該問題。"/>
+ <rlang id="1857" text="加速[%s]時，已同時加速YY語音，無需重複操作。"/>
+ <rlang id="1858" text="遊玩《%s》，請直接加速對應的遊戲。"/>
+ <rlang id="1859" text="遊玩《%s》等，請直接加速對應的遊戲。"/>
+ <rlang id="1860" text="檢視推薦加速&gt;"/>
+ <rlang id="1861" text="啟動遊戲輔助提醒"/>
+ <rlang id="1862" text="PS Portal"/>
+ <rlang id="1863" text="已加速，請在PS Portal按以下步驟進行設定"/>
+ <rlang id="1864" text="1. PS Portal主頁右上角：設定→設定→網路，最下方選擇「手動設定」；"/>
+ <rlang id="1865" text="2. 「網路名稱」中，輸入電腦路由器的 Wi-Fi名稱；"/>
+ <rlang id="1866" text="3. 「加密方式」「密碼」按路由器設定填寫（一般為 WPA-個人/WPA2-個人）；"/>
+ <rlang id="1867" text="4. 「IP位址設定」選擇為「手動」，並按如下內容填寫："/>
+ <rlang id="1868" text="5. 完成設定，如設定成功則自動進入加速頁，如無法跳轉請檢視"/>
+ <rlang id="1869" text="精準鎖區已開啟"/>
+ <rlang id="1870" text="精準鎖區已關閉"/>
+ <rlang id="1871" text="關閉將在遊戲退出後生效"/>
+ <rlang id="1872" text="下次不再提醒"/>
+ <rlang id="1873" text="我知道了"/>
+ <rlang id="1874" text="當前正在加速中，請先停止加速，再開啟該功能"/>
+ <rlang id="1875" text="未成年模式"/>
+ <rlang id="1876" text="開啟未成年人模式，會限制使用UU加速器，退出該模式需使用密碼"/>
+ <rlang id="1877" text="請設定4位數字密碼"/>
+ <rlang id="1878" text="當前為未成年模式，已限制加速器使用"/>
+ <rlang id="1879" text="輸入密碼退出該模式"/>
+ <rlang id="1880" text="忘記密碼"/>
+ <rlang id="1881" text="點選下方按鈕，兩小時後為你退出未成年模式，並重設功能密碼"/>
+ <rlang id="1882" text="申請重設"/>
+ <rlang id="1883" text="開啟"/>
+ <rlang id="1884" text="密碼錯誤，請重新輸入"/>
+ <rlang id="1885" text="退出UU"/>
+ <rlang id="1886" text="重設申請已提交"/>
+ <rlang id="1887" text="遊戲延遲"/>
+ <rlang id="1888" text="已降低%s"/>
+ <rlang id="1889" text="避免丟包"/>
+ <rlang id="1890" text="即時防護中"/>
+ <rlang id="1891" text="降低你網路丟包記錄："/>
+ <rlang id="1892" text="高速專網"/>
+ <rlang id="1893" text="智慧計算最快專線路徑，突破最低延遲。"/>
+ <rlang id="1894" text="丟包防護"/>
+ <rlang id="1895" text="對Wi-Fi、校園網路明顯效果"/>
+ <rlang id="1896" text="暫未發現網路丟包。"/>
+ <rlang id="1897" text="進入戰局，延遲更精準"/>
+ <rlang id="1898" text="延遲最佳化："/>
+ <rlang id="1899" text="已連高速專網"/>
+ <rlang id="1900" text="本地延遲過高"/>
+ <rlang id="1901" text="恭喜，PS Portal設定正確，連線成功"/>
+ <rlang id="1902" text="發現網路異常"/>
+ <rlang id="1903" text="偵測丟包率過高"/>
+ <rlang id="1904" text="本地網路丟包率已超過%s，在此狀態下，無法保證穩定的遊戲體驗，請儘快檢查你的網路情況。"/>
+ <rlang id="1905" text="當前Wi-Fi連線，請調整為有線連線。"/>
+ <rlang id="1906" text="偵測延遲過高"/>
+ <rlang id="1907" text="延遲異常升高，可能是本地網路存在問題，對加速效果有較大影響。"/>
+ <rlang id="1908" text="請檢查本地網路，或重新啟動路由器。"/>
+ <rlang id="1909" text="分鐘"/>
+ <rlang id="1910" text="加速前"/>
+ <rlang id="1911" text="加速後"/>
+ <rlang id="1912" text="根據遊戲給你匹配伺服器自動加速，啟動遊戲或遊戲內切換區服，均無需重新加速。"/>
+ <rlang id="1913" text="UU加速器-正在加速"/>
+ <rlang id="1914" text="重設"/>
+ <rlang id="1915" text="未安裝遊戲"/>
+ <rlang id="1916" text="UU偵測到你未安裝遊戲，\n點選下方按鈕即可前往官網下載。"/>
+ <rlang id="1917" text="前往官網下載"/>
+ <rlang id="1918" text="本機："/>
+ <rlang id="1919" text="即時定位遊戲伺服器"/>
+ <rlang id="1920" text="遊戲伺服器："/>
+ <rlang id="1921" text="網路監控"/>
+ <rlang id="1922" text="延遲："/>
+ <rlang id="1923" text="丟包："/>
+ <rlang id="1924" text="未匹配伺服器"/>
+ <rlang id="1925" text="記錄近30分鐘的網路變化"/>
+ <rlang id="1926" text="你的UU已升級至最新版本"/>
+ <rlang id="1927" text="新版已就緒，請享受更好的使用體驗"/>
+ <rlang id="1928" text="立即體驗"/>
+ <rlang id="1929" text="先請關閉Steam"/>
+ <rlang id="1930" text="需要Steam未開啟狀態下修復才能生效。"/>
+ <rlang id="1931" text="已降低延遲"/>
+ <rlang id="1932" text="已避免丟包"/>
+ <rlang id="1933" text="為你避免網路丟包，即時防護中"/>
+ <rlang id="1934" text="加速驗證錯誤"/>
+ <rlang id="1935" text="當前使用版本驗證失敗，請造訪UU官網下載最新版本，進行加速。"/>
+ <rlang id="1936" text="延遲"/>
+ <rlang id="1937" text="丟包"/>
+ <rlang id="1938" text="避免網路丟包"/>
+ <rlang id="1939" text="可降低至"/>
+ <rlang id="1940" text="滾輪往下可快速切換至「我的遊戲」"/>
+ <rlang id="1941" text="解決本機 Hosts 檔案網域衝突"/>
+ <rlang id="1942" text="加速過程中自動處理遊戲和系統 Hosts 檔案中的衝突網域，停止加速後恢復。"/>
+ <rlang id="1943" text="加速時停用網路代理"/>
+ <rlang id="1944" text="避免遊戲頁面無法正常運作，暫時停用其他網路代理，停止加速後恢復。"/>
+ <rlang id="1945" text="電腦正在執行其他網路代理，可能導致遊戲相關頁面無法正常開啟。"/>
+ <rlang id="1946" text="幫我解決"/>
+ <rlang id="1947" text="電腦存在%d個可能影響遊戲體驗的隱患，點選按鈕解決。"/>
+ <rlang id="1948" text="一鍵解決"/>
+ <rlang id="1949" text="電腦儲存的網路網域與加速衝突，已為你設定加速優先。"/>
+ <rlang id="1950" text="停用成功，僅加速生效，停止加速後自動為你恢復至加速前狀態。"/>
+ <rlang id="1951" text="本地Hosts檔案中網域與加速衝突，已為你設定加速優先。"/>
+ <rlang id="1952" text="停用成功，僅加速生效，停止加速後，自動為你恢復至加速前狀態。"/>
+ <rlang id="1953" text="加速優先設定成功，停止加速後，自動為你恢復至加速前狀態。"/>
+ <rlang id="1954" text="如何手動設定"/>
+ <rlang id="1955" text="本地Hosts檔案中部分網域與加速衝突，請點選解決，確保加速優先。"/>
+ <rlang id="1956" text="加速小貼士"/>
+ <rlang id="1957" text="可在"/>
+ <rlang id="1958" text="「設定」-「加速設定」-「解決本地Host檔案網域衝突」"/>
+ <rlang id="1959" text="「設定」-「加速設定」-「加速時停用網路代理」"/>
+ <rlang id="1960" text="中開啟/關閉。"/>
+ <rlang id="1961" text="不再推送此設定推薦"/>
+ <rlang id="1962" text="幫我設定"/>
+ <rlang id="1963" text="暫不開啟"/>
+ <rlang id="1964" text="解決以下問題，確保加速穩定，遊戲無卡頓"/>
+ <rlang id="1965" text="本地Hosts檔案中網域與加速衝突"/>
+ <rlang id="1966" text="可在「設定」-「解決本地Hosts檔案網域衝突」中開啟/關閉。"/>
+ <rlang id="1967" text="解決"/>
+ <rlang id="1968" text="正在執行其他網路代理，遊戲頁面可能無法正常運作"/>
+ <rlang id="1969" text="可在「設定」-「加速時停用網路代理」中開啟/關閉。"/>
+ <rlang id="1970" text="為避免其他軟體修改Hosts影響遊戲體驗，推薦保持該選項開啟。"/>
+ <rlang id="1971" text="為避免其他網路代理，導致遊戲頁面無法正常運作，推薦保持開啟。"/>
+ <rlang id="1972" text="已解決"/>
+ <rlang id="1973" text="已全部解決（%d）"/>
+ <rlang id="1974" text="開通會員享加速特權"/>
+ <rlang id="1975" text="加速該遊戲是會員專享服務，請儲值後再使用"/>
+ <rlang id="1976" text="已為你自動解決其中1個，其他需手動處理"/>
+ <rlang id="1977" text="加速遊戲時，電腦休眠仍保持網路連通。"/>
+ <rlang id="1978" text="系統版本低，缺少加速所需驅動"/>
+ <rlang id="1979" text="請使用管理員身份開啟UU"/>
+ <rlang id="1980" text="升級驅動"/>
+ <rlang id="1981" text="點選升級按鈕至微軟官網手動下載並安裝"/>
+ <rlang id="1982" text="「局內戰績速查」更新失敗"/>
+ <rlang id="1983" text="請確認網路連線正常後手動點選更新。"/>
+ <rlang id="1984" text="【線上客服】自動建立"/>
+ <rlang id="1985" text="【日誌上傳】ngpush上傳log"/>
+ <rlang id="1986" text="C槽空間不足，加速驅動無法更新"/>
+ <rlang id="1987" text="請嘗試清理C槽，保留一定空間後重試"/>
+ <rlang id="1988" text="清理教程"/>
+ <rlang id="1989" text="測速任務自動反饋"/>
+ <rlang id="1990" text="加速狀態列"/>
+ <rlang id="1991" text="建議在位置調整後即時啟用該功能，防止遊戲程式中誤觸"/>
+ <rlang id="1992" text="確認設定"/>
+ <rlang id="1993" text="加速狀態列樣式"/>
+ <rlang id="1994" text="橫版"/>
+ <rlang id="1995" text="豎版"/>
+ <rlang id="1996" text="狀態列位置鎖定"/>
+ <rlang id="1997" text="本地網路無法取得節點延遲"/>
+ <rlang id="1998" text="將為你進行修復，重新啟動UU加速器後生效"/>
+ <rlang id="1999" text="修復並重新啟動"/>
+ <rlang id="2000" text="歷史存檔"/>
+ <rlang id="2001" text="《%s》的存檔記錄"/>
+ <rlang id="2002" text="目前僅保存最新的 %d 個存檔，超出此數量將自動刪除較早存檔"/>
+ <rlang id="2003" text="檔案大小："/>
+ <rlang id="2004" text="存檔時間："/>
+ <rlang id="2005" text="過期時間："/>
+ <rlang id="2006" text="該存檔即將過期"/>
+ <rlang id="2007" text="恢復此存檔"/>
+ <rlang id="2008" text="保存至本機"/>
+ <rlang id="2009" text="刪除"/>
+ <rlang id="2010" text="存檔已過期，暫無法恢復"/>
+ <rlang id="2011" text="存檔 %02d"/>
+ <rlang id="2012" text="與本機一致"/>
+ <rlang id="2013" text="已過期"/>
+ <rlang id="2014" text="無法同步"/>
+ <rlang id="2015" text="當前裝置未偵測到此遊戲，請重新安裝後再試。"/>
+ <rlang id="2016" text="為避免檔案衝突，執行中的遊戲無法同步存檔，請退出遊戲後再試。"/>
+ <rlang id="2017" text="即將刪除%s時的存檔資料，刪除後可在本機找回最後刪除的存檔。"/>
+ <rlang id="2018" text="確定刪除此存檔嗎？"/>
+ <rlang id="2019" text="存檔記錄"/>
+ <rlang id="2020" text="刪除存檔失敗。"/>
+ <rlang id="2021" text="正在進入雲存檔…"/>
+ <rlang id="2022" text="請選擇要開啟雲存檔的遊戲"/>
+ <rlang id="2023" text="非會員用戶最多累計可選擇%d款要同步的遊戲"/>
+ <rlang id="2024" text="雲存檔"/>
+ <rlang id="2025" text="重新整理狀態"/>
+ <rlang id="2026" text="一鍵同步"/>
+ <rlang id="2027" text="設定"/>
+ <rlang id="2028" text="你已關閉所有遊戲雲存檔，點選右上角「設定」可恢復"/>
+ <rlang id="2029" text="終止任務"/>
+ <rlang id="2030" text="取消任務"/>
+ <rlang id="2031" text="重試"/>
+ <rlang id="2032" text="關閉錯誤提示"/>
+ <rlang id="2033" text="恢復歷史存檔"/>
+ <rlang id="2034" text="開啟存檔目錄"/>
+ <rlang id="2035" text="啟動遊戲"/>
+ <rlang id="2036" text="雲存檔設定"/>
+ <rlang id="2037" text="Steam賬號"/>
+ <rlang id="2038" text="解綁"/>
+ <rlang id="2039" text="開啟UU時檢查可同步存檔"/>
+ <rlang id="2040" text="有較新的雲存檔時將提醒你同步"/>
+ <rlang id="2041" text="啟用UU雲存檔"/>
+ <rlang id="2042" text="關閉開關將停止同步所有遊戲存檔"/>
+ <rlang id="2043" text="開啟/關閉遊戲雲存檔"/>
+ <rlang id="2044" text="暫無雲存檔"/>
+ <rlang id="2045" text="雲存檔時間："/>
+ <rlang id="2046" text="無法同步這些遊戲"/>
+ <rlang id="2047" text="無法同步遊戲，因為遊戲正在執行中或未偵測到安裝。請解決相關問題後再嘗試。"/>
+ <rlang id="2048" text="部分遊戲無法同步"/>
+ <rlang id="2049" text="確定要終止此任務嗎？"/>
+ <rlang id="2050" text="終止此任務後，本機存檔狀態將恢復至任務前狀態。"/>
+ <rlang id="2051" text="等待中..."/>
+ <rlang id="2052" text="有%d個存檔目錄不存在"/>
+ <rlang id="2053" text="確定要停用雲存檔嗎？"/>
+ <rlang id="2054" text="停用期間你的遊戲存檔將停止備份至UU雲端，可能造成無法挽回的損失。"/>
+ <rlang id="2055" text="當前賬號只能開啟%d款遊戲的雲存檔，如需開啟更多請儲值成為UU高級會員。"/>
+ <rlang id="2056" text="請開通UU高級會員"/>
+ <rlang id="2057" text="開通高級會員"/>
+ <rlang id="2058" text="暫不開通"/>
+ <rlang id="2059" text="確定關閉該遊戲的雲存檔嗎"/>
+ <rlang id="2060" text="如果當前遊戲已有雲存檔備份，關閉後所有雲存檔備份將過期處理，無法下載。"/>
+ <rlang id="2061" text="未繫結Steam賬號"/>
+ <rlang id="2062" text="繫結Steam賬號後可重新開啟雲存檔"/>
+ <rlang id="2063" text="繫結Steam賬號"/>
+ <rlang id="2064" text="進行隱私設定"/>
+ <rlang id="2065" text="進行隱私設定後可重新開啟雲存檔"/>
+ <rlang id="2066" text="隱私設定"/>
+ <rlang id="2067" text="沒有識別到支援雲存檔的遊戲"/>
+ <rlang id="2068" text="請啟動遊戲嘗試自動識別，若仍未能顯示可點選按鈕手動新增。"/>
+ <rlang id="2069" text="手動新增"/>
+ <rlang id="2070" text="換綁Steam賬號"/>
+ <rlang id="2071" text="你已停用雲存檔"/>
+ <rlang id="2072" text="如仍需使用請點選下方按鈕開啟"/>
+ <rlang id="2073" text="開啟雲存檔"/>
+ <rlang id="2074" text="偵測到與本機Steam賬號不一致"/>
+ <rlang id="2075" text="請以（%s）登入至Steam用戶端，或點選下方按鈕將當前Steam賬號繫結至雲存檔"/>
+ <rlang id="2076" text="請檢查網路連線"/>
+ <rlang id="2077" text="UU雲存檔伺服器連線失敗，點選重新整理頁面進行重連。如果多次重新整理仍無法連線伺服器，建議提交反饋。"/>
+ <rlang id="2078" text="重新整理頁面"/>
+ <rlang id="2079" text="確定(%d)"/>
+ <rlang id="2080" text="確定要解綁該Steam賬號嗎？"/>
+ <rlang id="2081" text="解綁後部分遊戲可能需要手動新增。"/>
+ <rlang id="2082" text="請先加速《Steam商店》"/>
+ <rlang id="2083" text="點選【立即加速】開始加速《Steam商店》"/>
+ <rlang id="2084" text="立即加速"/>
+ <rlang id="2085" text="直接去繫結"/>
+ <rlang id="2086" text="《%s》的存檔已恢復，快打開遊戲看看~"/>
+ <rlang id="2087" text="啟動遊戲"/>
+ <rlang id="2088" text="《%s》已同步最新存檔"/>
+ <rlang id="2089" text="有 %d 個遊戲存檔可同步"/>
+ <rlang id="2090" text="檢視詳情"/>
+ <rlang id="2091" text="還沒有歷史存檔資訊"/>
+ <rlang id="2092" text="你有新的遊戲支援雲存檔"/>
+ <rlang id="2093" text="你有新的遊戲支援雲存檔，為避免遊戲存檔問題，建議你立即開啟這些遊戲的雲存檔功能。"/>
+ <rlang id="2094" text="去設定"/>
+ <rlang id="2095" text="以後再說"/>
+ <rlang id="2096" text="正在偵測中..."/>
+ <rlang id="2097" text="正在上傳備份本機存檔..."/>
+ <rlang id="2098" text="正在下載雲存檔..."/>
+ <rlang id="2099" text="等待中..."/>
+ <rlang id="2100" text="雲存檔較新，可同步"/>
+ <rlang id="2101" text="雙端已同步"/>
+ <rlang id="2102" text="已恢復歷史存檔"/>
+ <rlang id="2103" text="未偵測到本機存檔"/>
+ <rlang id="2104" text="未找到遊戲，請嘗試手動識別"/>
+ <rlang id="2105" text="本機存檔檔案過大，無法上傳"/>
+ <rlang id="2106" text="沒有可下載的存檔檔案"/>
+ <rlang id="2107" text="同步存檔失敗"/>
+ <rlang id="2108" text="新增存檔失敗"/>
+ <rlang id="2109" text="磁碟空間不足"/>
+ <rlang id="2110" text="同步過程中發生了異常，錯誤碼：%d"/>
+ <rlang id="2111" text="雲存檔用戶登入狀態遺失，點選確認重新登入。"/>
+ <rlang id="2112" text="隨時隨地備份本機存檔，徹底告別存檔失敗、死壞檔等問題。"/>
+ <rlang id="2113" text="用戶須知"/>
+ <rlang id="2114" text="隱私設定"/>
+ <rlang id="2115" text="繫結成功"/>
+ <rlang id="2116" text="用戶協議與隱私政策"/>
+ <rlang id="2117" text="同意"/>
+ <rlang id="2118" text="用戶須知  "/>
+ <rlang id="2119" text="Steam隱私設定"/>
+ <rlang id="2120" text="進入雲存檔 "/>
+ <rlang id="2121" text="請打開                           （需登入），將「我的個人資料」和「遊戲詳情」設為公開"/>
+ <rlang id="2122" text="設定好了"/>
+ <rlang id="2123" text="正在校驗資訊"/>
+ <rlang id="2124" text="        未偵測到相關設定，請重試"/>
+ <rlang id="2125" text="Steam仍未完成登入，點選上方連結重試"/>
+ <rlang id="2126" text="網路請求異常"/>
+ <rlang id="2127" text="登入狀態遺失"/>
+ <rlang id="2128" text="你累計最多可保持同步%d款遊戲"/>
+ <rlang id="2129" text="你可保持同步所有遊戲"/>
+ <rlang id="2130" text="上傳存檔網路逾時"/>
+ <rlang id="2131" text="與本機一致"/>
+ <rlang id="2132" text="存檔已鎖定，長期有效"/>
+ <rlang id="2133" text="雲存檔已過期，升級會員立即恢復"/>
+ <rlang id="2134" text="請輸入備註資訊，限%d字以內。"/>
+ <rlang id="2135" text="存檔無法續存"/>
+ <rlang id="2136" text="該存檔存放時間過於久遠，解鎖後將同時被刪除，確定要這樣做嗎？"/>
+ <rlang id="2137" text="遊戲雲存檔數量已達上限，當前存檔解鎖後，將刪除最舊的歷史存檔，確定要這樣做嗎？"/>
+ <rlang id="2138" text="鎖定存檔失敗：%s。"/>
+ <rlang id="2139" text="鎖定失敗"/>
+ <rlang id="2140" text="當前鎖定存檔的限額已滿，請解除其他存檔的鎖定後再試。"/>
+ <rlang id="2141" text="當前鎖定存檔的限額已滿，請升級會員或解除其他存檔的鎖定後再試。"/>
+ <rlang id="2142" text="修改備註失敗：%s。"/>
+ <rlang id="2143" text="功能說明"/>
+ <rlang id="2144" text="存檔鎖定後可永久保存在UU雲端，非會員每遊戲可鎖定%d個存檔，會員每遊戲可鎖定%d個。"/>
+ <rlang id="2145" text="升級會員"/>
+ <rlang id="2146" text="每份存檔在 UU 雲端保存 %d 天，過期後無法下載，可升級會員以延長有效期。"/>
+ <rlang id="2147" text="會員期間，存檔自動保存在雲端，過期後無法下載，可續期會員以延長有效期。"/>
+ <rlang id="2148" text="解除鎖定後，如果存檔數超過了限制，會刪除最舊的未鎖定存檔。"/>
+ <rlang id="2149" text="永久鎖定"/>
+ <rlang id="2150" text="解除鎖定"/>
+ <rlang id="2151" text="新增備註"/>
+ <rlang id="2152" text="修改備註"/>
+ <rlang id="2153" text="分享此存檔"/>
+ <rlang id="2154" text="續期會員恢復雲存檔權益"/>
+ <rlang id="2155" text="你的UU會員已到期，上述遊戲的雲存檔已暫停使用，為避免影響你的遊戲進度，請及時續期會員。"/>
+ <rlang id="2156" text="你的UU會員已到期，含上述遊戲在內共%d款遊戲的雲存檔已暫停使用，為避免影響你的遊戲進度，請及時續期會員。"/>
+ <rlang id="2157" text="立即續費會員"/>
+ <rlang id="2158" text="如需開啟更多，請儲值成為 UU 會員"/>
+ <rlang id="2159" text="當前賬號只能累計開啟%d款遊戲的雲存檔，如需開啟更多請儲值成為UU會員。"/>
+ <rlang id="2160" text="你最多可免費使用 %d 款遊戲的雲存檔"/>
+ <rlang id="2161" text="已使用過雲存檔"/>
+ <rlang id="2162" text="本機有%d款遊戲可開啟雲存檔："/>
+ <rlang id="2163" text="普通用戶能累計開啟%d款遊戲雲存檔功能，會員不限制開啟數量。"/>
+ <rlang id="2164" text="無法新增遊戲"/>
+ <rlang id="2165" text="立即體驗"/>
+ <rlang id="2166" text="新增遊戲"/>
+ <rlang id="2167" text="更多"/>
+ <rlang id="2168" text="去開啟"/>
+ <rlang id="2169" text="繫結"/>
+ <rlang id="2170" text="暫未繫結Steam賬號，繫結後可自動新增Steam遊戲"/>
+ <rlang id="2171" text="識別"/>
+ <rlang id="2172" text="上傳裝置："/>
+ <rlang id="2173" text="修改啟動路徑"/>
+ <rlang id="2174" text="啟動平台："/>
+ <rlang id="2175" text="存檔市集"/>
+ <rlang id="2176" text="從存檔市集轉存成功"/>
+ <rlang id="2177" text="無法修改快取目錄"/>
+ <rlang id="2178" text="請檢查磁碟剩餘空間或關閉正在執行的遊戲後再試"/>
+ <rlang id="2179" text="任務已取消"/>
+ <rlang id="2180" text="快取目錄修改成功"/>
+ <rlang id="2181" text="新的快取目錄為 %s"/>
+ <rlang id="2182" text="正在遷移快取檔案，已完成 %d%%..."/>
+ <rlang id="2183" text="佔用空間 --，路徑為 --"/>
+ <rlang id="2184" text="佔用空間 %s，路徑為 %s"/>
+ <rlang id="2185" text="雲存檔同步任務結束後開始遷移檔案，請稍等..."/>
+ <rlang id="2186" text="轉存失敗，請取消其他存檔鎖定。"/>
+ <rlang id="2187" text="轉存失敗，請取消其他存檔鎖定或升級會員。"/>
+ <rlang id="2188" text="開始轉存"/>
+ <rlang id="2189" text="刪除存檔"/>
+ <rlang id="2190" text="分享存檔"/>
+ <rlang id="2191" text="關閉雲存檔"/>
+ <rlang id="2192" text="因未偵測到相關遊戲，已隱藏 %d 款開啟雲存檔的遊戲。"/>
+ <rlang id="2193" text="顯示被隱藏的遊戲"/>
+ <rlang id="2194" text="關閉遊戲雲存檔將停止存檔自動保存功能，但不會刪除已有雲存檔。關閉後可在 設定-開啟關閉遊戲雲存檔 中再次開啟。"/>
+ <rlang id="2195" text="如果當前遊戲已有雲存檔備份，關閉後所有雲存檔備份將過期處理，無法下載。關閉後可在 設定-開啟關閉遊戲雲存檔 中再次開啟。"/>
+ <rlang id="2196" text="存檔無法續存"/>
+ <rlang id="2197" text="遊戲雲存檔數量已達上限，當前存檔找回後，將刪除最舊的歷史存檔，確定要這樣做嗎？"/>
+ <rlang id="2198" text="找回存檔失敗：%s。"/>
+ <rlang id="2199" text="忽略"/>
+ <rlang id="2200" text="有存檔待轉存"/>
+ <rlang id="2201" text="轉存"/>
+ <rlang id="2202" text="搜尋雲存檔遊戲"/>
+ <rlang id="2203" text="提示"/>
+ <rlang id="2204" text="雲存檔同步即將完成，請稍候"/>
+ <rlang id="2205" text="立即退出"/>
+ <rlang id="2206" text="存檔可能遺失，仍要退出嗎？"/>
+ <rlang id="2207" text="當前有存檔正在同步，為避免遊戲進度遺失，建議等待同步完成後退出。"/>
+ <rlang id="2208" text="等待同步"/>
+ <rlang id="2209" text="仍要退出"/>
+ <rlang id="2210" text="網咖環境下，系統重新啟動可能導致存檔遺失，建議等待同步完成後退出。"/>
+ <rlang id="2211" text="網咖環境下，系統重新啟動可能導致存檔遺失，建議等待同步完成後再退出。"/>
+ <rlang id="2212" text="新增"/>
+ <rlang id="2213" text="普通用戶能累計開啟%d款遊戲雲存檔功能，會員不限制開啟數量，與個人版互通權益。"/>
+ <rlang id="2214" text="沒有匹配的遊戲"/>
+ <rlang id="2215" text="你已開通最新版雲存檔功能，請至官網更新最新版用戶端"/>
+ <rlang id="2216" text="取得新版本"/>
+ <rlang id="2217" text="任務被終止"/>
+ <rlang id="2218" text="轉存失敗"/>
+ <rlang id="2219" text="存檔解壓縮失敗"/>
+ <rlang id="2220" text="存檔壓縮失敗"/>
+ <rlang id="2221" text="轉存存檔"/>
+ <rlang id="2222" text="存檔%02d"/>
+ <rlang id="2223" text="轉存失敗，取得本機遊戲存檔失敗，請聯絡管理員。"/>
+ <rlang id="2224" text="轉存失敗，取得本機遊戲存檔失敗。"/>
+ <rlang id="2225" text="轉存失敗，該存檔已下架。"/>
+ <rlang id="2226" text="轉存失敗，你購買的存檔已不可用。"/>
+ <rlang id="2227" text="該項刪除存檔操作不可恢復哦！"/>
+ <rlang id="2228" text="%s 雲存檔反饋"/>
+ <rlang id="2229" text="轉存失敗，無法定位本存檔目錄。"/>
+ <rlang id="2230" text="轉存失敗，本機存檔正在被其他程式佔用。"/>
+ <rlang id="2231" text="存檔快取"/>
+ <rlang id="2232" text="修改路徑"/>
+ <rlang id="2233" text="全選"/>
+ <rlang id="2234" text="找不到已安裝的遊戲？請嘗試"/>
+ <rlang id="2235" text="手動新增"/>
+ <rlang id="2236" text="已新增"/>
+ <rlang id="2237" text="請輸入遊戲名稱"/>
+ <rlang id="2238" text="沒有符合條件的遊戲"/>
+ <rlang id="2239" text="此遊戲可能暫未支援，請"/> 
+ <rlang id="2240" text="聯絡U妹"/> 
+ <rlang id="2241" text="提報，我們會盡快完善。"/> 
+ <rlang id="2242" text=""/> 
+ <rlang id="2243" text=""/> 
+ <rlang id="2244" text=""/> 
+ <rlang id="2245" text=""/> 
+ <rlang id="2246" text=""/> 
+ <rlang id="2247" text=""/> 
+ <rlang id="2248" text=""/> 
+ <rlang id="2249" text=""/> 
+  
+ <rlang id="2500" text="簡訊通道擁擠，請嘗試左側微信掃碼登入"/>
+ <rlang id="2501" text="簡訊登入"/>
+ <rlang id="2502" text="掃碼登入"/>
+ <rlang id="2503" text="使用"/>
+ <rlang id="2504" text="微信  掃碼登入"/>
+ <rlang id="2505" text="快速登入"/>
+ <rlang id="2506" text="此賬號正在其他電腦加速中"/>
+ <rlang id="2507" text="若繼續登入，該賬號在其他電腦的加速將被中斷並登出。是否繼續？"/>
+ <rlang id="2508" text="繼續登入"/>
+ <rlang id="2509" text="返回"/>
+ <rlang id="2510" text="啟動、加速、退出時，會播放真人精心錄製的音效。"/>
+ <rlang id="2511" text="你已開啟UU雲存檔，選擇此項時本機存檔可能無法及時保存至雲端。"/>
+ <rlang id="2512" text="未成年人保護"/>
+ <rlang id="2513" text="桌面推送"/>
+ <rlang id="2514" text="接收遊戲福利活動及百科攻略推送。"/>
+ <rlang id="2515" text="路由模式效果增強"/>
+ <rlang id="2516" text="路由模式節點提供更高性能的加速體驗，可進一步降低延遲。"/>
+ <rlang id="2517" text="我的網路是長城寬頻"/>
+ <rlang id="2518" text="長城寬頻用戶專屬最佳化，達到和其他營運商一致的加速效果。"/>
+ <rlang id="2519" text="歷史節點"/>
+ <rlang id="2520" text="所有模式"/>
+ <rlang id="2521" text="模式過濾"/>
+ <rlang id="2522" text="節點過濾"/>
+ <rlang id="2523" text="提交問題"/>
+ <rlang id="2524" text="訊息中心"/>
+ <rlang id="2525" text="常用設定"/>
+ <rlang id="2526" text="點選可切換遊戲啟動方式"/>
+ <rlang id="2527" text="所羅門群島(+677)"/>
+ <rlang id="2528" text="{f 5}儲值頁打開過慢，{b}微信{/b} 掃描小程式進行儲值{/f}"/>
+ <rlang id="2529" text="掃一掃，進入UU加速器官方小程式"/>
+ <rlang id="2530" text="繫結手機號"/>
+ <rlang id="2531" text="繫結電子郵件"/>
+ <rlang id="2532" text="顯示完整功能需安裝微軟 WebView2 控件"/>
+ <rlang id="2533" text="修改頭像、暱稱及微信等功能需安裝控件"/>
+ <rlang id="2534" text="下載控件"/>
+ <rlang id="2535" text="為你下載並安裝微軟 WebView2 控件"/>
+ <rlang id="2536" text="預計 1-2 分鐘完成，請耐心等待…"/>
+ <rlang id="2537" text="下載中："/>
+ <rlang id="2538" text="安裝完成，重新啟動UU加速器顯示完整頁面"/>
+ <rlang id="2539" text="立即重新啟動"/>
+ <rlang id="2540" text="下載過程中出現錯誤，請重試"/>
+ <rlang id="2541" text="重試"/>
+ <rlang id="2542" text="{f 6}使用{b}微信{/b}，在UU加速器小程式上儲值會員{/f}"/>
+ <rlang id="2543" text="顯示儲值頁面需安裝微軟 WebView2 控件"/>
+ <rlang id="2544" text="請點選按鈕，為你自動下載並安裝"/>
+ <rlang id="2545" text="系統缺少顯示該頁面的微軟 WebView2 控件"/>
+ <rlang id="2546" text="請點選下方按鈕，為你自動下載並安裝"/>
+ <rlang id="2547" text="安全啟動偵測"/>
+ <rlang id="2548" text="安全啟動未成功開啟，檢視教程進行自主設定。"/>
+ <rlang id="2549" text="檢視教程"/>
+ <rlang id="2550" text="開啟未成年模式，將限制加速器的使用。"/>
+ <rlang id="2551" text="第三方授權協議"/>
+ <rlang id="2552" text=" · 可預約"/>
+ <rlang id="2553" text=" · &lt;c #00D2C4&gt;已預約&lt;/c&gt;"/>
+ <rlang id="2554" text="去預約"/>
+ <rlang id="2555" text="預約詳情"/>
+ <rlang id="2556" text=" · &lt;c #00D2C4&gt;檢視遊戲介紹&lt;/c&gt;"/>
+ <rlang id="2557" text="可預約"/>
+ <rlang id="2558" text="&lt;c #00D2C4&gt;已預約&lt;/c&gt;"/>
+ <rlang id="2559" text="&lt;c #00D2C4&gt;檢視遊戲介紹&lt;/c&gt;"/>
+ <rlang id="2560" text="正在上傳此存檔"/>
+ <rlang id="2561" text="該存檔下載前需先找回，如過期將無法直接下載，可升級會員延長有效期。"/>
+ <rlang id="2562" text="更新"/>
+ <rlang id="2563" text="等安裝程式完成後再關閉"/>
+ <rlang id="2564" text="關閉下載器將清空正在下載的內容"/>
+ <rlang id="2565" text="請檢查下載目錄的有效性"/>
+ <rlang id="2566" text="關閉當前任務後才能開啟新的下載任務"/>
+ <rlang id="2567" text="下載目錄空間不足，請至桌布官網下載"/>
+ <rlang id="2568" text="磁碟空間不足，請選擇其他目錄"/>
+ <rlang id="2569" text="下載中斷，請嘗試重新下載"/>
+ <rlang id="2570" text="安裝成功"/>
+ <rlang id="2571" text="正在安裝..."/>
+ <rlang id="2572" text="為保證雲存檔功能正常執行，你啟動遊戲瀏覽檔並退出UU時，預設保持程式執行至任務結束。"/>
+ <rlang id="2573" text="知道了"/>
+ <rlang id="2574" text="尊敬的用戶，你的計費時長已不足5分鐘，\n為不影響你的遊戲體驗，請及時儲值。"/>
+ <rlang id="2575" text="立即儲值"/>
+ <rlang id="2576" text="網咖專屬支援遊戲加速服務"/>
+ <rlang id="2577" text="掃碼登入 UU 賬號，&lt;c #FBFF26&gt;免費&lt;/c&gt;享受高級加速"/>
+ <rlang id="2578" text="下載《絕地求生助手》提高絕地求生實戰水準"/>
+ <rlang id="2579" text="雲存檔等權益，與個人版權益互通。"/>
+ <rlang id="2580" text="開"/>
+ <rlang id="2581" text="關"/>
+ <rlang id="2582" text="絕地求生已開啟"/>
+ <rlang id="2583" text="絕地求生開啟中。"/>
+ <rlang id="2584" text="已經退出絕地求生。"/>
+ <rlang id="2585" text="快捷鍵衝突，請更換"/>
+ <rlang id="2586" text="輸入了不支援的快捷鍵"/>
+ <rlang id="2587" text="快捷鍵設定失敗，錯誤碼%d"/>
+ <rlang id="2588" text="未開通權限，請聯絡管理開通功能。"/>
+ <rlang id="2589" text="等待電子郵件驗證（%ds）"/>
+ <rlang id="2590" text="近期刪除存檔（點選可找回）"/>
+ <rlang id="2591" text="%s 需開啟存檔分享"/>
+ <rlang id="2592" text="網咖會員"/>
+ <rlang id="2593" text="雲存檔特權、加速特權，權益與個人版互通。"/>
+ <rlang id="2594" text="當前網咖：%s"/>
+ <rlang id="2595" text="本網咖已支援遊戲加速服務"/>
+ <rlang id="2596" text="掃碼登入 UU 賬號，&lt;c #FBFF26&gt;免費&lt;/c&gt;取得更多福利"/>
+ <rlang id="2597" text="實用遊戲工具，護航你的遊戲人生"/>
+ <rlang id="2598" text="線上客服，1 對 1 解決加速問題"/>
+ <rlang id="2599" text="絕地《局內戰績速查》，輕鬆掌握戰場全局水準"/>
+ <rlang id="2600" text="請先掃碼登入/註冊 UU 賬號"/>
+ <rlang id="2601" text="專線加速全球遊戲，直降最低延遲"/>
+ <rlang id="2602" text="已加速成功"/>
+ <rlang id="2603" text="主機設備使用區域網路位址"/>
+ <rlang id="2604" text="關於"/>
+ <rlang id="2605" text="啟動設定"/>
+ <rlang id="2606" text="同步加速"/>
+ <rlang id="2607" text="更新"/>
+ <rlang id="2608" text="目前選擇："/>
+ <rlang id="2609" text="下載記錄"/> 
+ <rlang id="2610" text="正在下載 (%d)"/>
+ <rlang id="2611" text="下載設定"/>
+ <rlang id="2612" text="預設下載目錄"/>
+ <rlang id="2613" text="完成任務自動執行"/>
+ <rlang id="2614" text="全部記錄"/>
+ <rlang id="2615" text="等待下載"/>
+ <rlang id="2616" text="已暫停"/>
+ <rlang id="2617" text="正在安裝..."/>
+ <rlang id="2618" text="已完成"/>
+ <rlang id="2619" text="已取消"/>
+ <rlang id="2620" text="下載失敗"/>
+ <rlang id="2621" text=" · 已完成"/>
+ <rlang id="2622" text="今天"/>
+ <rlang id="2623" text="昨天"/>
+ <rlang id="2624" text="%d月%d日"/>
+ <rlang id="2625" text="%d年%d月%d日"/>
+ <rlang id="2626" text="請先加速《%s》"/>
+ <rlang id="2627" text="沒有加速的情況下，可能導致下載失敗"/>
+ <rlang id="2628" text="先去加速"/>
+ <rlang id="2629" text="直接下載"/>
+ <rlang id="2630" text="連線逾時"/>
+ <rlang id="2631" text="無法連接伺服器"/>
+ <rlang id="2632" text="域名解析失敗"/>
+ <rlang id="2633" text="安全連線失敗"/>
+ <rlang id="2634" text="磁碟寫入失敗"/>
+ <rlang id="2635" text="無法建立檔案"/>
+ <rlang id="2636" text="伺服器回傳錯誤"/>
+ <rlang id="2637" text="下載失敗 (錯誤碼: %d)"/>
+ <rlang id="2638" text="請選擇下載目錄"/>
+ <rlang id="2639" text="暫停"/>
+ <rlang id="2640" text="執行"/>
+ <rlang id="2641" text="重新下載"/>
+ <rlang id="2642" text="刪除檔案"/>
+ <rlang id="2643" text="我的卡券"/>
+ <rlang id="2644" text="刪除任務時，一併刪除已下載的檔案"/>
+ <rlang id="2645" text="類別"/>
+ <rlang id="2646" text="當前配置"/>
+ <rlang id="2647" text="最低配備"/>
+ <rlang id="2648" text="建議配備"/>
+ <rlang id="2649" text="狀態"/>
+ <rlang id="2650" text="作業系統"/>
+ <rlang id="2651" text="處理器"/>
+ <rlang id="2652" text="記憶體"/>
+ <rlang id="2653" text="顯示卡"/>
+ <rlang id="2654" text="DirectX版本"/>
+ <rlang id="2655" text="中國香港"/>
+ <rlang id="2656" text="中國澳門"/>
+ <rlang id="2657" text="中國臺灣"/>
+ <rlang id="2658" text="立即同步"/>
+ <rlang id="2659" text="綁定遊戲平台，快速新增遊戲"/>
+ <rlang id="2660" text="你已登入過以下 Steam 帳號，是否要綁定此帳號？"/>
+ <rlang id="2661" text="立即綁定"/>
+ <rlang id="2662" text="綁定其他帳號"/>
+ <rlang id="2663" text="Steam個人檔案頁面"/>
+ <rlang id="2664" text="收到 %d 張新優惠券"/>
+ <rlang id="2665" text="收到 %d 張新時長卡"/>
+ <rlang id="2666" text="線路故障補償已入帳"/>
+ <rlang id="2667" text="跟隨系統"/>
+ <rlang id="2668" text="轉換為 GPT 磁碟"/>
+ <rlang id="2669" text="TPM 就緒"/>
+ <rlang id="2670" text="安全啟動開啟"/>
+ <rlang id="2671" text="請開啟遊戲，開啟後會自動取得相關資訊"/>
+ <rlang id="2672" text="我已開啟遊戲"/>
+ <rlang id="2673" text="正在嘗試取得遊戲資訊…"/>
+ <rlang id="2674" text="取得遊戲資訊失敗"/>
+ <rlang id="2675" text="抱歉，無法取得遊戲資訊。請確認遊戲已安裝，或點擊下方按鈕輸入遊戲路徑。"/>
+ <rlang id="2676" text="輸入遊戲路徑"/>
+ <rlang id="2677" text="辨識成功"/>
+ <rlang id="2678" text="遊戲路徑"/>
+ <rlang id="2679" text="目前沒有進行中或已完成的下載任務"/>
+ <rlang id="2680" text="已加速：%s"/>
+ <rlang id="2681" text="遲遲未收到驗證碼？試試掃碼登入"/>
+ <rlang id="2682" text="設定自訂路徑："/>
+ <rlang id="2683" text="好的"/>
+ <rlang id="2684" text="找回存檔"/>
+ <rlang id="2685" text="繼續轉存"/>
+ <rlang id="2686" text="取消轉存"/>
+ <rlang id="2687" text="XBOX"/>
+ <rlang id="2688" text="Battle.net "/>
+ <rlang id="2689" text="%s啟動路徑："/>
+ <rlang id="2690" text="補償時長已新增至目前會員時長"/>
+ <rlang id="2691" text="補償"/>
+ <rlang id="2692" text="故障時長"/>
+ <rlang id="2693" text="補償時長"/>
+ <rlang id="2694" text="次要DNS："/>
+ <rlang id="2695" text="有新內容下載完成"/>
+ <rlang id="2696" text="同步翻譯"/>
+ <rlang id="2697" text="頁面載入失敗，請點擊重試。"/>
+ <rlang id="2698" text="此電腦的UU帳號已登出"/>
+ <rlang id="2699" text="目前帳號已於 {c #00D2C4}%s{/c} 在其他電腦（{c #00D2C4}%s{/c}）上登入。"/>
+ <rlang id="2700" text="目前帳號已在其他電腦（{c #00D2C4}%s{/c}）上登入。"/>
+ <rlang id="2701" text="目前帳號已於 {c #00D2C4}%s{/c} 在其他電腦上登入。"/>
+ <rlang id="2702" text="目前帳號已在其他電腦上登入。"/>
+ <rlang id="2703" text="語言設定已變更"/>
+ <rlang id="2704" text="需要重新啟動UU加速器才能套用新語言"/>
+ <rlang id="2705" text="關閉遊戲雲存檔將停止存檔自動保存功能，但不"/>
+ <rlang id="2706" text="會刪除既有雲存檔，關閉後可在 "/>
+ <rlang id="2707" text="設定-開啟/關閉"/>
+ <rlang id="2708" text="遊戲雲存檔"/>
+ <rlang id="2709" text="中再次開啟。"/>
+ <rlang id="2710" text="版本選擇"/>
+ <rlang id="2711" text="同步啟動「Apex助手」"/>
+ <rlang id="2712" text="需先下載「Apex助手」"/>
+ <rlang id="2713" text="請選擇遊戲預設啟動平台"/>
+ <rlang id="2714" text="請選擇你要啟動的遊戲版本"/>
+ <rlang id="2715" text="手動選擇啟動項"/>
+ <rlang id="2716" text="發佈者"/>
+ <rlang id="2717" text="轉存時間："/>
+ <rlang id="2718" text="轉存失敗，請取消其他存檔鎖定或升級會員。"/>
+ <rlang id="2719" text="存檔已鎖定"/>
+ <rlang id="2720" text="存檔已解鎖"/>
+ <rlang id="2721" text="沒有符合條件的遊戲，請至 UU 首頁頂部重新搜尋加速"/>
+ <rlang id="2722" text="載入中"/>
+ <rlang id="2723" text="為確保加速生效："/>
+ <rlang id="2724" text="Steam 授權"/>
+ <rlang id="2725" text="加速"/>
+ <rlang id="2726" text="授權"/>
+ <rlang id="2727" text="授權/設定"/>
+ <rlang id="2728" text="完成"/>
+ <rlang id="2729" text="請先加速 Steam 商店"/>
+ <rlang id="2730" text="加速後能確保順利開啟 Steam 頁面。"/>
+ <rlang id="2731" text="加速 Steam 商店"/>
+ <rlang id="2732" text="請前往 Steam 完成以下任務"/>
+ <rlang id="2733" text="開啟 Steam 後，目前頁面將自動偵測完成狀況"/>
+ <rlang id="2734" text="帳號授權"/>
+ <rlang id="2735" text="在 Steam 端完成登入即可看到授權視窗"/>
+ <rlang id="2736" text="偵測中"/>
+ <rlang id="2737" text="設為公開：個人資料、遊戲詳情"/>
+ <rlang id="2738" text="在帳號資料頁面將選項設為&quot;公開&quot; "/>
+ <rlang id="2739" text="查看教學"/>
+ <rlang id="2740" text="開啟 Steam 頁面"/>
+ <rlang id="2741" text="我已完成以上操作"/>
+ <rlang id="2742" text="重新開啟 Steam 頁面"/>
+ <rlang id="2743" text="授權未通過"/>
+ <rlang id="2744" text="未偵測到有效的 Steam 授權資訊"/>
+ <rlang id="2745" text="可能原因：授權被拒絕、連結已過期，或瀏覽器中未完成登入"/>
+ <rlang id="2746" text="授權成功"/>
+ <rlang id="2747" text="遊戲平台授權"/>
+ <rlang id="2748" text="管理已授權的遊戲平台帳號"/>
+ <rlang id="2749" text="Steam 平台"/>
+ <rlang id="2750" text="暫無授權帳號"/>
+ <rlang id="2751" text="授權後可參與 UU 補給站活動，領取加速時長、遊戲道具等獎勵。"/>
+ <rlang id="2752" text="新增 Steam 帳號"/>
+ <rlang id="2753" text="最多可授權 %d 個 Steam 帳號"/>
+ <rlang id="2754" text="目前"/>
+ <rlang id="2755" text="設為目前"/>
+ <rlang id="2756" text="解除"/>
+ <rlang id="2757" text="確定要解除該 Steam 帳號嗎？"/>
+ <rlang id="2758" text="%s 將從你的 UU 帳號中移除。解除後將自動切換為 %s 作為目前使用帳號。"/>
+ <rlang id="2759" text="%s 將從你的 UU 帳號中移除。"/>
+ <rlang id="2760" text="遊戲平台授權"/>
+ <rlang id="2761" text="授權帳號：%s"/>
+ <rlang id="2762" text="帳號已授權，請繼續完成設定"/>
+ <rlang id="2763" text="設為公開後，即可參與 UU 各項福利活動，獲得會員時長、遊戲道具等獎勵"/>
+ <rlang id="2764" text="正在加速"/>
+ <rlang id="1592" text="正在加速"/>
+ <rlang id="3000" text=""/>
+ <rlang id="3001" text="本機網路仍無法取得節點延遲"/>
+ <rlang id="3002" text="請聯絡UU加速器客服，解決此問題"/>
+ <rlang id="3003" text="下載提醒"/>
+ <rlang id="3004" text="本機未安裝：%s\n推薦點選下方按鈕，一鍵開啟下載。"/>
+ <rlang id="3005" text="快速下載"/>
+ <rlang id="3006" text="繼續加速"/>
+ <rlang id="3007" text="修復中..."/>
+ <rlang id="3008" text="外觀"/>
+ <rlang id="3009" text="字型大小調整"/>
+ <rlang id="3010" text="錯誤碼自動上報%d"/>
+ <rlang id="3011" text="遊戲環境修復"/>
+ <rlang id="3012" text="當前裝置待最佳化："/>
+ <rlang id="3013" text="共%d項可最佳化"/>
+ <rlang id="3014" text="當前裝置狀態已符合遊戲標準"/>
+ <rlang id="3015" text="目前裝置存在%d項待最佳化問題"/>
+ <rlang id="3016" text="一鍵修復"/>
+ <rlang id="3017" text="待修復"/>
+ <rlang id="3018" text="已安裝"/>
+ <rlang id="3019" text="已修復"/>
+ <rlang id="3020" text="收起詳情"/>
+ <rlang id="3021" text="展開詳情"/>
+ <rlang id="3022" text="未識別"/>
+ <rlang id="3023" text="修復中"/>
+ <rlang id="3024" text="目前正在修復中，退出後中斷修復，是否繼續退出？"/>
+ <rlang id="3025" text="目前配置暫不符合標準"/>
+ <rlang id="3026" text="雲端電腦"/>
+ <rlang id="3027" text="不限配置，小筆電也能暢玩 3A 大作，享受與高配電腦一致的遊戲體驗："/>
+ <rlang id="3028" text="動態桌布"/>
+ <rlang id="3029" text="解鎖桌布新玩法，海量免費 4K 遊戲桌布可互動超好玩，讓桌面動起來："/>
+ <rlang id="3030" text="前往官網"/>
+ <rlang id="3031" text="功能專區"/>
+ <rlang id="3032" text="確定要隱藏該專區嗎？"/>
+ <rlang id="3033" text="您也可以在「"/>
+ <rlang id="3034" text="常用設定－功能專區"/>
+ <rlang id="3035" text="」中，重新選擇顯示該專區。"/>
+ <rlang id="3036" text="目前裝置配備已符合遊戲等相關配置要求。"/>
+ <rlang id="3037" text="點此查看"/>
+ <rlang id="3038" text="是否關閉本遊戲環境修復"/>
+ <rlang id="3039" text="關閉後，該遊戲不再出現該修復項。後續可在遊戲加速頁右上角「設定」處開啟。"/>
+ <rlang id="3040" text="僅本次"/>
+ <rlang id="3041" text="關閉偵測"/>
+ <rlang id="3042" text="開啟遊戲環境修復"/>
+ <rlang id="3043" text="偵測使用者電腦軟硬體配置是否滿足遊戲要求。"/>
+ <rlang id="3044" text="分配中"/>
+ <rlang id="3045" text="UU加速器連線"/>
+ <rlang id="3046" text="區域網路連線邀請"/>
+ <rlang id="3047" text="%s 邀請你加入連線 %s"/>
+ <rlang id="3048" text="立即加入"/>
+ <rlang id="3049" text="稍後再說"/>
+ <rlang id="3050" text="開始連線"/>
+ <rlang id="3051" text="連線 AI 助手（Agent Skills）"/>
+ <rlang id="3052" text="允許 OpenClaw、Claude Code 等 AI 助手呼叫加速功能，傳送 &quot;UU加速器&quot; 即可"/>
+ <rlang id="3053" text="實現使用。"/>
+ <rlang id="3054" text="手動配置Skills目錄"/>
+ <rlang id="3055" text="使用須知"/>
+ <rlang id="3056" text="請先閱讀須知，依需求選擇是否開啟"/> 
+ <rlang id="3057" text="1. 開啟後，會自動辨識你已安裝的 AI 助手軟體，並在它的目錄中建立\n「netease-uu-booster」資料夾，同時安裝同名 Skill；"/> 
+ <rlang id="3058" text="2. Skill 支援在 AI 助手中透過對話方式加速遊戲、查詢加速狀態，可輸入\n「啟動加速」「加速絕地」等關鍵字喚起使用；"/> 
+ <rlang id="3059" text="3. 除加速相關功能外，Skill 不包含任何其他內容。安裝後，使用 AI 助手過程中會產生一定的 Token 消耗，如不需要此功能，可點擊關閉。"/> 
+ <rlang id="3060" text="繼續開啟"/> 
+ <rlang id="3061" text="暫不需要"/>
+ <rlang id="3062" text="AI 設定"/>
+ <rlang id="3063" text="AI 連線設定"/>
+ <rlang id="3064" text="在 AI 助手中透過對話方式，直接加速遊戲、查詢加速狀態"/>
+ <rlang id="3065" text="開啟授權"/>
+ <rlang id="3066" text="支援 OpenClaw、Claude Code、Cursor、Codex、Hermes Agent 等"/>
+ <rlang id="3067" text="已連線的 AI 助手"/>
+ <rlang id="3068" text="重新偵測"/>
+ <rlang id="3069" text="未偵測到已安裝的 AI 助手，點選「重新偵測」重試。"/>
+ <rlang id="3070" text="請嘗試點選 重試 ，或重新安裝 UU"/>
+ <rlang id="3071" text="已設定"/>
+ <rlang id="3072" text="待設定"/>
+ <rlang id="3073" text="設定失敗"/>
+ <rlang id="3074" text="解除安裝失敗"/>
+ <rlang id="3075" text="連線 AI 助手授權須知"/>
+ <rlang id="3076" text="請先閱讀以下說明，再決定是否授權開啟"/>
+ <rlang id="3077" text="1. 授權開啟後，將自動偵測已安裝的 AI 助手並為你提供一鍵設定能力："/>
+ <rlang id="3078" text=" · 僅檢查安裝路徑是否存在，不做安裝目錄內任何內容的掃描。"/>
+ <rlang id="3079" text="2. 選擇你需要設定的 AI 助手，功能將在其目錄中建立名稱為\n「netease-uu-booster」的資料夾，並安裝同名 Skill；\n3. Skill 支援在 AI 助手中透過對話的方式使用以下能力："/>
+ <rlang id="3080" text=" · 搜尋支援遊戲、區服；\n · 遊戲加速、停止加速；\n · 查詢加速延遲、掉封包。"/>
+ <rlang id="3081" text="4. 上述資訊僅在本地使用，不會上傳至伺服器。在設定中關閉即可刪除設定內容。"/>
+ <rlang id="3082" text="授權開啟"/>
+ <rlang id="3083" text="Skill 設定失敗，請檢查系統權限"/>
+ <rlang id="3084" text="Skill 刪除失敗，請檢查系統權限"/>
+ <rlang id="3085" text="未找到本地 AI 助手目錄，請嘗試點選 重新整理 按鈕"/>
+ <rlang id="3086" text="專區紅點提醒"/>
+ <rlang id="3087" text="「補給站」專區出現小紅點提醒，關閉將不再顯示小紅點。"/>
+ <rlang id="3088" text="偵測中…"/>
+ <rlang id="3089" text="補給站"/>
+ <rlang id="3090" text="你的遊戲路上不孤單，這裡會集結各大遊戲福利，專屬好禮隨時等你領取。"/>
+ <rlang id="3091" text="是否開啟「補給站」專區？"/>
+ <rlang id="3092" text="參與相關活動，需開啟該專區；\n點擊「確定」即可前往。"/>
+ <rlang id="3093" text="雲聯機"/>
+ 
+ <rlang id="4000" text=""/>
+ <rlang id="8001" text="安全啟動已成功開啟"/>
+ <rlang id="8002" text="當前裝置已開啟安全啟動（Secure Boot），可成功進入遊戲。"/>
+ <rlang id="8003" text="安全啟動設定教程"/>
+ <rlang id="8004" text="轉換為 GPT 磁碟"/>
+ <rlang id="8005" text="掃碼檢視教程"/>
+ <rlang id="8006" text="一鍵重新啟動"/>
+ <rlang id="8007" text="當前磁碟格式不符合要求，請點選下方官方教程，自行修改："/>
+ <rlang id="8008" text="《通用磁碟轉換教學》（網頁內搜尋「磁碟管理」）"/>
+ <rlang id="8009" text="《微軟官方教程》"/>
+ <rlang id="8010" text="上述操作可能有損壞磁碟等不可逆影響，建議在專業人士指導後操作；如頁面載入較慢，可加速 EA app 後存取。"/>
+ <rlang id="8011" text="已修改"/>
+ <rlang id="8012" text="正在偵測，請稍後"/>
+ <rlang id="8013" text="已掃碼"/>
+ <rlang id="8014" text="返回磁碟修改頁"/>
+ <rlang id="8015" text="已保存，立刻重新啟動"/>
+ <rlang id="8016" text="返回掃碼頁"/>
+ <rlang id="8017" text="後續流程需重新啟動裝置，請手機微信掃碼，以便在手機上繼續檢視，避免後續流程中斷。"/>
+ <rlang id="8018" text="請確保已成功掃碼進入教程頁；"/>
+ <rlang id="8019" text="保存好電腦檔案後可點選下方按鈕一鍵重新啟動，後續請在手機上檢視流程。"/>
+ <rlang id="8020" text="保存好電腦檔案後點選下方按鈕一鍵重新啟動進入 BIOS 設定，後續請在手機上檢視流程。"/>
+ <rlang id="8021" text="修改成功（%ds）"/>
+ <rlang id="8022" text="修改成功"/>
+ <rlang id="8023" text="立刻重新啟動進入 BIOS"/>
+ <rlang id="8024" text="安全啟動未成功開啟"/>
+ <rlang id="8025" text="目前裝置未開啟安全開機（Secure Boot），可能無法進入遊戲。請按照教學完成設定。"/>
+ <rlang id="8026" text="稍後設定"/>
+ <rlang id="8027" text="TPM未就緒"/>
+ <rlang id="8028" text="目前裝置未開啟TPM，可能無法進入遊戲。請按照教學完成設定。"/>
+ <rlang id="8029" text="TPM開啟教學"/>
+ <rlang id="8030" text="TPM已就緒"/>
+ <rlang id="8031" text="當前裝置已開啟TPM，可成功進入遊戲。"/>
+</root>

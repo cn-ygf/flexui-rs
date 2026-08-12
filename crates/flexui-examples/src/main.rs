@@ -10,40 +10,95 @@ use std::sync::OnceLock;
 
 const ORIGINAL_LOGIN_XML: &str = include_str!("../assets/data/original_login.xml");
 const ORIGINAL_CHS_XML: &str = include_str!("../assets/data/chs.xml");
+const ORIGINAL_CHT_XML: &str = include_str!("../assets/data/cht_tw.xml");
+const ORIGINAL_EN_XML: &str = include_str!("../assets/data/en.xml");
 
-fn nation_codes() -> &'static [(String, String)] {
-    static CODES: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    CODES.get_or_init(|| {
-        let language = roxmltree::Document::parse(ORIGINAL_CHS_XML)
-            .expect("原版简体中文语言文件必须是有效 XML");
-        let labels: HashMap<&str, &str> = language
-            .descendants()
-            .filter(|node| node.has_tag_name("rlang"))
-            .filter_map(|node| Some((node.attribute("id")?, node.attribute("text")?)))
-            .collect();
-        let layout = roxmltree::Document::parse(ORIGINAL_LOGIN_XML)
-            .expect("原版登录布局必须是有效 XML");
-        let list = layout
-            .descendants()
-            .find(|node| node.attribute("name") == Some("nation_flags_list"))
-            .expect("原版登录布局必须包含 nation_flags_list");
-        list.children()
-            .filter(|node| node.is_element())
-            .filter_map(|node| {
-                if node.attribute("userdata") == Some("national_flag") {
-                    let code = node.attribute("name")?;
-                    let resource = node.attribute("text")?;
-                    let id = resource.strip_prefix("%{")?.strip_suffix('}')?;
-                    Some((labels.get(id)?.to_string(), format!("nation_{code}")))
-                } else if node.has_tag_name("Label") {
-                    let title = node.attribute("text")?;
-                    Some((title.to_string(), format!("nation_header_{title}")))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    })
+#[derive(Clone, Copy)]
+enum NationLanguage {
+    SimplifiedChinese,
+    TraditionalChinese,
+    English,
+}
+
+fn nation_language(locale: Option<&str>) -> NationLanguage {
+    let locale = locale.unwrap_or("zh-Hans").to_ascii_lowercase();
+    if locale == "en" || locale.starts_with("en-") {
+        NationLanguage::English
+    } else if locale.contains("hant")
+        || locale.starts_with("zh-tw")
+        || locale.starts_with("zh-hk")
+        || locale.starts_with("zh-mo")
+    {
+        NationLanguage::TraditionalChinese
+    } else {
+        NationLanguage::SimplifiedChinese
+    }
+}
+
+fn escape_bare_ampersands(xml: &str) -> String {
+    let mut escaped = String::with_capacity(xml.len());
+    for (index, character) in xml.char_indices() {
+        if character == '&' {
+            let tail = &xml[index..];
+            if !["&amp;", "&quot;", "&apos;", "&lt;", "&gt;", "&#"]
+                .iter()
+                .any(|entity| tail.starts_with(entity))
+            {
+                escaped.push_str("&amp;");
+                continue;
+            }
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+fn parse_nation_codes(language_xml: &str) -> Vec<(String, String)> {
+    let language_xml = escape_bare_ampersands(language_xml);
+    let language = roxmltree::Document::parse(&language_xml)
+        .expect("原版语言文件必须是有效 XML");
+    let labels: HashMap<&str, &str> = language
+        .descendants()
+        .filter(|node| node.has_tag_name("rlang"))
+        .filter_map(|node| Some((node.attribute("id")?, node.attribute("text")?)))
+        .collect();
+    let layout = roxmltree::Document::parse(ORIGINAL_LOGIN_XML)
+        .expect("原版登录布局必须是有效 XML");
+    let list = layout
+        .descendants()
+        .find(|node| node.attribute("name") == Some("nation_flags_list"))
+        .expect("原版登录布局必须包含 nation_flags_list");
+    list.children()
+        .filter(|node| node.is_element())
+        .filter_map(|node| {
+            if node.attribute("userdata") == Some("national_flag") {
+                let code = node.attribute("name")?;
+                let resource = node.attribute("text")?;
+                let id = resource.strip_prefix("%{")?.strip_suffix('}')?;
+                Some((labels.get(id)?.to_string(), format!("nation_entry_{id}_{code}")))
+            } else if node.has_tag_name("Label") {
+                let title = node.attribute("text")?;
+                Some((title.to_string(), format!("nation_header_{title}")))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn nation_codes(locale: Option<&str>) -> &'static [(String, String)] {
+    static SIMPLIFIED: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    static TRADITIONAL: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    static ENGLISH: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    match nation_language(locale) {
+        NationLanguage::SimplifiedChinese => {
+            SIMPLIFIED.get_or_init(|| parse_nation_codes(ORIGINAL_CHS_XML))
+        }
+        NationLanguage::TraditionalChinese => {
+            TRADITIONAL.get_or_init(|| parse_nation_codes(ORIGINAL_CHT_XML))
+        }
+        NationLanguage::English => ENGLISH.get_or_init(|| parse_nation_codes(ORIGINAL_EN_XML)),
+    }
 }
 
 fn original_bitmap(bytes: &'static [u8]) -> ImageSource {
@@ -82,7 +137,7 @@ impl WindowImpl for UuExample {
             }
             "minimize" => ctx.minimize(),
             "close_window" => ctx.close(),
-            "btn_start" => ctx.set_text("home_status", "已选择 Steam，准备开始加速（演示）"),
+            "btn_start" => ctx.set_localized_text("home_status", "app.status.steam_selected"),
             _ => {}
         }
     }
@@ -90,11 +145,12 @@ impl WindowImpl for UuExample {
 
 struct LoginDialog {
     nation_code: String,
+    nation_item: String,
 }
 
 impl Default for LoginDialog {
     fn default() -> Self {
-        Self { nation_code: "86".into() }
+        Self { nation_code: "86".into(), nation_item: "nation_entry_1063_86".into() }
     }
 }
 
@@ -116,7 +172,7 @@ impl WindowImpl for LoginDialog {
                     .unwrap_or(Rect::new(326.0, 128.0, 68.0, 44.0));
                 ctx.open_styled_menu(
                     anchor,
-                    nation_codes().to_vec(),
+                    nation_codes(ctx.locale().as_deref()).to_vec(),
                     MenuStyle {
                         background: Color::from_u8(57, 63, 116, 255),
                         border: Color::from_u8(0, 0, 0, 0),
@@ -155,15 +211,16 @@ impl WindowImpl for LoginDialog {
                         },
                         window_margin: Insets::new(0.0, 0.0, 14.0, 28.0),
                     },
-                    Some(format!("nation_{}", self.nation_code)),
+                    Some(self.nation_item.clone()),
                 );
             }
-            _ if name.starts_with("nation_") => {
-                self.nation_code = name.trim_start_matches("nation_").to_string();
+            _ if name.starts_with("nation_entry_") => {
+                self.nation_item = name.to_owned();
+                self.nation_code = name.rsplit('_').next().unwrap_or("86").to_owned();
                 ctx.set_text("nation_code_text", format!("+{}", self.nation_code));
             }
-            "get_code" => ctx.set_text("login_status", "演示界面不会发送短信"),
-            "btn_login" => ctx.set_text("login_status", "演示界面不会提交账号信息"),
+            "get_code" => ctx.set_localized_text("login_status", "login.status.no_sms"),
+            "btn_login" => ctx.set_localized_text("login_status", "login.status.no_submit"),
             _ => {}
         }
     }
@@ -188,7 +245,8 @@ impl WindowImpl for SettingsDialog {
                 match selected {
                     Some(0) => { let _ = ctx.set_system_locale(); }
                     Some(1) => { let _ = ctx.set_locale("zh-Hans"); }
-                    Some(2) => { let _ = ctx.set_locale("en"); }
+                    Some(2) => { let _ = ctx.set_locale("zh-Hant"); }
+                    Some(3) => { let _ = ctx.set_locale("en"); }
                     _ => {}
                 }
                 ctx.set_localized_text("settings_status", "settings.locale_changed");
@@ -217,9 +275,33 @@ fn main() {
         .expect("加载简体中文本地化资源失败");
     localizer.load_json_res(&resource_manager, "i18n/en.json")
         .expect("加载英文本地化资源失败");
+    localizer.load_json_res(&resource_manager, "i18n/zh-Hant.json")
+        .expect("加载繁体中文本地化资源失败");
     flexui::set_application_localizer(localizer);
 
     #[cfg(target_os = "macos")]
     flexui::set_application_icon(include_bytes!("../assets/app.icns"));
     Window::new(UuExample).center().run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn nation_code_catalogs_match_the_original_layout() {
+        let simplified = nation_codes(Some("zh-Hans"));
+        let traditional = nation_codes(Some("zh-TW"));
+        let english = nation_codes(Some("en-US"));
+        assert_eq!(simplified.len(), traditional.len());
+        assert_eq!(simplified.len(), english.len());
+        assert_eq!(simplified[0].0, "中国(+86)");
+        assert_eq!(traditional[0].0, "中國(+86)");
+        assert_eq!(english[0].0, "China (+86)");
+        assert_eq!(
+            simplified.iter().map(|(_, name)| name).collect::<HashSet<_>>().len(),
+            simplified.len()
+        );
+    }
 }

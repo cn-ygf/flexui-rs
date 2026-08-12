@@ -1,41 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Window title="UU 加速器 · flexui XML 示例" width="1000" height="688" resizable="false"
+<Window title="app.window_title" width="1000" height="688" resizable="false"
         titlebar="none" system-corners="true" system-shadow="true" drag-region="0 0 1000 94">
 <Panel normal-bgcolor="#181D42" mouse="transparent" font-family="Microsoft YaHei">
   <VBox spacing="0" normal-bgcolor="#181D42" mouse="transparent">
     <VBox height="94" spacing="0" mouse="transparent">
       <HBox height="27" padding="2 8" spacing="6" mouse="transparent">
         <Panel flex="1" mouse="transparent"/>
-        <Button name="open_settings" tooltip="设置" width="24" height="24"
+        <Button name="open_settings" tooltip="app.tooltip.settings" width="24" height="24"
                 normal-bgimage="button/menu_normal.svg" hot-bgimage="button/menu_hover.svg"
                 pushed-bgimage="button/menu_pushed.svg" normal-bgfit="center"/>
-        <Button name="minimize" tooltip="最小化" width="24" height="24"
+        <Button name="minimize" tooltip="app.tooltip.minimize" width="24" height="24"
                 normal-bgimage="button/mini_normal.svg" hot-bgimage="button/mini_hover.svg"
                 pushed-bgimage="button/mini_pushed.svg" normal-bgfit="center"/>
-        <Button name="close_window" tooltip="关闭" width="24" height="24"
+        <Button name="close_window" tooltip="app.tooltip.close" width="24" height="24"
                 normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
                 pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
       </HBox>
       <HBox height="67" padding="2 38" spacing="18" align="center" mouse="transparent">
         <Image src="label/uu_logo@2.00x.png" width="40" height="46"/>
-        <Button tooltip="返回" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
+        <Button tooltip="app.tooltip.back" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
                 hot-bgimage="button/back_hover@2.00x.png" normal-bgfit="center"/>
-        <Button text="首页" width="72" height="42" normal-bgcolor="#181D42" normal-fgcolor="#FFFFFF"
+        <Button text="app.nav.home" width="72" height="42" normal-bgcolor="#181D42" normal-fgcolor="#FFFFFF"
                 font-size="18" bold="true" normal-textalign="center"/>
-        <Button text="游戏" width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+        <Button text="app.nav.games" width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
                 normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
-        <Button text="云联机" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+        <Button text="app.nav.cloud_play" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
                 normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
-        <Button text="云存档" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+        <Button text="app.nav.cloud_saves" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
                 normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
         <Panel flex="1" mouse="transparent"/>
-        <Edit name="search" placeholder="搜索" width="168" height="36" padding="3 18 3 36"
+        <Edit name="search" placeholder="app.search.placeholder" width="168" height="36" padding="3 18 3 36"
               normal-bgimage="edit/edit_search_normal@2.00x.png"
               hot-bgimage="edit/edit_search_hover@2.00x.png"
               focus-bgimage="edit/edit_search_focused@2.00x.png"
               normal-bgfit="stretch" hot-bgfit="stretch" focus-bgfit="stretch"
               normal-fgcolor="#FFFFFF" placeholder-fgcolor="#FFFFFF" font-size="16"/>
-        <Button name="open_login" tooltip="登录" width="38" height="38"
+        <Button name="open_login" tooltip="app.tooltip.login" width="38" height="38"
                 normal-bgimage="label/user_center.svg" hot-bgimage="label/user_center.svg"
                 normal-bgfit="stretch"/>
       </HBox>
@@ -47,7 +47,7 @@
           <Button name="btn_start" width="218" height="320"
                   normal-bgimage="common/steam_card@2.00x.png" hot-bgimage="common/steam_card_hot@2.00x.png"
                   pushed-bgimage="common/steam_card_hot@2.00x.png" normal-bgfit="stretch"/>
-          <Label text="Steam 商店" height="28" normal-fgcolor="#FFFFFF" font-size="17"
+          <Label text="app.game.steam_store" height="28" normal-fgcolor="#FFFFFF" font-size="17"
                  normal-textalign="center"/>
         </VBox>
         <VBox width="218" height="356" spacing="8">
@@ -68,17 +68,17 @@
         <VBox flex="1" spacing="16">
           <HBox height="60" spacing="16">
             <Button width="218" height="60" normal-bgimage="button/membership_recharge.svg" normal-bgfit="stretch"/>
-            <Button text="我的游戏  (1)" width="218" height="60" normal-bgcolor="#30386F"
+            <Button text="app.my_games" width="218" height="60" normal-bgcolor="#30386F"
                     hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
           </HBox>
           <HBox height="60" spacing="16">
             <Image src="button/college_student_discount@2.00x.png" width="218" height="60"/>
-            <Button text="我的卡券" width="218" height="60" normal-bgcolor="#30386F"
+            <Button text="app.my_coupons" width="218" height="60" normal-bgcolor="#30386F"
                     hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
           </HBox>
         </VBox>
       </HBox>
-      <Label name="home_status" text="选择一个游戏开始体验 UU 加速器" height="22"
+      <Label name="home_status" text="app.status.choose_game" height="22"
              normal-fgcolor="#7D89B7" font-size="13"/>
     </VBox>
   </VBox>

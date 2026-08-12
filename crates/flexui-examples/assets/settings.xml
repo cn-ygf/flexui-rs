@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Window title="window.settings.title" width="760" height="560" resizable="false" titlebar="none"
+<Window title="settings.window_title" width="760" height="560" resizable="false" titlebar="none"
         system-corners="true" system-shadow="true" drag-region="0 0 760 42">
 <Panel normal-bgcolor="#30386F" font-family="Microsoft YaHei" mouse="transparent">
   <VBox spacing="0" normal-bgcolor="#30386F" mouse="transparent">
@@ -34,7 +34,7 @@
         <Label text="settings.system" height="34" normal-fgcolor="#FFFFFF" font-size="20" bold="true"/>
         <HBox height="54" align="center">
           <Label text="settings.language" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <ComboBox name="language" options="locale.system,locale.zh_hans,locale.en" selected="0" width="150" height="36"
+          <ComboBox name="language" options="settings.locale.system,settings.locale.simplified_chinese,settings.locale.traditional_chinese,settings.locale.english" selected="0" width="150" height="36"
                     padding="0 10" normal-bgcolor="#3D4785" normal-fgcolor="#FFFFFF" border-width="1"
                     normal-bordercolor="#4F5A9A" corner-radius="6"/>
         </HBox>
