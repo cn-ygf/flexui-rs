@@ -255,7 +255,7 @@ impl Edit {
                 style.fg_color.unwrap_or(PLACEHOLDER_COLOR), TextAlign::Left, false);
             if self.base.focused && self.base.caret_on {
                 let y = content.top() + (line_h - caret_h) / 2.0;
-                cv.fill_rect(Rect::new(content.left() + 1.0, y, 1.5, caret_h), color);
+                cv.fill_rect(Rect::new(content.left(), y, 1.5, caret_h), color);
             }
             return;
         }
@@ -356,7 +356,7 @@ impl Widget for Edit {
             draw_aligned_text(cv, &self.base.placeholder, content, &font,
                 style.fg_color.unwrap_or(PLACEHOLDER_COLOR), TextAlign::Left, false);
             if self.base.focused && self.base.caret_on {
-                cv.fill_rect(Rect::new(content.left() + 1.0, cy.max(content.top()), 1.5, caret_h), color);
+                cv.fill_rect(Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h), color);
             }
             return;
         }

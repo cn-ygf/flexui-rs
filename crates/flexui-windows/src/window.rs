@@ -9,7 +9,7 @@ use flexui_core::event::keys;
 use flexui_core::{
     hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher, Event, Mods, MouseButton,
     NewWindow, Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
-    WindowDragRegion, WindowHandle,
+    WindowDragRegion, WindowHandle, Widget, WidgetRole,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -627,6 +627,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 自绘标题栏占满整个窗口，同时保留 WS_THICKFRAME 供 DWM 生成圆角、阴影和 Snap。
         WM_NCCALCSIZE if !state.is_null() && (*state).frameless => 0,
+        WM_SETCURSOR if !state.is_null() && (lparam as u32 & 0xFFFF) == HTCLIENT => {
+            let mut p: POINT = std::mem::zeroed();
+            if GetCursorPos(&mut p) != 0 && ScreenToClient(hwnd, &mut p) != 0 {
+                let dpi = GetDpiForWindow(hwnd);
+                let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+                let logical = Point::new(p.x as f32 / scale, p.y as f32 / scale);
+                let cursor = if point_over_edit((*state).root.as_ref(), logical) {
+                    IDC_IBEAM
+                } else {
+                    IDC_ARROW
+                };
+                SetCursor(LoadCursorW(null_mut(), cursor));
+                return 1;
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
             let hdc = BeginPaint(hwnd, &mut ps);
@@ -1059,6 +1075,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
+/// 命中最上层可交互控件，判断当前位置是否应显示文本输入光标。
+fn point_over_edit(root: &dyn Widget, point: Point) -> bool {
+    let Some(hit) = hit_test(root, point) else {
+        return false;
+    };
+    fn role_by_id(node: &dyn Widget, id: flexui_core::WidgetId) -> Option<WidgetRole> {
+        if node.base().id == id {
+            return Some(node.base().role);
+        }
+        node.base().children.iter().find_map(|child| role_by_id(child.as_ref(), id))
+    }
+    role_by_id(root, hit) == Some(WidgetRole::Edit)
+}
+
 /// WM_PAINT 期间：双缓冲 + DPI 缩放绘制整棵控件树。
 ///
 /// 先画到 32bpp 离屏位图（抗锯齿/ClearType 在位图上效果最佳），再整块 blit 到窗口，
@@ -1156,5 +1186,41 @@ unsafe fn paint_window(hwnd: HWND, hdc: HDC, paint: RECT, state: &mut AppState) 
             null_mut(),
         );
         gp::GdipDeleteGraphics(gw);
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+    use flexui_core::{Edit, HitPolicy, Panel};
+
+    #[test]
+    fn edit_hit_uses_text_cursor() {
+        let mut root = Panel::new();
+        root.base_mut().rect = Rect::new(0.0, 0.0, 200.0, 100.0);
+
+        let mut edit = Edit::new();
+        edit.base_mut().rect = Rect::new(20.0, 20.0, 120.0, 36.0);
+        root.base_mut().children.push(Box::new(edit));
+
+        assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
+        assert!(!point_over_edit(&root, Point::new(180.0, 80.0)));
+    }
+
+    #[test]
+    fn transparent_overlay_does_not_hide_edit_cursor() {
+        let mut root = Panel::new();
+        root.base_mut().rect = Rect::new(0.0, 0.0, 200.0, 100.0);
+
+        let mut edit = Edit::new();
+        edit.base_mut().rect = Rect::new(20.0, 20.0, 120.0, 36.0);
+        root.base_mut().children.push(Box::new(edit));
+
+        let mut overlay = Panel::new();
+        overlay.base_mut().rect = Rect::new(0.0, 0.0, 200.0, 100.0);
+        overlay.base_mut().hit = HitPolicy::Transparent;
+        root.base_mut().children.push(Box::new(overlay));
+
+        assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
     }
 }
