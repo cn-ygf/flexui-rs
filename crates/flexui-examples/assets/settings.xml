@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Window title="UU 设置" width="760" height="560" resizable="false" titlebar="none"
         system-corners="true" system-shadow="true" drag-region="0 0 760 42">
-<Panel normal-bgcolor="#30386F" font-family="Microsoft YaHei">
-  <VBox spacing="0" normal-bgcolor="#30386F">
+<Panel normal-bgcolor="#30386F" font-family="Microsoft YaHei" mouse="transparent">
+  <VBox spacing="0" normal-bgcolor="#30386F" mouse="transparent">
     <HBox height="42" padding="5 10" normal-bgcolor="#343C78" mouse="transparent">
       <Label text="设置" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="18" mouse="transparent"/>
       <Button name="close_settings" tooltip="关闭设置" width="28" height="28"
