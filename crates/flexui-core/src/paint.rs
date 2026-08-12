@@ -113,12 +113,14 @@ fn paint_tree_impl(
     // 6. 子控件（裁剪到自身范围内）
     if !b.children.is_empty() {
         cv.save();
-        cv.clip_rect(rect);
+        cv.clip_rect(node.children_viewport());
         for child in b.children.iter() {
             paint_tree_impl(child.as_ref(), cv, dirty, focus_active && b.focus_within);
         }
         cv.restore();
     }
+    // 7. 前景覆盖层（如滚动条）。
+    node.paint_foreground(cv, &style);
     if rounded {
         cv.restore();
     }

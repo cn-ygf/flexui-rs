@@ -453,6 +453,7 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], res
             "align" => node.base_mut().align = parse_align_items(v),
             "enabled" => node.base_mut().enabled = parse_bool(v),
             "visible" => node.base_mut().visible = parse_bool(v),
+            "focusable" | "tabstop" => node.base_mut().focusable = parse_bool(v),
             "focus-within" | "focuswithin" => node.base_mut().focus_within = parse_bool(v),
             "switch" => { node.apply_property(WidgetProperty::SwitchStyle(tag == "checkbox" && parse_bool(v))); }
             "multiline" => { node.apply_property(WidgetProperty::Multiline(parse_bool(v))); }
@@ -1120,6 +1121,16 @@ mod tests {
         let b = res.root.base();
         assert_eq!(b.padding, Insets::new(8.0, 4.0, 8.0, 4.0));
         assert_eq!(b.margin, Insets::new(4.0, 1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn focusable属性可关闭按钮焦点() {
+        let res = load_str(
+            r#"<Button name="code" focusable="false"/>"#,
+            &Context::new(),
+        )
+        .unwrap();
+        assert!(!res.root.base().focusable);
     }
 
     #[test]

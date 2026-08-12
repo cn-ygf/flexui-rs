@@ -162,8 +162,8 @@ define_class!(
         fn scroll_wheel(&self, event: &NSEvent) {
             self.dispatch(Event::MouseWheel {
                 pos: self.point(event),
-                dx: event.deltaX() as f32,
-                dy: event.deltaY() as f32,
+                dx: event.scrollingDeltaX() as f32,
+                dy: event.scrollingDeltaY() as f32,
             });
         }
 

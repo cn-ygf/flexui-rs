@@ -229,6 +229,12 @@ pub trait Widget {
     /// 绘制自身内容（文字/图标等）。背景/边框/子控件由统一管线负责。
     fn paint_content(&self, _cv: &mut dyn Canvas, _style: &StyleSpec) {}
 
+    /// 子控件绘制与命中的可见区域；滚动容器覆写为去除 padding 后的视口。
+    fn children_viewport(&self) -> Rect { self.base().rect }
+
+    /// 子控件绘制完成后的前景层；滚动条等需要覆盖在内容之上的元素使用。
+    fn paint_foreground(&self, _cv: &mut dyn Canvas, _style: &StyleSpec) {}
+
     /// 自定义事件处理（默认不拦截）。
     fn on_event(&mut self, _ev: &Event) -> EventFlow {
         EventFlow::Ignored

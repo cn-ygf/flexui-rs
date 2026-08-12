@@ -31,7 +31,7 @@ pub use widget::{
 pub use widgets::{
     build_menu, build_menu_labels, build_menu_styled, build_tooltip, Button, CheckBox, ComboBox,
     Edit, EditConfig, HBox, Image, Label, ListView, MenuItem, MenuStyle, Panel, Progress, Radio,
-    ScrollView, Separator, Slider, TabBox, VBox,
+    ScrollBarStyle, ScrollView, Separator, Slider, TabBox, VBox,
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,

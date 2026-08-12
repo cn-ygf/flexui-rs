@@ -30,10 +30,10 @@
           <Panel width="36" height="44" normal-bgimage="label/phone_normal@2.00x.png"
                  focus-bgimage="label/phone_hover@2.00x.png" normal-bgfit="center" focus-bgfit="center"/>
           <HBox name="nation_code" width="68" height="44" align="center" spacing="0" focus-within="true">
-            <Button name="nation_code_text" text="+86" width="50" height="44" padding="0 0 0 4"
+            <Button name="nation_code_text" text="+86" width="50" height="44" padding="0 0 0 4" focusable="false"
                     normal-fgcolor="#9095BB" hot-fgcolor="#FFFFFF" focus-fgcolor="#FFFFFF"
                     font-size="14" normal-textalign="left"/>
-            <Button name="nation_code_arrow" width="6" height="4"
+            <Button name="nation_code_arrow" width="6" height="4" focusable="false"
                     normal-bgimage="button/nation_code_normal.svg"
                     hot-bgimage="button/nation_code_hover.svg"
                     focus-bgimage="button/nation_code_hover.svg" normal-bgfit="stretch"

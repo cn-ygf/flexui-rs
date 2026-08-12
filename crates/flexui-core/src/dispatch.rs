@@ -98,6 +98,8 @@ pub struct Overlay {
     pub owner: Option<WidgetId>,
     /// 点击浮层外部是否关闭（菜单恒为 true）。
     pub dismiss_outside: bool,
+    /// 浮层相对窗口边缘的安全边距。
+    pub window_margin: flexui_geometry::Insets,
 }
 
 /// 被动浮层（Tooltip）：只绘制、从不参与事件；由 hover + 定时器控制显隐。
@@ -270,7 +272,13 @@ impl Dispatcher {
             &style,
             selected_name.as_deref(),
         );
-        self.overlays.push(Overlay { root: menu, anchor, owner: None, dismiss_outside: true });
+        self.overlays.push(Overlay {
+            root: menu,
+            anchor,
+            owner: None,
+            dismiss_outside: true,
+            window_margin: style.window_margin,
+        });
         self.needs_redraw = true;
     }
 
@@ -279,17 +287,18 @@ impl Dispatcher {
     pub fn paint_overlays(&mut self, cv: &mut dyn Canvas, window: Size) {
         for i in 0..self.overlays.len() {
             let anchor = self.overlays[i].anchor;
+            let window_margin = self.overlays[i].window_margin;
             let min_w = anchor.size.width; // 菜单至少与锚点同宽
             let node = self.overlays[i].root.as_mut();
             let desired = node.measure(window, &*cv);
-            let rect = place_overlay(anchor, desired, window, min_w);
+            let rect = place_overlay(anchor, desired, window, min_w, window_margin);
             layout_node(node, rect, &*cv);
             paint_tree(&*node, cv);
         }
         if let Some(tip) = &mut self.tooltip {
             let node = tip.root.as_mut();
             let desired = node.measure(window, &*cv);
-            let rect = place_overlay(tip.anchor, desired, window, 0.0);
+            let rect = place_overlay(tip.anchor, desired, window, 0.0, flexui_geometry::Insets::default());
             layout_node(node, rect, &*cv);
             paint_tree(&*node, cv);
         }
@@ -389,6 +398,11 @@ impl Dispatcher {
             }
             Event::KeyDown { key, .. } if *key == crate::event::keys::ESCAPE => {
                 keep = false;
+            }
+            Event::MouseWheel { pos, dy, .. }
+                if scroll_tree_at(ov.root.as_mut(), *pos, *dy).is_some() =>
+            {
+                self.needs_redraw = true;
             }
             _ => {}
         }
@@ -676,23 +690,8 @@ impl Dispatcher {
 
     /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
     fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dy: f32) {
-        // 找到包含该点的最深可滚动容器 id。
-        let mut target: Option<WidgetId> = None;
-        for_each_visible_mut(root, true, &mut |w| {
-            let b = w.base();
-            if w.is_scrollable() && b.rect.contains(pos) {
-                target = Some(b.id); // 后序覆盖 → 保留最深（子在父后遍历）
-            }
-        });
-        if let Some(id) = target {
-            let mut rect = None;
-            visit_mut(root, id, &mut |w| {
-                rect = Some(w.base().rect);
-                w.scroll_by(dy);
-            });
-            if let Some(r) = rect {
-                self.mark_dirty(r); // 只脏滚动区
-            }
+        if let Some(rect) = scroll_tree_at(root, pos, dy) {
+            self.mark_dirty(rect); // 只脏滚动区
         }
     }
 
@@ -829,6 +828,7 @@ impl Dispatcher {
                 anchor,
                 owner: Some(id),
                 dismiss_outside: true,
+                window_margin: flexui_geometry::Insets::default(),
             });
             self.needs_redraw = true;
             return;
@@ -892,9 +892,11 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
     if !b.visible || !b.rect.contains(p) {
         return None;
     }
-    for child in b.children.iter().rev() {
-        if let Some(id) = hit_test(child.as_ref(), p) {
-            return Some(id);
+    if node.children_viewport().contains(p) {
+        for child in b.children.iter().rev() {
+            if let Some(id) = hit_test(child.as_ref(), p) {
+                return Some(id);
+            }
         }
     }
     match b.hit {
@@ -906,30 +908,57 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
 /// 读取控件的可动画属性值。
 /// 写入控件的可动画属性值（带各自的取值约束）。
 /// 计算浮层摆放矩形：优先锚点下方、放不下则上翻；X 夹到窗内；至少 min_width 宽。
-fn place_overlay(anchor: Rect, desired: Size, window: Size, min_width: f32) -> Rect {
-    let w = desired.width.max(min_width).min(window.width);
-    let h = desired.height.min(window.height);
+fn place_overlay(
+    anchor: Rect,
+    desired: Size,
+    window: Size,
+    min_width: f32,
+    margin: flexui_geometry::Insets,
+) -> Rect {
+    let available_w = (window.width - margin.horizontal()).max(0.0);
+    let available_h = (window.height - margin.vertical()).max(0.0);
+    let w = desired.width.max(min_width).min(available_w);
+    let h = desired.height.min(available_h);
     // X：锚点左对齐，超出右边则左移，再夹到 0。
     let mut x = anchor.left();
-    if x + w > window.width {
-        x = window.width - w;
+    if x + w > window.width - margin.right {
+        x = window.width - margin.right - w;
     }
-    if x < 0.0 {
-        x = 0.0;
+    if x < margin.left {
+        x = margin.left;
     }
     // Y：优先锚点下方；放不下则上翻到上方；再放不下贴底。
     let below = anchor.bottom();
-    let y = if below + h <= window.height {
+    let y = if below + h <= window.height - margin.bottom {
         below
     } else {
         let above = anchor.top() - h;
-        if above >= 0.0 {
+        if above >= margin.top {
             above
         } else {
-            (window.height - h).max(0.0)
+            (window.height - margin.bottom - h).max(margin.top)
         }
     };
     Rect::new(x, y, w, h)
+}
+
+/// 滚动光标下最深的可滚动控件，返回实际发生变化的视口矩形。
+fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<Rect> {
+    let mut target = None;
+    for_each_visible_mut(root, true, &mut |widget| {
+        if widget.is_scrollable() && widget.children_viewport().contains(pos) {
+            target = Some(widget.base().id);
+        }
+    });
+    let id = target?;
+    let mut changed_rect = None;
+    visit_mut(root, id, &mut |widget| {
+        let viewport = widget.children_viewport();
+        if widget.scroll_by(dy) {
+            changed_rect = Some(viewport);
+        }
+    });
+    changed_rect
 }
 
 /// 两矩形的包围并集。
@@ -1198,15 +1227,84 @@ mod tests {
     fn place_overlay_下方上翻夹取() {
         let win = Size::new(200.0, 100.0);
         // 下方够放：y=锚点底部；宽取 max(desired,min)。
-        let r = place_overlay(Rect::new(10.0, 10.0, 50.0, 20.0), Size::new(40.0, 30.0), win, 50.0);
+        let r = place_overlay(Rect::new(10.0, 10.0, 50.0, 20.0), Size::new(40.0, 30.0), win, 50.0, flexui_geometry::Insets::default());
         assert_eq!(r.top(), 30.0);
         assert_eq!(r.size.width, 50.0);
         // 下方放不下 → 上翻到锚点上方。
-        let r2 = place_overlay(Rect::new(10.0, 80.0, 50.0, 15.0), Size::new(40.0, 30.0), win, 0.0);
+        let r2 = place_overlay(Rect::new(10.0, 80.0, 50.0, 15.0), Size::new(40.0, 30.0), win, 0.0, flexui_geometry::Insets::default());
         assert_eq!(r2.top(), 50.0);
         // 锚点靠右 → X 夹到窗内。
-        let r3 = place_overlay(Rect::new(180.0, 10.0, 10.0, 10.0), Size::new(40.0, 10.0), win, 0.0);
+        let r3 = place_overlay(Rect::new(180.0, 10.0, 10.0, 10.0), Size::new(40.0, 10.0), win, 0.0, flexui_geometry::Insets::default());
         assert_eq!(r3.left(), 160.0);
+        // 原版登录菜单在 580 宽窗口内保留 14px 右边距。
+        let r4 = place_overlay(
+            Rect::new(326.0, 116.0, 68.0, 44.0),
+            Size::new(294.0, 228.0),
+            Size::new(580.0, 416.0),
+            68.0,
+            flexui_geometry::Insets::new(0.0, 0.0, 14.0, 28.0),
+        );
+        assert_eq!(r4, Rect::new(272.0, 160.0, 294.0, 228.0));
+    }
+
+    #[test]
+    fn 浮层滚轮只滚菜单且保持打开() {
+        let mut root = ScrollView::new()
+            .push(Panel::new().height(200.0))
+            .height(100.0);
+        layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &FakeCanvas);
+
+        let style = crate::widgets::MenuStyle {
+            width: Some(160.0),
+            height: Some(100.0),
+            row_height: 32.0,
+            panel_padding: flexui_geometry::Insets::all(4.0),
+            ..Default::default()
+        };
+        let items = (0..8)
+            .map(|i| (format!("item {i}"), format!("item_{i}")))
+            .collect();
+        let mut disp = Dispatcher::new();
+        disp.open_styled_menu(
+            Rect::new(20.0, 20.0, 80.0, 20.0),
+            items,
+            Some(style),
+            None,
+        );
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+        let menu_viewport = disp.overlays[0].root.children_viewport();
+        let main_before = root.scroll_position();
+        disp.handle(
+            &mut root,
+            &Event::MouseWheel {
+                pos: Point::new(menu_viewport.left() + 20.0, menu_viewport.top() + 20.0),
+                dx: 0.0,
+                dy: -32.0,
+            },
+        );
+        assert!(disp.has_overlays());
+        assert_eq!(disp.overlays[0].root.scroll_position(), Some(32.0));
+        assert_eq!(root.scroll_position(), main_before);
+    }
+
+    #[test]
+    fn 滚出子视口的菜单项不能命中() {
+        let style = crate::widgets::MenuStyle {
+            width: Some(160.0),
+            height: Some(100.0),
+            row_height: 32.0,
+            panel_padding: flexui_geometry::Insets::new(10.0, 16.0, 10.0, 16.0),
+            ..Default::default()
+        };
+        let items = (0..5)
+            .map(|i| (format!("item {i}"), format!("item_{i}")))
+            .collect::<Vec<_>>();
+        let mut menu = crate::widgets::build_menu_styled(&items, None, &style, None);
+        layout_node(menu.as_mut(), Rect::new(0.0, 0.0, 160.0, 100.0), &FakeCanvas);
+        assert!(menu.scroll_by(-20.0));
+        let padding_point = Point::new(20.0, 10.0);
+        assert!(menu.base().children[0].base().rect.contains(padding_point));
+        assert_ne!(hit_test(menu.as_ref(), padding_point), Some(menu.base().children[0].base().id));
     }
 
     #[test]

@@ -876,8 +876,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam >> 16) & 0xFFFF) as u16 as i16;
-            // 一格(120) ≈ 4px 逻辑；lparam 为屏幕坐标 → 客户区 → 逻辑坐标。
-            let dy = delta as f32 / 30.0;
+            // 一格滚动一行菜单项；lparam 为屏幕坐标 → 客户区 → 逻辑坐标。
+            let dy = delta as f32 / 120.0 * 32.0;
             let mut pt = POINT {
                 x: (lparam & 0xFFFF) as u16 as i16 as i32,
                 y: ((lparam >> 16) & 0xFFFF) as u16 as i16 as i32,
