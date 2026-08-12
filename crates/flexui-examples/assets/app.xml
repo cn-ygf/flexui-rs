@@ -30,8 +30,9 @@
         <Button text="云存档" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
                 normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
         <Panel flex="1" mouse="transparent"/>
-        <Edit name="search" text="搜索" width="168" height="36" padding="0 18"
-              normal-bgcolor="#30366E" normal-fgcolor="#929AC2" corner-radius="18" font-size="15"/>
+        <Edit name="search" placeholder="搜索" width="168" height="36" padding="0 18"
+              normal-bgcolor="#30366E" normal-fgcolor="#FFFFFF" placeholder-fgcolor="#929AC2"
+              corner-radius="18" font-size="15"/>
         <Button name="open_login" tooltip="登录" width="38" height="38"
                 normal-bgimage="label/user_center.svg" hot-bgimage="label/user_center.svg"
                 normal-bgfit="stretch"/>
@@ -115,12 +116,12 @@
           <HBox width="256" height="44" normal-bgcolor="#222857" corner-radius="6">
             <Label text="+86  ▾" width="76" height="44" normal-fgcolor="#B7BBD9" font-size="14"
                    normal-textalign="center"/>
-            <Edit name="edit_phone" text="请输入手机号" flex="1" height="44" padding="0 10"
-                  normal-bgcolor="#222857" normal-fgcolor="#9095BB" font-size="14"/>
+            <Edit name="edit_phone" placeholder="请输入手机号" flex="1" height="44" padding="0 10"
+                  normal-bgcolor="#222857" normal-fgcolor="#FFFFFF" placeholder-fgcolor="#9095BB" font-size="14"/>
           </HBox>
           <HBox width="256" height="44" normal-bgcolor="#222857" corner-radius="6">
-            <Edit name="edit_code" text="请输入验证码" flex="1" height="44" padding="0 12"
-                  normal-bgcolor="#222857" normal-fgcolor="#9095BB" font-size="14"/>
+            <Edit name="edit_code" placeholder="请输入验证码" flex="1" height="44" padding="0 12"
+                  normal-bgcolor="#222857" normal-fgcolor="#FFFFFF" placeholder-fgcolor="#9095BB" font-size="14"/>
             <Button text="获取验证码" width="104" height="44" normal-bgcolor="#222857"
                     normal-fgcolor="#00D2C4" hot-fgcolor="#73D3CB" font-size="14"/>
           </HBox>

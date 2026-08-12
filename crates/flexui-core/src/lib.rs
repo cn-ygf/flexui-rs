@@ -23,7 +23,7 @@ pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};
 pub use paint::{paint_tree, paint_tree_in_rect};
 pub use sizing::{Align, Justify, Sizing};
-pub use style::{BaseState, Gradient, Shadow, StyleSet, StyleSpec, VisualState};
+pub use style::{BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec, VisualState};
 pub use widget::{
     find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable, Container,
     HitPolicy, Node, TextControl, Widget, WidgetId, WidgetRole,

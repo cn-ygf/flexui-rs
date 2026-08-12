@@ -78,10 +78,11 @@ impl Widget for ComboBox {
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
         // 文本区留出右侧箭头宽度。
         let arrow_w = 18.0;
+        let text_left = 10.0;
         let text_rect = Rect::new(
-            content.left(),
+            content.left() + text_left,
             content.top(),
-            (content.size.width - arrow_w).max(0.0),
+            (content.size.width - arrow_w - text_left).max(0.0),
             content.size.height,
         );
         draw_aligned_text(cv, &self.base.text, text_rect, &self.base.font, color, TextAlign::Left, true);
@@ -113,6 +114,19 @@ common_builders!(ComboBox);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flexui_geometry::{Corners, Point};
+    use flexui_gfx::Font;
+    use std::cell::RefCell;
+
+    struct TextOriginCanvas { origin: RefCell<Option<Point>> }
+    impl Canvas for TextOriginCanvas {
+        fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+        fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+        fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+        fn draw_text(&mut self, _t: &str, origin: Point, _f: &Font, _c: Color) { *self.origin.borrow_mut() = Some(origin); }
+        fn measure_text(&self, text: &str, font: &Font) -> Size { Size::new(text.chars().count() as f32 * font.size * 0.6, font.size * 1.2) }
+    }
 
     #[test]
     fn combobox_选项与选择() {
@@ -131,5 +145,14 @@ mod tests {
     fn combobox_无选项不弹菜单() {
         let c = ComboBox::new();
         assert_eq!(c.menu_items(), None);
+    }
+
+    #[test]
+    fn combobox_text_keeps_left_inset() {
+        let mut combo = ComboBox::new().options(["简体中文"]);
+        let mut cv = TextOriginCanvas { origin: RefCell::new(None) };
+        combo.base_mut().rect = Rect::new(20.0, 0.0, 150.0, 36.0);
+        combo.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.origin.borrow().unwrap().x, 30.0);
     }
 }

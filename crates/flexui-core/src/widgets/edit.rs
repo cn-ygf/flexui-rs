@@ -7,11 +7,12 @@ use crate::common_builders;
 use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
-use crate::style::StyleSpec;
+use crate::style::{PlaceholderStyleSet, StyleSpec};
 use crate::widget::{Base, TextControl, Widget, WidgetRole};
 
 /// 选区高亮色（半透明蓝）。
 const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
+const PLACEHOLDER_COLOR: Color = Color::rgba(0.50, 0.50, 0.50, 1.0);
 
 /// 单行的字符边界缓存：start 为该行首字符在整段文本中的索引，offsets 为行内每个
 /// 字符边界的 x 偏移（累积前缀宽度，长度=行内字符数+1）。
@@ -44,6 +45,16 @@ impl Edit {
     pub fn text(mut self, t: impl Into<String>) -> Self {
         self.base.text = t.into();
         self.base.cursor = self.base.text.chars().count();
+        self
+    }
+    /// 设置内容为空时显示的占位文本。
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        self.base.placeholder = text.into();
+        self
+    }
+    /// 设置占位文本的分状态字体样式。
+    pub fn placeholder_style(mut self, style: PlaceholderStyleSet) -> Self {
+        self.base.placeholder_style = style;
         self
     }
     /// 设为多行文本（Enter 换行）。
@@ -236,6 +247,18 @@ impl Edit {
         let color = style.fg_color.unwrap_or(Color::BLACK);
         let line_h = self.line_height();
         let caret_h = self.base.font.size;
+        if self.shows_placeholder() {
+            let style = self.base.placeholder_style.resolve(self.base.visual_state());
+            let font = style.resolve_font(&self.base.font);
+            let line_rect = Rect::new(content.left(), content.top(), content.size.width, line_h);
+            draw_aligned_text(cv, &self.base.placeholder, line_rect, &font,
+                style.fg_color.unwrap_or(PLACEHOLDER_COLOR), TextAlign::Left, false);
+            if self.base.focused && self.base.caret_on {
+                let y = content.top() + (line_h - caret_h) / 2.0;
+                cv.fill_rect(Rect::new(content.left() + 1.0, y, 1.5, caret_h), color);
+            }
+            return;
+        }
         let sel = self.base.sel_range();
         let (cur_line, cur_col) = self.pos_of(self.base.cursor);
 
@@ -269,6 +292,10 @@ impl Edit {
             y += line_h;
             base_idx += ll + 1;
         }
+    }
+
+    fn shows_placeholder(&self) -> bool {
+        self.base.text.is_empty() && self.base.marked.is_empty() && !self.base.placeholder.is_empty()
     }
 }
 
@@ -323,6 +350,16 @@ impl Widget for Edit {
         let color = style.fg_color.unwrap_or(Color::BLACK);
         let caret_h = self.base.font.size;
         let cy = content.top() + (content.size.height - caret_h) / 2.0;
+        if self.shows_placeholder() {
+            let style = self.base.placeholder_style.resolve(self.base.visual_state());
+            let font = style.resolve_font(&self.base.font);
+            draw_aligned_text(cv, &self.base.placeholder, content, &font,
+                style.fg_color.unwrap_or(PLACEHOLDER_COLOR), TextAlign::Left, false);
+            if self.base.focused && self.base.caret_on {
+                cv.fill_rect(Rect::new(content.left() + 1.0, cy.max(content.top()), 1.5, caret_h), color);
+            }
+            return;
+        }
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
         if self.base.marked.is_empty() {
             if let Some((lo, hi)) = self.base.sel_range() {
@@ -502,14 +539,18 @@ mod tests {
     /// 记录最后一次 draw_text 文本，用于验证 IME 组合串已内联绘制。
     struct RecCanvas {
         last_text: RefCell<String>,
+        last_font: RefCell<Option<Font>>,
+        last_color: RefCell<Option<Color>>,
     }
     impl Canvas for RecCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
         fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
-        fn draw_text(&mut self, t: &str, _o: Point, _f: &Font, _c: Color) {
+        fn draw_text(&mut self, t: &str, _o: Point, f: &Font, c: Color) {
             *self.last_text.borrow_mut() = t.to_string();
+            *self.last_font.borrow_mut() = Some(f.clone());
+            *self.last_color.borrow_mut() = Some(c);
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
@@ -523,7 +564,7 @@ mod tests {
         e.base_mut().cursor = 1;
         e.base_mut().marked = "b".to_string();
         e.base_mut().focused = true;
-        let cv = RecCanvas { last_text: RefCell::new(String::new()) };
+        let cv = RecCanvas { last_text: RefCell::new(String::new()), last_font: RefCell::new(None), last_color: RefCell::new(None) };
         let mut cv = cv;
         layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let style = StyleSpec::default();
@@ -532,10 +573,52 @@ mod tests {
         assert_eq!(e.base().text, "ac", "组合串不改动已提交文本");
     }
 
+    fn rec_canvas() -> RecCanvas {
+        RecCanvas { last_text: RefCell::new(String::new()), last_font: RefCell::new(None), last_color: RefCell::new(None) }
+    }
+
     use crate::event::{keys, Event, Mods};
 
     fn kd(key: u32, shift: bool) -> Event {
         Event::KeyDown { key, mods: Mods { shift, ..Default::default() } }
+    }
+
+    #[test]
+    fn placeholder_only_draws_for_empty_text_and_returns_after_delete() {
+        let mut edit = Edit::new().placeholder("请输入");
+        let mut cv = rec_canvas();
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        edit.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(*cv.last_text.borrow(), "请输入");
+        assert!(edit.base().text.is_empty(), "占位文本不能成为输入内容");
+        edit.on_event(&Event::Char { ch: 'A' });
+        edit.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(*cv.last_text.borrow(), "A");
+        edit.on_event(&kd(keys::BACKSPACE, false));
+        edit.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(*cv.last_text.borrow(), "请输入");
+    }
+
+    #[test]
+    fn placeholder_draws_complete_font_for_current_state() {
+        use crate::style::{BaseState, PlaceholderStyleSpec, VisualState};
+        let mut styles = PlaceholderStyleSet::new().with_normal(PlaceholderStyleSpec {
+            font_family: Some("Microsoft YaHei".to_string()), font_size: Some(13.0),
+            fg_color: Some(Color::WHITE), bold: Some(true), italic: Some(false), underline: Some(true),
+        });
+        styles.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
+            font_size: Some(15.0), fg_color: Some(Color::BLACK), italic: Some(true), ..Default::default()
+        });
+        let mut edit = Edit::new().placeholder("搜索").placeholder_style(styles);
+        edit.base_mut().hover = true;
+        let mut cv = rec_canvas();
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        edit.paint_content(&mut cv, &StyleSpec::default());
+        let font = cv.last_font.borrow().clone().unwrap();
+        assert_eq!(font.family.as_deref(), Some("Microsoft YaHei"));
+        assert_eq!(font.size, 15.0);
+        assert!(font.bold && font.italic && font.underline);
+        assert_eq!(*cv.last_color.borrow(), Some(Color::BLACK));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use flexui_gfx::{Canvas, Font};
 
 use crate::event::{Event, EventFlow};
 use crate::sizing::{Align, Justify, Sizing};
-use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
+use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
 
 /// 控件唯一 id。
 pub type WidgetId = u64;
@@ -68,6 +68,10 @@ pub struct Base {
     pub role: WidgetRole,
     /// 文本内容（Label/Button/Edit/CheckBox/Radio 复用）。
     pub text: String,
+    /// 输入框内容为空时显示的占位文本，仅 Edit 使用。
+    pub placeholder: String,
+    /// 输入框占位文本的分状态字体样式，仅 Edit 使用。
+    pub placeholder_style: PlaceholderStyleSet,
     /// 文本光标位置（字符索引，Edit 用）。
     pub cursor: usize,
     /// 选区锚点（字符索引）。选区在 anchor 与 cursor 之间；None 或与 cursor 相等表示无选区。
@@ -144,6 +148,8 @@ impl Base {
             name: None,
             role,
             text: String::new(),
+            placeholder: String::new(),
+            placeholder_style: PlaceholderStyleSet::new(),
             cursor: 0,
             sel_anchor: None,
             multiline: false,

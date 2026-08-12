@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use flexui_core::{
     Align, Base, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, Gradient, HBox,
     HitPolicy, Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel,
-    Progress, Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox,
+    PlaceholderStyleSet, PlaceholderStyleSpec, Progress, Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox,
     TextAlign, TitlebarMode, VBox, VisualState, WidgetId, WindowConfig, WindowDragRegion,
 };
 use flexui_resource::ResourceManager;
@@ -399,6 +399,7 @@ fn make_node(tag: &str, el: &Element, res: Option<&ResourceManager>) -> Result<N
 fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Option<&ResourceManager>) {
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
+    let mut placeholder_slots: HashMap<VisualState, PlaceholderStyleSpec> = HashMap::new();
 
     for (k, v) in attrs {
         let key = k.to_lowercase();
@@ -409,6 +410,7 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
             | "row-height" => {}
             "name" => base.name = Some(v.clone()),
             "tooltip" => base.tooltip = Some(v.clone()),
+            "placeholder" => base.placeholder = v.clone(),
             "value" => base.value = v.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
             "font-size" | "fontsize" => {
                 if let Ok(s) = v.parse::<f32>() {
@@ -466,7 +468,9 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
                 }
             }
             // 其余按分状态样式属性解析。
-            _ => apply_style_attr(&mut slots, &key, v, res),
+            _ => if !apply_placeholder_style_attr(&mut placeholder_slots, &key, v) {
+                apply_style_attr(&mut slots, &key, v, res)
+            },
         }
     }
 
@@ -478,6 +482,36 @@ fn apply_attrs(base: &mut Base, tag: &str, attrs: &[(String, String)], res: Opti
         }
         base.style = set;
     }
+    if !placeholder_slots.is_empty() {
+        let mut set = PlaceholderStyleSet::new();
+        for (vs, spec) in placeholder_slots { set.set(vs, spec); }
+        base.placeholder_style = set;
+    }
+}
+
+/// 解析 `[state-][focus-][selected-]placeholder-*` 属性。
+fn apply_placeholder_style_attr(slots: &mut HashMap<VisualState, PlaceholderStyleSpec>, key: &str, val: &str) -> bool {
+    let parts: Vec<&str> = key.split('-').collect();
+    let (mut idx, mut state, mut focused, mut selected) = (0, BaseState::Normal, false, false);
+    while idx < parts.len() {
+        if let Some(parsed) = parse_state(parts[idx]) { state = parsed; }
+        else if parts[idx] == "focus" { focused = true; }
+        else if parts[idx] == "selected" { selected = true; }
+        else { break; }
+        idx += 1;
+    }
+    if parts.get(idx) != Some(&"placeholder") || idx + 1 >= parts.len() { return false; }
+    let spec = slots.entry(VisualState::with_selected(state, focused, selected)).or_default();
+    match parts[idx + 1..].join("").as_str() {
+        "fontfamily" | "font" => spec.font_family = Some(val.to_string()),
+        "fontsize" => spec.font_size = val.parse().ok(),
+        "fgcolor" | "color" => spec.fg_color = parse_color(val),
+        "bold" => spec.bold = Some(parse_bool(val)),
+        "italic" => spec.italic = Some(parse_bool(val)),
+        "underline" => spec.underline = Some(parse_bool(val)),
+        _ => return false,
+    }
+    true
 }
 
 /// 解析形如 `[state-][focus-][selected-]prop` 的样式属性并写入对应槽。
@@ -1023,6 +1057,28 @@ mod tests {
         assert!(f.bold && f.italic && f.underline);
         assert_eq!(f.size, 20.0);
         assert_eq!(f.family.as_deref(), Some("Menlo"));
+    }
+
+    #[test]
+    fn xml_edit_placeholder_base_and_state_font_styles() {
+        let xml = r##"<Edit placeholder="请输入手机号" placeholder-font-family="Microsoft YaHei"
+            placeholder-font-size="14" placeholder-fgcolor="#9095BB" placeholder-bold="true"
+            placeholder-italic="false" placeholder-underline="true" hot-placeholder-font-size="16"
+            hot-placeholder-fgcolor="#FFFFFF" focus-placeholder-italic="true" disabled-placeholder-bold="false"/>"##;
+        let res = load_str(xml, &Context::new()).unwrap();
+        let base = res.root.base();
+        assert_eq!(base.placeholder, "请输入手机号");
+        let normal = base.placeholder_style.resolve(VisualState::default());
+        assert_eq!(normal.font_family.as_deref(), Some("Microsoft YaHei"));
+        assert_eq!(normal.font_size, Some(14.0));
+        assert_eq!(normal.fg_color, Some(Color::from_u8(0x90, 0x95, 0xBB, 0xFF)));
+        assert_eq!((normal.bold, normal.italic, normal.underline), (Some(true), Some(false), Some(true)));
+        let hot = base.placeholder_style.resolve(VisualState::new(BaseState::Hot, false));
+        assert_eq!((hot.font_size, hot.fg_color, hot.bold), (Some(16.0), Some(Color::WHITE), Some(true)));
+        let focused = base.placeholder_style.resolve(VisualState::new(BaseState::Normal, true));
+        assert_eq!((focused.italic, focused.font_size), (Some(true), Some(14.0)));
+        let disabled = base.placeholder_style.resolve(VisualState::new(BaseState::Disabled, false));
+        assert_eq!((disabled.bold, disabled.underline), (Some(false), Some(true)));
     }
 
     #[test]

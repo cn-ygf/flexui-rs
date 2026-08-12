@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use flexui_geometry::{Color, Corners};
-use flexui_gfx::{ImageFit, ImageSource, TextAlign};
+use flexui_gfx::{Font, ImageFit, ImageSource, TextAlign};
 
 /// 基础状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -85,6 +85,87 @@ pub struct StyleSpec {
     pub gradient: Option<Gradient>,
     /// 投影。
     pub shadow: Option<Shadow>,
+}
+
+/// Edit 占位文本的单个状态样式。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlaceholderStyleSpec {
+    pub font_family: Option<String>,
+    pub font_size: Option<f32>,
+    pub fg_color: Option<Color>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+}
+
+impl PlaceholderStyleSpec {
+    fn fill_from(&self, base: &PlaceholderStyleSpec) -> Self {
+        Self {
+            font_family: self.font_family.clone().or_else(|| base.font_family.clone()),
+            font_size: self.font_size.or(base.font_size),
+            fg_color: self.fg_color.or(base.fg_color),
+            bold: self.bold.or(base.bold),
+            italic: self.italic.or(base.italic),
+            underline: self.underline.or(base.underline),
+        }
+    }
+
+    /// 把稀疏字体样式覆盖到控件字体上。
+    pub fn resolve_font(&self, base: &Font) -> Font {
+        Font {
+            family: self.font_family.clone().or_else(|| base.family.clone()),
+            size: self.font_size.unwrap_or(base.size),
+            bold: self.bold.unwrap_or(base.bold),
+            italic: self.italic.unwrap_or(base.italic),
+            underline: self.underline.unwrap_or(base.underline),
+        }
+    }
+}
+
+/// Edit 占位文本的分状态样式集。
+#[derive(Debug, Clone, Default)]
+pub struct PlaceholderStyleSet {
+    normal: PlaceholderStyleSpec,
+    slots: HashMap<VisualState, PlaceholderStyleSpec>,
+}
+
+impl PlaceholderStyleSet {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn set(&mut self, state: VisualState, spec: PlaceholderStyleSpec) {
+        if state == VisualState::default() {
+            self.normal = spec;
+        } else {
+            self.slots.insert(state, spec);
+        }
+    }
+
+    pub fn with_normal(mut self, spec: PlaceholderStyleSpec) -> Self {
+        self.normal = spec;
+        self
+    }
+
+    fn slot(&self, state: VisualState) -> Option<&PlaceholderStyleSpec> {
+        if state == VisualState::default() { Some(&self.normal) } else { self.slots.get(&state) }
+    }
+
+    /// 按视觉状态解析，并对缺省字段回退到 normal。
+    pub fn resolve(&self, state: VisualState) -> PlaceholderStyleSpec {
+        let chain = [
+            state,
+            VisualState::with_selected(state.base, false, state.selected),
+            VisualState::with_selected(state.base, state.focused, false),
+            VisualState::new(state.base, false),
+        ];
+        let mut effective = PlaceholderStyleSpec::default();
+        for candidate in chain {
+            if let Some(spec) = self.slot(candidate) {
+                effective = spec.clone();
+                break;
+            }
+        }
+        effective.fill_from(&self.normal)
+    }
 }
 
 impl StyleSpec {
@@ -225,5 +306,25 @@ mod tests {
         let r = set.resolve(VisualState::new(BaseState::Hot, false));
         assert_eq!(r.bg_color, Some(Color::BLACK)); // 用自己的
         assert_eq!(r.border_width, Some(1.0)); // 从 Normal 继承
+    }
+
+    #[test]
+    fn placeholder_state_fields_fall_back_to_normal() {
+        let mut set = PlaceholderStyleSet::new().with_normal(PlaceholderStyleSpec {
+            font_family: Some("Microsoft YaHei".to_string()),
+            font_size: Some(14.0), fg_color: Some(Color::WHITE),
+            bold: Some(true), italic: Some(false), underline: Some(true),
+        });
+        set.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
+            font_size: Some(16.0), fg_color: Some(Color::BLACK), italic: Some(true),
+            ..Default::default()
+        });
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.font_family.as_deref(), Some("Microsoft YaHei"));
+        assert_eq!(resolved.font_size, Some(16.0));
+        assert_eq!(resolved.fg_color, Some(Color::BLACK));
+        assert_eq!(resolved.bold, Some(true));
+        assert_eq!(resolved.italic, Some(true));
+        assert_eq!(resolved.underline, Some(true));
     }
 }
