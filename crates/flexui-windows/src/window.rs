@@ -18,8 +18,7 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, ValidateRect, HDC,
-    PAINTSTRUCT,
+    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, ValidateRect, HDC, PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -41,8 +40,6 @@ use crate::gdiplus::{Gdiplus, OffscreenBitmap};
 
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
-/// 延迟到当前鼠标消息完成后再最小化，确保 DWM 缓存的是稳定的最终帧。
-const WM_APP_MINIMIZE: u32 = WM_APP + 1;
 /// 还原消息栈退出后再刷新最小化期间发生的内容更新。
 const WM_APP_RESTORE_REDRAW: u32 = WM_APP + 2;
 
@@ -79,13 +76,13 @@ impl WindowHandle for WinWindowHandle {
         unsafe { PostMessageW(self.hwnd, WM_CLOSE, 0, 0) };
     }
     fn minimize(&mut self) {
-        unsafe { PostMessageW(self.hwnd, WM_APP_MINIMIZE, 0, 0) };
+        unsafe { PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_MINIMIZE as usize, 0) };
     }
     fn maximize(&mut self) {
-        unsafe { ShowWindow(self.hwnd, SW_MAXIMIZE) };
+        unsafe { PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_MAXIMIZE as usize, 0) };
     }
     fn restore(&mut self) {
-        unsafe { ShowWindow(self.hwnd, SW_RESTORE) };
+        unsafe { PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_RESTORE as usize, 0) };
     }
 }
 
@@ -217,7 +214,12 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
     let frameless = config.titlebar != TitlebarMode::System;
     let keep_dwm_frame = config.resizable || config.system_corners || config.system_shadow;
     let mut style = if frameless {
-        let mut value = WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+        // 保留 WS_CAPTION 的标准顶层窗口语义，让 Shell/DWM 提供最小化、最大化和还原动画；
+        // 可见标题栏仍由 WM_NCCALCSIZE 完全移除。
+        let mut value = WS_OVERLAPPED | WS_CAPTION | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX;
+        if config.resizable {
+            value |= WS_MAXIMIZEBOX;
+        }
         if keep_dwm_frame {
             value |= WS_THICKFRAME;
         }
@@ -290,6 +292,17 @@ unsafe fn create_window(spec: NewWindow) -> HWND {
 
     if frameless {
         configure_frameless_dwm(hwnd, config.system_corners, config.system_shadow);
+        // CreateWindowExW 期间 AppState 尚未挂到 HWND，首次 WM_NCCALCSIZE 仍按系统标题栏计算。
+        // 状态就绪后强制重算边框，隐藏标题栏但保留 WS_CAPTION 的 Shell/DWM 动画语义。
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
     }
 
     DragAcceptFiles(hwnd, 1);
@@ -398,7 +411,8 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) {
     }
     // 最小化期间保留 DWM 的最后一帧，不积累恢复后立即触发的绘制请求。
     if st.minimized {
-        st.redraw_after_restore |= need || opened || !acts.is_empty() || !doubles.is_empty() || dirty.is_some();
+        st.redraw_after_restore |=
+            need || opened || !acts.is_empty() || !doubles.is_empty() || dirty.is_some();
         return;
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
@@ -589,14 +603,12 @@ unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
     match msg {
-        // 无边框窗口没有需要随激活状态重绘的非客户区；避免 WS_THICKFRAME 失焦时刷出白边。
-        WM_NCACTIVATE if !state.is_null() && (*state).frameless => 1,
-        // 自绘标题栏占满整个窗口，同时保留 WS_THICKFRAME 供 DWM 生成圆角、阴影和 Snap。
-        WM_NCCALCSIZE
-            if GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & WS_POPUP != 0 =>
-        {
-            0
+        // 交给默认过程维护激活状态；lParam=-1 仅禁止重绘不可见的非客户区，避免失焦白边。
+        WM_NCACTIVATE if !state.is_null() && (*state).frameless => {
+            DefWindowProcW(hwnd, msg, wparam, -1)
         }
+        // 自绘标题栏占满整个窗口，同时保留 WS_THICKFRAME 供 DWM 生成圆角、阴影和 Snap。
+        WM_NCCALCSIZE if !state.is_null() && (*state).frameless => 0,
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
             let hdc = BeginPaint(hwnd, &mut ps);
@@ -604,22 +616,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 paint_window(hwnd, hdc, &mut *state);
             }
             EndPaint(hwnd, &ps);
-            0
-        }
-        WM_APP_MINIMIZE => {
-            if !state.is_null() && IsIconic(hwnd) == 0 {
-                // 鼠标已离开即将隐藏的窗口，先把 hover/tooltip 清理后的稳定帧交给 DWM。
-                dispatch(
-                    hwnd,
-                    state,
-                    Event::MouseMove {
-                        pos: Point::new(-1.0, -1.0),
-                    },
-                );
-                InvalidateRect(hwnd, null(), 0);
-                UpdateWindow(hwnd);
-                ShowWindow(hwnd, SW_MINIMIZE);
-            }
             0
         }
         WM_APP_RESTORE_REDRAW => {
@@ -932,14 +928,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 背景擦除由我们的双缓冲全覆盖，拦截以消除闪烁。
         WM_ERASEBKGND => 1,
-        WM_SYSCOMMAND if (wparam & 0xFFF0) == SC_MINIMIZE as usize => {
-            PostMessageW(hwnd, WM_APP_MINIMIZE, 0, 0);
-            0
-        }
         WM_SYSCOMMAND
-            if !state.is_null()
-                && !(*state).resizable
-                && (wparam & 0xFFF0) == SC_SIZE as usize =>
+            if !state.is_null() && !(*state).resizable && (wparam & 0xFFF0) == SC_SIZE as usize =>
         {
             0
         }
@@ -956,9 +946,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 delegate.on_close(&mut ctx)
             };
             if allow {
-                DestroyWindow(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            } else {
+                0
             }
-            0
         }
         // 无边框：顶部空白条可拖动（有实体控件处放行给控件），实现自绘标题栏拖动 + Aero Snap。
         WM_NCHITTEST if !state.is_null() && (*state).frameless => {
