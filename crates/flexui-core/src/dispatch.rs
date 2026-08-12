@@ -63,7 +63,10 @@ impl<'a> EventCtx<'a> {
     /// 便捷：设置某控件的文本。
     pub fn set_text(&mut self, name: &str, text: impl Into<String>) {
         let text = text.into();
-        self.with(name, move |w| w.set_text_value(text));
+        self.with(name, move |w| {
+            w.base_mut().localizations.retain(|binding| !matches!(binding, crate::LocalizationBinding::Text(_)));
+            w.set_text_value(text);
+        });
     }
 
     /// 便捷：读取某控件的 selected（CheckBox/Radio）。

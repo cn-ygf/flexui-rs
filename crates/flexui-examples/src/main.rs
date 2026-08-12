@@ -2,7 +2,8 @@
 
 use flexui::{
     build_window, Color, DirProvider, ImageFit, ImageSource, Insets, MenuStyle, Rect,
-    ResourceManager, ScrollBarStyle, Skin, Window, WindowCtx, WindowImpl,
+    LocalizedStringResource, Localizer, ResourceManager, ScrollBarStyle, Skin, Window, WindowCtx,
+    WindowImpl,
 };
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -182,12 +183,26 @@ impl WindowImpl for SettingsDialog {
     fn on_click(&mut self, name: &str, ctx: &mut WindowCtx) {
         match name {
             "close_settings" => ctx.close(),
+            "language" => {
+                let selected = ctx.with("language", |widget| widget.selected_index()).flatten();
+                match selected {
+                    Some(0) => { let _ = ctx.set_system_locale(); }
+                    Some(1) => { let _ = ctx.set_locale("zh-Hans"); }
+                    Some(2) => { let _ = ctx.set_locale("en"); }
+                    _ => {}
+                }
+                ctx.set_localized_text("settings_status", "settings.locale_changed");
+            }
             "set_startup" | "set_desktop" | "set_auto" | "set_sleep" | "set_audio"
             | "set_notice" => {
                 let enabled = ctx.is_selected(name).unwrap_or(false);
-                ctx.set_text(
+                ctx.set_localized_text(
                     "settings_status",
-                    if enabled { "设置项已开启" } else { "设置项已关闭" },
+                    LocalizedStringResource::new(if enabled {
+                        "settings.enabled"
+                    } else {
+                        "settings.disabled"
+                    }),
                 );
             }
             _ => {}
@@ -196,6 +211,14 @@ impl WindowImpl for SettingsDialog {
 }
 
 fn main() {
+    let localizer = Localizer::new("zh-Hans").expect("开发语言标签必须有效");
+    let resource_manager = resources();
+    localizer.load_json_res(&resource_manager, "i18n/zh-Hans.json")
+        .expect("加载简体中文本地化资源失败");
+    localizer.load_json_res(&resource_manager, "i18n/en.json")
+        .expect("加载英文本地化资源失败");
+    flexui::set_application_localizer(localizer);
+
     #[cfg(target_os = "macos")]
     flexui::set_application_icon(include_bytes!("../assets/app.icns"));
     Window::new(UuExample).center().run();

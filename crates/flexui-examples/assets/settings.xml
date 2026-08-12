@@ -1,66 +1,66 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Window title="UU 设置" width="760" height="560" resizable="false" titlebar="none"
+<Window title="window.settings.title" width="760" height="560" resizable="false" titlebar="none"
         system-corners="true" system-shadow="true" drag-region="0 0 760 42">
 <Panel normal-bgcolor="#30386F" font-family="Microsoft YaHei" mouse="transparent">
   <VBox spacing="0" normal-bgcolor="#30386F" mouse="transparent">
     <HBox height="42" padding="5 10" normal-bgcolor="#343C78" mouse="transparent">
-      <Label text="设置" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="18" mouse="transparent"/>
-      <Button name="close_settings" tooltip="关闭设置" width="28" height="28"
+      <Label text="settings.title" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="18" mouse="transparent"/>
+      <Button name="close_settings" tooltip="settings.close" width="28" height="28"
               normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
               pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
     </HBox>
     <HBox flex="1">
       <VBox width="180" spacing="0" normal-bgcolor="#343C78">
-        <Button text="系统设置" width="180" height="48" padding="0 0 0 52"
+        <Button text="settings.system" width="180" height="48" padding="0 0 0 52"
                 normal-bgimage="button/setform_system_selected.svg" normal-bgfit="stretch"
                 normal-fgcolor="#FFFFFF" font-size="15" normal-textalign="left"/>
-        <Button text="功能专区" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.features" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
-        <Button text="加速设置" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.acceleration" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
-        <Button text="自助修复" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.repair" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
-        <Button text="游戏平台授权" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.authorization" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
-        <Button text="AI 设置" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.ai" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
-        <Button text="下载设置" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.downloads" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
-        <Button text="关于" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
+        <Button text="settings.about" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
                 hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
         <Panel flex="1" mouse="transparent"/>
       </VBox>
       <VBox flex="1" spacing="0" padding="18 24" normal-bgcolor="#30386F">
-        <Label text="系统设置" height="34" normal-fgcolor="#FFFFFF" font-size="20" bold="true"/>
+        <Label text="settings.system" height="34" normal-fgcolor="#FFFFFF" font-size="20" bold="true"/>
         <HBox height="54" align="center">
-          <Label text="语言设置" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <ComboBox name="language" options="跟随系统,简体中文,English" selected="0" width="150" height="36"
+          <Label text="settings.language" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+          <ComboBox name="language" options="locale.system,locale.zh_hans,locale.en" selected="0" width="150" height="36"
                     padding="0 10" normal-bgcolor="#3D4785" normal-fgcolor="#FFFFFF" border-width="1"
                     normal-bordercolor="#4F5A9A" corner-radius="6"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="58" align="center">
-          <Label text="开机自动运行" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+          <Label text="settings.startup" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
           <CheckBox name="set_startup" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
                     selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="58" align="center">
-          <Label text="自动创建桌面快捷方式" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+          <Label text="settings.desktop_shortcut" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
           <CheckBox name="set_desktop" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
                     selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="58" align="center">
-          <Label text="启动后自动加速" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
+          <Label text="settings.auto_accelerate" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
           <CheckBox name="set_auto" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
                     selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="70" align="center">
           <VBox flex="1" spacing="2">
-            <Label text="加速时休眠不断网" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
-            <Label text="加速游戏时，电脑休眠仍保持网络连通。" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+            <Label text="settings.keep_network" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <Label text="settings.keep_network.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
           </VBox>
           <CheckBox name="set_sleep" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
                     selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
@@ -68,8 +68,8 @@
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="70" align="center">
           <VBox flex="1" spacing="2">
-            <Label text="开启 UU 音效" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
-            <Label text="启动、加速、退出时播放提示音。" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+            <Label text="settings.sound" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <Label text="settings.sound.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
           </VBox>
           <CheckBox name="set_audio" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
                     selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
@@ -77,14 +77,14 @@
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="70" align="center">
           <VBox flex="1" spacing="2">
-            <Label text="专区小红点提醒" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
-            <Label text="“补给站”专区出现小红点提醒。" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+            <Label text="settings.badge" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
+            <Label text="settings.badge.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
           </VBox>
           <CheckBox name="set_notice" switch="true" checked="true" text="" width="52" height="26"
                     normal-bgcolor="#565E99" selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF"
                     corner-radius="13"/>
         </HBox>
-        <Label name="settings_status" text="设置变更仅在当前演示会话中生效" flex="1" height="24"
+        <Label name="settings_status" text="settings.session_only" flex="1" height="24"
                normal-fgcolor="#93A0CA" font-size="12"/>
       </VBox>
     </HBox>

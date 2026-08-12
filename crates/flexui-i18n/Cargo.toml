@@ -1,0 +1,12 @@
+[package]
+name = "flexui-i18n"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+unic-langid = { workspace = true }
+intl_pluralrules = { workspace = true }
+sys-locale = { workspace = true }
+flexui-resource = { workspace = true }

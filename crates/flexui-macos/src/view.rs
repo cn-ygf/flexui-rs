@@ -21,7 +21,7 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    find_mut_by_id, layout_node, paint_tree, Dispatcher, Event, Mods, MouseButton, NewWindow,
+    apply_localizations, find_mut_by_id, layout_node, paint_tree, Dispatcher, Event, Mods, MouseButton, NewWindow,
     Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowDragRegion,
     WindowHandle,
 };
@@ -75,6 +75,9 @@ pub struct AppState {
     pub root: Node,
     pub disp: Dispatcher,
     pub delegate: Box<dyn WindowDelegate>,
+    pub localizer: Option<flexui_core::Localizer>,
+    pub locale_revision: u64,
+    pub localized_title: Option<flexui_core::LocalizedStringResource>,
     /// 回调中动态打开的子窗口保活句柄。
     pub child_windows: Vec<Retained<NSWindow>>,
     /// 每窗口独立图片缓存，随窗口释放原生 NSImage。
@@ -420,6 +423,15 @@ fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
     topmost(root, p) == Some(true)
 }
 
+/// 创建 FlexView 时随窗口传入的环境状态。
+pub struct FlexViewEnvironment {
+    pub localizer: Option<flexui_core::Localizer>,
+    pub locale_revision: u64,
+    pub localized_title: Option<flexui_core::LocalizedStringResource>,
+    pub drag_region: WindowDragRegion,
+    pub modal_owner: Option<Retained<NSWindow>>,
+}
+
 /// 把 NSString / NSAttributedString 参数转成 Rust String。
 fn ns_to_string(obj: &AnyObject) -> String {
     if let Some(s) = obj.downcast_ref::<NSString>() {
@@ -466,23 +478,26 @@ fn command_to_key(name: &[u8]) -> Option<(u32, bool)> {
 }
 
 impl FlexView {
+    /// 将窗口级环境归组，避免构造器随环境字段增加而持续膨胀。
     pub fn new(
         mtm: MainThreadMarker,
         root: Node,
         disp: Dispatcher,
         delegate: Box<dyn WindowDelegate>,
-        drag_region: WindowDragRegion,
-        modal_owner: Option<Retained<NSWindow>>,
+        environment: FlexViewEnvironment,
     ) -> Retained<Self> {
         let ivars = FlexViewIvars {
             state: RefCell::new(AppState {
                 root,
                 disp,
                 delegate,
+                localizer: environment.localizer,
+                locale_revision: environment.locale_revision,
+                localized_title: environment.localized_title,
                 child_windows: Vec::new(),
                 image_cache: Rc::new(RefCell::new(ImageCache::default())),
-                drag_region,
-                modal_owner,
+                drag_region: environment.drag_region,
+                modal_owner: environment.modal_owner,
             }),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -494,10 +509,11 @@ impl FlexView {
     pub fn fire_close(&self) -> bool {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
+        let localizer = st.localizer.clone();
         let AppState { root, delegate, .. } = &mut *st;
         if let Some(win) = window {
             let mut handle = MacWindowHandle { window: win };
-            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             delegate.on_close(&mut ctx)
         } else {
             true
@@ -510,13 +526,16 @@ impl FlexView {
             window: window.clone(),
         };
         let mut st = self.ivars().state.borrow_mut();
+        let localizer = st.localizer.clone();
         let AppState {
             root,
             disp,
             delegate,
             ..
         } = &mut *st;
-        let mut ctx = WindowCtx::with_proxy(root.as_mut(), &mut handle, disp.proxy());
+        let mut ctx = WindowCtx::with_proxy_and_localizer(
+            root.as_mut(), &mut handle, disp.proxy(), localizer,
+        );
         delegate.on_init(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
@@ -553,10 +572,11 @@ impl FlexView {
     fn fire_drop(&self, paths: Vec<String>) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
+        let localizer = st.localizer.clone();
         let AppState { root, delegate, .. } = &mut *st;
         if let Some(win) = window {
             let mut handle = MacWindowHandle { window: win };
-            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             delegate.on_drop_files(&paths, &mut ctx);
         }
         drop(st);
@@ -567,6 +587,18 @@ impl FlexView {
     fn fire_frame(&self) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
+        let localizer_for_ctx = st.localizer.clone();
+        let locale_changed = st.localizer.as_ref().is_some_and(|localizer| {
+            localizer.revision() != st.locale_revision
+        });
+        if locale_changed {
+            let localizer = st.localizer.as_ref().unwrap().clone();
+            apply_localizations(&mut st.root, &localizer);
+            if let (Some(window), Some(title)) = (window.as_ref(), st.localized_title.clone()) {
+                window.setTitle(&NSString::from_str(&localizer.text(title)));
+            }
+            st.locale_revision = localizer.revision();
+        }
         let AppState {
             root,
             disp,
@@ -580,7 +612,9 @@ impl FlexView {
         if !msgs.is_empty() {
             if let Some(win) = window {
                 let mut handle = MacWindowHandle { window: win };
-                let mut ctx = WindowCtx::with_proxy(root.as_mut(), &mut handle, disp.proxy());
+                let mut ctx = WindowCtx::with_proxy_and_localizer(
+                    root.as_mut(), &mut handle, disp.proxy(), localizer_for_ctx.clone(),
+                );
                 for m in &msgs {
                     delegate.on_message(m, &mut ctx);
                 }
@@ -594,7 +628,7 @@ impl FlexView {
         for a in anim_reqs {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
         }
-        let redraw = changed || !msgs.is_empty();
+        let redraw = changed || !msgs.is_empty() || locale_changed;
         drop(st);
         if redraw {
             self.setNeedsDisplay(true);
@@ -624,6 +658,7 @@ impl FlexView {
     fn dispatch(&self, ev: Event) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
+        let localizer = st.localizer.clone();
         let AppState {
             root,
             disp,
@@ -643,7 +678,7 @@ impl FlexView {
         if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
             if let Some(win) = window {
                 let mut handle = MacWindowHandle { window: win };
-                let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+                let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer.clone());
                 for name in &acts {
                     delegate.on_activate(name, &mut ctx);
                 }
@@ -699,10 +734,11 @@ impl FlexView {
         };
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
+        let localizer = st.localizer.clone();
         let AppState { root, delegate, .. } = &mut *st;
         if let Some(win) = window {
             let mut handle = MacWindowHandle { window: win };
-            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             delegate.on_key(ch as u32, &mut ctx);
         }
     }

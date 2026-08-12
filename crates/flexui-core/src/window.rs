@@ -7,6 +7,7 @@
 use crate::dispatch::EventCtx;
 use crate::widget::Widget;
 use flexui_geometry::Rect;
+use flexui_i18n::{LocalizedStringResource, Localizer};
 
 /// 标题栏模式（一期先实现 System；隐藏留控件/无边框见开发计划阶段 3）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,6 +37,8 @@ pub enum WindowDragRegion {
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
     pub title: String,
+    /// 窗口标题的本地化资源；切换语言时同步更新原生标题。
+    pub localized_title: Option<LocalizedStringResource>,
     pub width: f32,
     pub height: f32,
     /// false = 禁止改变大小。
@@ -53,6 +56,7 @@ impl Default for WindowConfig {
     fn default() -> Self {
         Self {
             title: "flexui-rs".to_string(),
+            localized_title: None,
             width: 640.0,
             height: 440.0,
             resizable: true,
@@ -106,6 +110,8 @@ pub trait WindowHandle {
     fn minimize(&mut self);
     fn maximize(&mut self);
     fn restore(&mut self);
+    /// 共享环境发生变化；平台可立即通知同一应用中的其他窗口。
+    fn environment_changed(&mut self) {}
 }
 
 /// 上下文菜单等浮层的打开请求（由 WindowCtx 收集，后端排空后交分发器）。
@@ -136,6 +142,10 @@ pub struct NewWindow {
     pub disp: crate::dispatch::Dispatcher,
     pub delegate: Box<dyn WindowDelegate>,
     pub presentation: WindowPresentation,
+    /// 当前窗口使用的共享本地化环境。
+    pub localizer: Option<Localizer>,
+    /// 最近一次应用到该窗口的目录修订号。
+    pub locale_revision: u64,
 }
 
 /// 动态窗口的呈现方式。
@@ -157,6 +167,7 @@ pub struct WindowCtx<'a> {
     anim_requests: Vec<AnimRequest>,
     new_windows: Vec<NewWindow>,
     proxy: Option<crate::dispatch::MainProxy>,
+    localizer: Option<Localizer>,
 }
 
 impl<'a> WindowCtx<'a> {
@@ -168,17 +179,32 @@ impl<'a> WindowCtx<'a> {
             anim_requests: Vec::new(),
             new_windows: Vec::new(),
             proxy: None,
+            localizer: None,
         }
+    }
+
+    /// 带共享本地化环境构造；平台后端用于所有窗口回调。
+    pub fn with_localizer(
+        root: &'a mut dyn Widget,
+        win: &'a mut dyn WindowHandle,
+        localizer: Option<Localizer>,
+    ) -> Self {
+        let mut ctx = Self::new(root, win);
+        ctx.localizer = localizer;
+        ctx
     }
 
     /// 在回调里打开一个新窗口（接入共享事件循环）。用 `flexui::build_window(imp)` 构造规格。
     pub fn open_window(&mut self, spec: NewWindow) {
+        let mut spec = spec;
+        if spec.localizer.is_none() { spec.localizer = self.localizer.clone(); }
         self.new_windows.push(spec);
     }
 
     /// 打开以当前窗口为 owner 的模态对话框。
     pub fn open_modal(&mut self, mut spec: NewWindow) {
         spec.presentation = WindowPresentation::ModalDialog;
+        if spec.localizer.is_none() { spec.localizer = self.localizer.clone(); }
         self.new_windows.push(spec);
     }
 
@@ -196,6 +222,60 @@ impl<'a> WindowCtx<'a> {
         let mut c = Self::new(root, win);
         c.proxy = Some(proxy);
         c
+    }
+
+    pub fn with_proxy_and_localizer(
+        root: &'a mut dyn Widget,
+        win: &'a mut dyn WindowHandle,
+        proxy: crate::dispatch::MainProxy,
+        localizer: Option<Localizer>,
+    ) -> Self {
+        let mut ctx = Self::with_localizer(root, win, localizer);
+        ctx.proxy = Some(proxy);
+        ctx
+    }
+
+    /// 运行时切换 BCP 47 语言；所有共享该环境的窗口会同步刷新。
+    pub fn set_locale(&mut self, locale: &str) -> Result<(), flexui_i18n::I18nError> {
+        self.localizer.as_ref().ok_or_else(|| flexui_i18n::I18nError::Format("窗口未配置本地化环境".into()))?.set_locale(locale)?;
+        self.win.environment_changed();
+        Ok(())
+    }
+
+    /// 恢复跟随操作系统语言。
+    pub fn set_system_locale(&mut self) -> Result<(), flexui_i18n::I18nError> {
+        let localizer = self.localizer.as_ref()
+            .ok_or_else(|| flexui_i18n::I18nError::Format("窗口未配置本地化环境".into()))?;
+        localizer.set_system_locale();
+        self.win.environment_changed();
+        Ok(())
+    }
+
+    pub fn locale(&self) -> Option<String> { self.localizer.as_ref().map(Localizer::locale) }
+
+    /// 使用当前窗口的环境解析本地化资源，适合动态状态文案。
+    pub fn localized_text(&self, resource: impl Into<LocalizedStringResource>) -> String {
+        let resource = resource.into();
+        self.localizer.as_ref()
+            .map(|localizer| localizer.text(resource.clone()))
+            .unwrap_or_else(|| resource.default_value.unwrap_or_else(|| resource.key.as_str().to_owned()))
+    }
+
+    /// 设置控件文本并保留本地化绑定，后续切换语言时会继续刷新。
+    pub fn set_localized_text(
+        &mut self,
+        name: &str,
+        resource: impl Into<LocalizedStringResource>,
+    ) {
+        let resource = resource.into();
+        let text = self.localized_text(resource.clone());
+        self.with(name, move |widget| {
+            widget.base_mut().localizations.retain(|binding| {
+                !matches!(binding, crate::LocalizationBinding::Text(_))
+            });
+            widget.base_mut().localizations.push(crate::LocalizationBinding::Text(resource));
+            widget.set_text_value(text);
+        });
     }
 
     /// 取主线程投递句柄（在 on_init 里获取，clone 给工作线程后 `send`）。

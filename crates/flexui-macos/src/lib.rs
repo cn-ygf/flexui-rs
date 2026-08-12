@@ -44,6 +44,8 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         disp,
         delegate,
         presentation: WindowPresentation::Normal,
+        localizer: None,
+        locale_revision: 0,
     }]);
 }
 
@@ -78,6 +80,8 @@ pub(crate) fn make_window(
         disp,
         delegate,
         presentation,
+        localizer,
+        locale_revision,
     } = spec;
     let modal_owner = if presentation == WindowPresentation::ModalDialog {
         owner
@@ -154,8 +158,13 @@ pub(crate) fn make_window(
         root,
         disp,
         delegate,
-        config.drag_region,
-        modal_owner.map(Message::retain),
+        view::FlexViewEnvironment {
+            localizer,
+            locale_revision,
+            localized_title: config.localized_title.clone(),
+            drag_region: config.drag_region,
+            modal_owner: modal_owner.map(Message::retain),
+        },
     );
     // 注册文件拖放类型（接收拖入的文件路径 → on_drop_files）。
     view.registerForDraggedTypes(&NSArray::from_slice(&[view::filenames_pboard_type()]));

@@ -13,6 +13,7 @@ use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow};
 use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
+use crate::localization::LocalizationBinding;
 
 /// 控件唯一 id。
 pub type WidgetId = u64;
@@ -74,6 +75,7 @@ pub enum WidgetProperty {
     TabIndex(Option<usize>),
     SelectedIndex(usize),
     Value(f32),
+    Items(Vec<String>),
 }
 
 /// 平台文本输入协议需要的只读快照。
@@ -97,6 +99,8 @@ pub struct Base {
     pub text: String,
     /// 悬停提示文本（Tooltip）；None 表示无提示。
     pub tooltip: Option<String>,
+    /// 声明式本地化绑定；运行时切换语言时据此重新解析。
+    pub localizations: Vec<LocalizationBinding>,
     pub font: Font,
     pub style: StyleSet,
 
@@ -151,6 +155,7 @@ impl Base {
             role,
             text: String::new(),
             tooltip: None,
+            localizations: Vec::new(),
             font: Font::default(),
             style: StyleSet::new(),
             enabled: true,

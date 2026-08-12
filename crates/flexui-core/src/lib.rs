@@ -8,6 +8,7 @@ pub mod dialog;
 pub mod dispatch;
 pub mod event;
 pub mod layout;
+pub mod localization;
 pub mod paint;
 pub mod sizing;
 pub mod style;
@@ -21,6 +22,7 @@ pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
 pub use event::{Event, EventFlow, Mods, MouseButton};
 pub use layout::{layout_node, Axis};
+pub use localization::{apply_localizations, LocalizationBinding};
 pub use paint::{paint_tree, paint_tree_in_rect};
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec, VisualState};
@@ -42,3 +44,4 @@ pub use window::{
 // 几何/绘图类型透传，便于上层一次性引入。
 pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
 pub use flexui_gfx::{image_density_from_path, Canvas, Font, ImageFit, ImageSource, TextAlign};
+pub use flexui_i18n::{I18nError, LocalizedStringKey, LocalizedStringResource, LocalizationValue, Localizer};

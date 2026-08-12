@@ -11,6 +11,7 @@ use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
 use crate::widget::{Base, Widget, WidgetRole};
+use crate::widget::WidgetProperty;
 
 /// 下拉选择框：显示当前项 + 右侧 ▼，点击弹出选项菜单。
 pub struct ComboBox {
@@ -115,6 +116,16 @@ impl Widget for ComboBox {
     }
     fn selected_index(&self) -> Option<usize> { Some(self.selected_index) }
     fn set_selected_index(&mut self, index: usize) -> bool { self.apply_selection(index) }
+    fn apply_property(&mut self, property: WidgetProperty) -> bool {
+        if let WidgetProperty::Items(items) = property {
+            self.options = items;
+            self.selected_index = self.selected_index.min(self.options.len().saturating_sub(1));
+            self.base.text = self.options.get(self.selected_index).cloned().unwrap_or_default();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 common_builders!(ComboBox);

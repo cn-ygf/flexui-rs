@@ -3,11 +3,12 @@
 //! RegisterClassW + CreateWindowExW 建窗，WndProc 分发消息：WM_PAINT 用 GDI+ 自绘，
 //! 鼠标/键盘消息翻译成 flexui 的 `Event` 交给 `Dispatcher`。与 macOS 后端对位。
 
+use std::cell::RefCell;
 use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher, Event, Mods, MouseButton,
+    apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher, Event, Mods, MouseButton,
     NewWindow, Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
     WindowDragRegion, WindowHandle, WindowPresentation, Widget, WidgetRole,
 };
@@ -45,12 +46,37 @@ use crate::gdiplus::{Gdiplus, OffscreenBitmap, UNIT_PIXEL};
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
 /// 还原消息栈退出后再刷新最小化期间发生的内容更新。
 const WM_APP_RESTORE_REDRAW: u32 = WM_APP + 2;
+/// 一个窗口切换语言时通知同线程的全部 flexui 窗口。
+const WM_APP_LOCALE_CHANGED: u32 = WM_APP + 3;
+
+thread_local! {
+    /// 所有窗口都由同一 UI 线程创建，注册表用于跨普通窗口和 owned tool window 广播环境变化。
+    static THREAD_WINDOWS: RefCell<Vec<HWND>> = const { RefCell::new(Vec::new()) };
+}
+
+unsafe fn broadcast_locale_change(source: HWND) {
+    THREAD_WINDOWS.with(|windows| {
+        for hwnd in windows.borrow().iter().copied() {
+            if IsWindow(hwnd) != 0 {
+                if hwnd == source {
+                    // 当前窗口仍在事件回调的可变借用中，退出回调后再刷新，避免 WndProc 重入。
+                    PostMessageW(hwnd, WM_APP_LOCALE_CHANGED, 0, 0);
+                } else {
+                    SendMessageW(hwnd, WM_APP_LOCALE_CHANGED, 0, 0);
+                }
+            }
+        }
+    });
+}
 
 /// 窗口内部状态：控件树 + 分发器 + 窗口委托（通过窗口 USERDATA 关联到 HWND）。
 struct AppState {
     root: Node,
     disp: Dispatcher,
     delegate: Box<dyn WindowDelegate>,
+    localizer: Option<flexui_core::Localizer>,
+    locale_revision: u64,
+    localized_title: Option<flexui_core::LocalizedStringResource>,
     image_cache: ImageCache,
     /// 无边框（自绘标题栏）模式：启用自定义拖动/命中。
     frameless: bool,
@@ -71,6 +97,19 @@ struct AppState {
     layout_dirty: bool,
     /// 模态子窗口的 owner；销毁时恢复 owner 的输入与激活状态。
     modal_owner: HWND,
+}
+
+/// 应用共享语言环境的最新修订，并返回是否发生变化。
+unsafe fn refresh_localizations(hwnd: HWND, state: &mut AppState) -> bool {
+    let Some(localizer) = state.localizer.as_ref() else { return false };
+    if localizer.revision() == state.locale_revision { return false; }
+    apply_localizations(&mut state.root, localizer);
+    if let Some(title) = state.localized_title.clone() {
+        SetWindowTextW(hwnd, wide(&localizer.text(title)).as_ptr());
+    }
+    state.locale_revision = localizer.revision();
+    state.layout_dirty = true;
+    true
 }
 
 /// Windows 窗口控制句柄（实现平台无关的 WindowHandle）。
@@ -94,6 +133,9 @@ impl WindowHandle for WinWindowHandle {
     fn restore(&mut self) {
         unsafe { PostMessageW(self.hwnd, WM_SYSCOMMAND, SC_RESTORE as usize, 0) };
     }
+    fn environment_changed(&mut self) {
+        unsafe { broadcast_locale_change(self.hwnd) };
+    }
 }
 
 /// UTF-8 → NUL 结尾 UTF-16。
@@ -115,6 +157,8 @@ pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn
         disp,
         delegate,
         presentation: WindowPresentation::Normal,
+        localizer: None,
+        locale_revision: 0,
     }]);
 }
 
@@ -219,6 +263,8 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         disp,
         delegate,
         presentation,
+        localizer,
+        locale_revision,
     } = spec;
     let hinstance = GetModuleHandleW(null());
     let class_name = wide("FlexUiWindowClass");
@@ -297,6 +343,9 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         root,
         disp,
         delegate,
+        localizer,
+        locale_revision,
+        localized_title: config.localized_title.clone(),
         image_cache: ImageCache::default(),
         frameless,
         resizable: config.resizable,
@@ -313,6 +362,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         modal_owner: if is_modal { owner } else { null_mut() },
     }));
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+    THREAD_WINDOWS.with(|windows| windows.borrow_mut().push(hwnd));
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     if frameless {
@@ -349,7 +399,9 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     let new_wins = {
         let st = &mut *state;
         let mut handle = WinWindowHandle { hwnd };
-        let mut ctx = WindowCtx::with_proxy(st.root.as_mut(), &mut handle, st.disp.proxy());
+        let mut ctx = WindowCtx::with_proxy_and_localizer(
+            st.root.as_mut(), &mut handle, st.disp.proxy(), st.localizer.clone(),
+        );
         st.delegate.on_init(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
@@ -409,7 +461,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
             let mut handle = WinWindowHandle { hwnd };
             let root = &mut st.root;
             let delegate = &mut st.delegate;
-            let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
             for name in &acts {
                 delegate.on_activate(name, &mut ctx);
             }
@@ -627,7 +679,7 @@ unsafe fn fire_drop(hwnd: HWND, state: *mut AppState, paths: Vec<String>) {
     let mut handle = WinWindowHandle { hwnd };
     let root = &mut st.root;
     let delegate = &mut st.delegate;
-    let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+    let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
     delegate.on_drop_files(&paths, &mut ctx);
     st.layout_dirty = true;
     InvalidateRect(hwnd, null(), 0);
@@ -947,6 +999,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if !state.is_null() {
                 let st = &mut *state;
                 if wparam == 2 {
+                    let locale_changed = refresh_localizations(hwnd, st);
                     let changed = if st.minimized {
                         false
                     } else {
@@ -957,8 +1010,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let mut ov_reqs = Vec::new();
                     if !msgs.is_empty() {
                         let mut handle = WinWindowHandle { hwnd };
-                        let mut ctx =
-                            WindowCtx::with_proxy(st.root.as_mut(), &mut handle, st.disp.proxy());
+                        let mut ctx = WindowCtx::with_proxy_and_localizer(
+                            st.root.as_mut(), &mut handle, st.disp.proxy(), st.localizer.clone(),
+                        );
                         for m in &msgs {
                             st.delegate.on_message(m, &mut ctx);
                         }
@@ -978,7 +1032,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             a.easing,
                         );
                     }
-                    if changed || !msgs.is_empty() {
+                    if changed || !msgs.is_empty() || locale_changed {
                         if st.minimized {
                             st.redraw_after_restore = true;
                         } else {
@@ -1000,6 +1054,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_APP_LOCALE_CHANGED => {
+            if !state.is_null() && refresh_localizations(hwnd, &mut *state) {
+                InvalidateRect(hwnd, null(), 0);
+            }
+            0
+        }
+        // 模态 owner 重新启用时保证应用共享环境已应用；disabled 窗口可能延迟处理普通消息。
+        WM_ENABLE if wparam != 0 => {
+            if !state.is_null() && refresh_localizations(hwnd, &mut *state) {
+                InvalidateRect(hwnd, null(), 0);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         // 背景擦除由我们的双缓冲全覆盖，拦截以消除闪烁。
         WM_ERASEBKGND => 1,
         WM_SYSCOMMAND
@@ -1016,7 +1083,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let mut handle = WinWindowHandle { hwnd };
                 let root = &mut st.root;
                 let delegate = &mut st.delegate;
-                let mut ctx = WindowCtx::new(root.as_mut(), &mut handle);
+                let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
                 delegate.on_close(&mut ctx)
             };
             if allow {
@@ -1094,10 +1161,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_DESTROY => {
             if !state.is_null() {
                 let owner = (*state).modal_owner;
+                THREAD_WINDOWS.with(|windows| windows.borrow_mut().retain(|window| *window != hwnd));
                 drop(Box::from_raw(state));
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 if !owner.is_null() && IsWindow(owner) != 0 {
                     EnableWindow(owner, 1);
+                    PostMessageW(owner, WM_APP_LOCALE_CHANGED, 0, 0);
                     SetForegroundWindow(owner);
                 }
             }

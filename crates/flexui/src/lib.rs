@@ -3,6 +3,8 @@
 //! 面向对象用法（参考 duilib WinImplBase/Window）：实现 `WindowImpl` trait（≈ WindowImplBase），
 //! 用 `Window::new(MyWindow).run()` 启动（≈ Window）。控件层用组合式 + 能力 trait 表达层级。
 
+use std::sync::{OnceLock, RwLock};
+
 // 核心：控件、状态、样式、布局、事件、分发、窗口抽象。
 pub use flexui_core::*;
 
@@ -14,6 +16,21 @@ pub use flexui_xml::{
 
 // 资源系统（RM1-5）。
 pub use flexui_resource::{DirProvider, ResError, ResourceManager, ResourceProvider, ZipProvider};
+pub use flexui_i18n::{I18nError, LocalizedStringKey, LocalizedStringResource, LocalizationValue, Localizer};
+
+fn application_localizer_slot() -> &'static RwLock<Option<Localizer>> {
+    static SLOT: OnceLock<RwLock<Option<Localizer>>> = OnceLock::new();
+    SLOT.get_or_init(|| RwLock::new(None))
+}
+
+/// 设置 SwiftUI Environment 风格的应用级本地化环境；后续创建的窗口自动继承。
+pub fn set_application_localizer(localizer: Localizer) {
+    *application_localizer_slot().write().unwrap() = Some(localizer);
+}
+
+pub fn application_localizer() -> Option<Localizer> {
+    application_localizer_slot().read().unwrap().clone()
+}
 
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
 #[cfg(target_os = "macos")]
@@ -149,6 +166,9 @@ pub trait WindowImpl: 'static {
         ResourceManager::new()
     }
 
+    /// SwiftUI Environment 风格的共享本地化环境；None 表示全部文本按字面量处理。
+    fn localizer(&self) -> Option<Localizer> { application_localizer() }
+
     /// 窗口与控件创建完成（≈ InitWindow）：绑事件、预设文本等。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
     /// 某具名控件被点击（≈ Notify）。
@@ -210,9 +230,11 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
 ///
 /// 可用于多窗口：在任意窗口回调里用 `build_window` 构造规格后传给 `ctx.open_window`。
 pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
-    let ctx = Context::new();
+    let localizer = imp.localizer();
+    let mut ctx = Context::new();
+    if let Some(value) = localizer.clone() { ctx.set_localizer(value); }
     // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
-    let (config, root, bindings) = match imp.skin() {
+    let (config, mut root, bindings) = match imp.skin() {
         Skin::Xml(xml) => {
             let doc = load_window_str(&xml, &ctx)?;
             (
@@ -232,6 +254,9 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
         }
         Skin::Tree(node) => (imp.config(), node, Vec::new()),
     };
+    if let Some(localizer) = localizer.as_ref() {
+        apply_localizations(&mut root, localizer);
+    }
     let mut disp = Dispatcher::new();
     for (group, tabbox) in bindings {
         disp.bind_tab(group, tabbox);
@@ -242,6 +267,8 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
         disp,
         delegate: Box::new(ImplDelegate { imp }),
         presentation: WindowPresentation::Normal,
+        locale_revision: localizer.as_ref().map_or(0, Localizer::revision),
+        localizer,
     })
 }
 

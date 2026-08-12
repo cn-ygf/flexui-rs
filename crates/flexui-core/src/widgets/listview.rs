@@ -132,10 +132,14 @@ impl Widget for ListView {
         EventFlow::Ignored
     }
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
-        if let WidgetProperty::SelectedIndex(index) = property {
-            self.set_selected_index(index)
-        } else {
-            false
+        match property {
+            WidgetProperty::SelectedIndex(index) => self.set_selected_index(index),
+            WidgetProperty::Items(items) => {
+                self.items = items;
+                self.selection = self.selection.filter(|index| *index < self.items.len());
+                true
+            }
+            _ => false,
         }
     }
     fn selected_index(&self) -> Option<usize> { self.selection }
