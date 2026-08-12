@@ -31,8 +31,9 @@ pub use widget::{
     HitPolicy, Node, TextControl, TextInputState, Widget, WidgetId, WidgetProperty, WidgetRole,
 };
 pub use widgets::{
-    build_menu, build_menu_labels, build_menu_styled, build_tooltip, Button, CheckBox, ComboBox,
-    Edit, EditConfig, HBox, Image, Label, ListView, MenuItem, MenuStyle, Panel, Progress, Radio,
+    build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
+    CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
+    MenuItem, MenuStyle, Panel, Progress, Radio,
     ScrollBarStyle, ScrollView, Separator, Slider, TabBox, VBox,
 };
 pub use window::{

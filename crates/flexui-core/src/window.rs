@@ -124,6 +124,8 @@ pub struct OverlayRequest {
     pub style: Option<crate::widgets::MenuStyle>,
     /// 当前选中项的 name；菜单项左侧绘制勾选标记。
     pub selected_name: Option<String>,
+    /// 带图标或子菜单时使用；None 表示使用兼容的 items。
+    pub entries: Option<Vec<crate::widgets::MenuEntry>>,
 }
 
 /// 属性动画请求（由 WindowCtx 收集，后端排空后交分发器）。
@@ -290,6 +292,7 @@ impl<'a> WindowCtx<'a> {
             items,
             style: None,
             selected_name: None,
+            entries: None,
         });
     }
 
@@ -306,6 +309,23 @@ impl<'a> WindowCtx<'a> {
             items,
             style: Some(style),
             selected_name,
+            entries: None,
+        });
+    }
+
+    /// 在 anchor 处弹出带图标、子菜单和自定义外观的菜单。
+    pub fn open_styled_menu_entries(
+        &mut self,
+        anchor: flexui_geometry::Rect,
+        entries: Vec<crate::widgets::MenuEntry>,
+        style: crate::widgets::MenuStyle,
+    ) {
+        self.overlay_requests.push(OverlayRequest {
+            anchor,
+            items: Vec::new(),
+            style: Some(style),
+            selected_name: None,
+            entries: Some(entries),
         });
     }
 

@@ -11,6 +11,40 @@ use crate::style::{StyleSet, StyleSpec};
 use crate::widget::{Base, Node, Widget, WidgetRole};
 use crate::widgets::{ScrollBarStyle, ScrollView, VBox};
 
+/// 菜单项：可带左侧图标，也可包含下一级菜单。
+#[derive(Debug, Clone)]
+pub struct MenuEntry {
+    pub label: String,
+    pub name: String,
+    pub icon: Option<ImageSource>,
+    pub children: Vec<MenuEntry>,
+}
+
+impl MenuEntry {
+    pub fn item(label: impl Into<String>, name: impl Into<String>) -> Self {
+        Self { label: label.into(), name: name.into(), icon: None, children: Vec::new() }
+    }
+
+    pub fn submenu(label: impl Into<String>, children: Vec<MenuEntry>) -> Self {
+        Self { label: label.into(), name: String::new(), icon: None, children }
+    }
+
+    pub fn icon(mut self, icon: ImageSource) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn is_submenu(&self) -> bool { !self.children.is_empty() }
+}
+
+/// 根菜单相对锚点的水平对齐方式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MenuAlignment {
+    #[default]
+    Start,
+    End,
+}
+
 /// 浮层菜单的可配置外观。
 #[derive(Debug, Clone)]
 pub struct MenuStyle {
@@ -20,6 +54,8 @@ pub struct MenuStyle {
     pub hot_text: Color,
     pub selected_text: Color,
     pub hot_background: Color,
+    pub hot_background_image: Option<ImageSource>,
+    pub hot_background_fit: Option<ImageFit>,
     pub row_height: f32,
     pub width: Option<f32>,
     pub height: Option<f32>,
@@ -30,6 +66,11 @@ pub struct MenuStyle {
     pub background_fit: Option<ImageFit>,
     pub selected_image: Option<ImageSource>,
     pub selected_image_size: Size,
+    pub icon_size: Size,
+    pub icon_inset: f32,
+    pub submenu_indicator: Option<ImageSource>,
+    pub submenu_indicator_size: Size,
+    pub submenu_indicator_inset: f32,
     /// name 以此前缀开头的条目绘制为不可选分组标题。
     pub header_name_prefix: Option<String>,
     pub header_text: Color,
@@ -38,6 +79,10 @@ pub struct MenuStyle {
     pub scrollbar: ScrollBarStyle,
     /// 浮层在窗口内摆放时保留的边距。
     pub window_margin: Insets,
+    pub alignment: MenuAlignment,
+    /// 子菜单顶部是否与父菜单面板顶部对齐；默认与触发它的菜单项顶部对齐。
+    pub submenu_align_panel_top: bool,
+    pub submenu_style: Option<Box<MenuStyle>>,
 }
 
 impl Default for MenuStyle {
@@ -49,6 +94,8 @@ impl Default for MenuStyle {
             hot_text: Color::WHITE,
             selected_text: Color::WHITE,
             hot_background: Color::rgba(0.28, 0.42, 0.70, 0.55),
+            hot_background_image: None,
+            hot_background_fit: None,
             row_height: 28.0,
             width: None,
             height: None,
@@ -59,12 +106,20 @@ impl Default for MenuStyle {
             background_fit: None,
             selected_image: None,
             selected_image_size: Size::new(14.0, 14.0),
+            icon_size: Size::new(18.0, 18.0),
+            icon_inset: 10.0,
+            submenu_indicator: None,
+            submenu_indicator_size: Size::new(16.0, 16.0),
+            submenu_indicator_inset: 8.0,
             header_name_prefix: None,
             header_text: Color::from_u8(120, 126, 156, 255),
             header_height: 20.0,
             header_padding: Insets::new(16.0, 0.0, 0.0, 0.0),
             scrollbar: ScrollBarStyle::default(),
             window_margin: Insets::default(),
+            alignment: MenuAlignment::Start,
+            submenu_align_panel_top: false,
+            submenu_style: None,
         }
     }
 }
@@ -76,16 +131,22 @@ pub struct MenuItem {
     selected_mark: bool,
     selected_image: Option<ImageSource>,
     selected_image_size: Size,
+    icon: Option<ImageSource>,
+    icon_size: Size,
+    icon_inset: f32,
+    submenu_indicator: Option<ImageSource>,
+    submenu_indicator_size: Size,
+    submenu_indicator_inset: f32,
 }
 
 impl MenuItem {
     pub fn new(label: impl Into<String>, index: usize) -> Self {
-        Self::styled(label, index, &MenuStyle::default(), false)
+        Self::styled(&MenuEntry::item(label, ""), index, &MenuStyle::default(), false)
     }
 
-    fn styled(label: impl Into<String>, index: usize, menu: &MenuStyle, selected: bool) -> Self {
+    fn styled(entry: &MenuEntry, index: usize, menu: &MenuStyle, selected: bool) -> Self {
         let mut base = Base::new(WidgetRole::MenuItem);
-        base.text = label.into();
+        base.text = entry.label.clone();
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(menu.row_height);
         base.padding = menu.item_padding;
@@ -97,7 +158,9 @@ impl MenuItem {
         styles.set(
             crate::style::VisualState::new(crate::style::BaseState::Hot, false),
             StyleSpec {
-                bg_color: Some(menu.hot_background),
+                bg_color: menu.hot_background_image.is_none().then_some(menu.hot_background),
+                bg_image: menu.hot_background_image.clone(),
+                bg_fit: menu.hot_background_fit.clone(),
                 fg_color: Some(menu.hot_text),
                 ..Default::default()
             },
@@ -120,7 +183,9 @@ impl MenuItem {
                 true,
             ),
             StyleSpec {
-                bg_color: Some(menu.hot_background),
+                bg_color: menu.hot_background_image.is_none().then_some(menu.hot_background),
+                bg_image: menu.hot_background_image.clone(),
+                bg_fit: menu.hot_background_fit.clone(),
                 fg_color: Some(menu.hot_text),
                 ..Default::default()
             },
@@ -132,6 +197,12 @@ impl MenuItem {
             selected_mark: selected,
             selected_image: menu.selected_image.clone(),
             selected_image_size: menu.selected_image_size,
+            icon: entry.icon.clone(),
+            icon_size: menu.icon_size,
+            icon_inset: menu.icon_inset,
+            submenu_indicator: entry.is_submenu().then(|| menu.submenu_indicator.clone()).flatten(),
+            submenu_indicator_size: menu.submenu_indicator_size,
+            submenu_indicator_inset: menu.submenu_indicator_inset,
         }
     }
 
@@ -151,6 +222,12 @@ impl MenuItem {
             selected_mark: false,
             selected_image: None,
             selected_image_size: Size::default(),
+            icon: None,
+            icon_size: Size::default(),
+            icon_inset: 0.0,
+            submenu_indicator: None,
+            submenu_indicator_size: Size::default(),
+            submenu_indicator_inset: 0.0,
         }
     }
 }
@@ -174,6 +251,15 @@ impl Widget for MenuItem {
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
+        if let Some(icon) = &self.icon {
+            let icon_rect = flexui_geometry::Rect::new(
+                self.base.rect.left() + self.icon_inset,
+                self.base.rect.top() + (self.base.rect.size.height - self.icon_size.height) / 2.0,
+                self.icon_size.width,
+                self.icon_size.height,
+            );
+            cv.draw_image(icon, icon_rect, None, ImageFit::Stretch);
+        }
         if self.selected_mark {
             let mark_rect = flexui_geometry::Rect::new(
                 self.base.rect.left() + 10.0,
@@ -188,6 +274,16 @@ impl Widget for MenuItem {
             }
         }
         draw_aligned_text(cv, &self.base.text, content, &self.base.font, color, TextAlign::Left, true);
+        if let Some(indicator) = &self.submenu_indicator {
+            let indicator_rect = flexui_geometry::Rect::new(
+                self.base.rect.right() - self.submenu_indicator_inset - self.submenu_indicator_size.width,
+                self.base.rect.top()
+                    + (self.base.rect.size.height - self.submenu_indicator_size.height) / 2.0,
+                self.submenu_indicator_size.width,
+                self.submenu_indicator_size.height,
+            );
+            cv.draw_image(indicator, indicator_rect, None, ImageFit::Stretch);
+        }
     }
     fn selected_index(&self) -> Option<usize> {
         (self.base.role == WidgetRole::MenuItem).then_some(self.index)
@@ -202,10 +298,31 @@ pub fn build_menu(items: &[(String, String)], _owner: Option<crate::widget::Widg
     build_menu_styled(items, _owner, &MenuStyle::default(), None)
 }
 
+/// 用带图标与子菜单的条目构建菜单。
+pub fn build_menu_entries(
+    entries: &[MenuEntry],
+    menu: &MenuStyle,
+    selected_name: Option<&str>,
+) -> Node {
+    build_menu_entries_inner(entries, menu, selected_name)
+}
+
 /// 用指定外观构建菜单，并按 name 标记当前选中项。
 pub fn build_menu_styled(
     items: &[(String, String)],
     _owner: Option<crate::widget::WidgetId>,
+    menu: &MenuStyle,
+    selected_name: Option<&str>,
+) -> Node {
+    let entries = items
+        .iter()
+        .map(|(label, name)| MenuEntry::item(label.clone(), name.clone()))
+        .collect::<Vec<_>>();
+    build_menu_entries_inner(&entries, menu, selected_name)
+}
+
+fn build_menu_entries_inner(
+    entries: &[MenuEntry],
     menu: &MenuStyle,
     selected_name: Option<&str>,
 ) -> Node {
@@ -233,19 +350,19 @@ pub fn build_menu_styled(
         if let Some(width) = menu.width {
             scroll.base_mut().width = Sizing::Fixed(width);
         }
-        for (i, (label, name)) in items.iter().enumerate() {
+        for (i, entry) in entries.iter().enumerate() {
             if menu
                 .header_name_prefix
                 .as_deref()
-                .is_some_and(|prefix| name.starts_with(prefix))
+                .is_some_and(|prefix| entry.name.starts_with(prefix))
             {
-                scroll = scroll.push(MenuItem::header(label.clone(), menu));
+                scroll = scroll.push(MenuItem::header(entry.label.clone(), menu));
                 continue;
             }
-            let selected = selected_name.is_some_and(|selected| selected == name);
-            let mut item = MenuItem::styled(label.clone(), i, menu, selected);
-            if !name.is_empty() {
-                item = item.name(name.clone());
+            let selected = selected_name.is_some_and(|selected| selected == entry.name);
+            let mut item = MenuItem::styled(entry, i, menu, selected);
+            if !entry.name.is_empty() {
+                item = item.name(entry.name.clone());
             }
             scroll = scroll.push(item);
         }
@@ -262,19 +379,19 @@ pub fn build_menu_styled(
         if let Some(width) = menu.width {
             vbox.base_mut().width = Sizing::Fixed(width);
         }
-        for (i, (label, name)) in items.iter().enumerate() {
+        for (i, entry) in entries.iter().enumerate() {
             if menu
                 .header_name_prefix
                 .as_deref()
-                .is_some_and(|prefix| name.starts_with(prefix))
+                .is_some_and(|prefix| entry.name.starts_with(prefix))
             {
-                vbox = vbox.push(MenuItem::header(label.clone(), menu));
+                vbox = vbox.push(MenuItem::header(entry.label.clone(), menu));
                 continue;
             }
-            let selected = selected_name.is_some_and(|selected| selected == name);
-            let mut item = MenuItem::styled(label.clone(), i, menu, selected);
-            if !name.is_empty() {
-                item = item.name(name.clone());
+            let selected = selected_name.is_some_and(|selected| selected == entry.name);
+            let mut item = MenuItem::styled(entry, i, menu, selected);
+            if !entry.name.is_empty() {
+                item = item.name(entry.name.clone());
             }
             vbox = vbox.push(item);
         }

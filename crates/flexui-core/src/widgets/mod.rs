@@ -33,7 +33,10 @@ pub use hbox::HBox;
 pub use image::Image;
 pub use label::Label;
 pub use listview::ListView;
-pub use menu::{build_menu, build_menu_labels, build_menu_styled, build_tooltip, MenuItem, MenuStyle};
+pub use menu::{
+    build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip,
+    MenuAlignment, MenuEntry, MenuItem, MenuStyle,
+};
 pub use panel::Panel;
 pub use progress::Progress;
 pub use radio::Radio;

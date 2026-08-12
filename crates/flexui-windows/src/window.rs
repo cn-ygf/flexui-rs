@@ -42,6 +42,24 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use crate::canvas::{GdiCanvas, ImageCache};
 use crate::gdiplus::{Gdiplus, OffscreenBitmap, UNIT_PIXEL};
 
+fn open_overlay_request(disp: &mut Dispatcher, request: flexui_core::OverlayRequest) {
+    if let Some(entries) = request.entries {
+        disp.open_styled_menu_entries(
+            request.anchor,
+            entries,
+            request.style.unwrap_or_default(),
+            request.selected_name,
+        );
+    } else {
+        disp.open_styled_menu(
+            request.anchor,
+            request.items,
+            request.style,
+            request.selected_name,
+        );
+    }
+}
+
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
 /// 还原消息栈退出后再刷新最小化期间发生的内容更新。
@@ -407,7 +425,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         let anims = ctx.take_anim_requests();
         let nw = ctx.take_new_windows();
         for r in overlays {
-            st.disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
+            open_overlay_request(&mut st.disp, r);
         }
         for a in anims {
             st.disp.animate(
@@ -482,7 +500,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
-        st.disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
+        open_overlay_request(&mut st.disp, r);
     }
     for a in anim_reqs {
         st.disp.animate(
@@ -1020,7 +1038,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         ov_reqs = ctx.take_overlay_requests();
                     }
                     for r in ov_reqs {
-                        st.disp.open_styled_menu(r.anchor, r.items, r.style, r.selected_name);
+                        open_overlay_request(&mut st.disp, r);
                     }
                     for a in anim_reqs {
                         st.disp.animate(

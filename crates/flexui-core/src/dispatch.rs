@@ -103,6 +103,11 @@ pub struct Overlay {
     pub dismiss_outside: bool,
     /// 浮层相对窗口边缘的安全边距。
     pub window_margin: flexui_geometry::Insets,
+    /// 当前层的菜单数据，用于按行展开子菜单。
+    pub entries: Vec<crate::widgets::MenuEntry>,
+    pub style: crate::widgets::MenuStyle,
+    /// 子菜单所属的父菜单项；根菜单为 None。
+    pub parent_item: Option<WidgetId>,
 }
 
 /// 被动浮层（Tooltip）：只绘制、从不参与事件；由 hover + 定时器控制显隐。
@@ -129,9 +134,9 @@ pub struct Dispatcher {
     /// 模态浮层栈（下拉/菜单）；顶部为当前活动浮层。
     overlays: Vec<Overlay>,
     /// 浮层内的悬停项（与主树 hover 分离，避免打开菜单清掉主树状态）。
-    overlay_hover: Option<WidgetId>,
+    overlay_hover: Option<(usize, WidgetId)>,
     /// 浮层内的按下项（与主树 pressed 分离）。
-    overlay_pressed: Option<WidgetId>,
+    overlay_pressed: Option<(usize, WidgetId)>,
     /// 被动 Tooltip 浮层（None=不显示）。
     tooltip: Option<Tooltip>,
     /// hover 停留在带 tooltip 控件上累计的定时 tick 数（用于延时显示）。
@@ -265,22 +270,35 @@ impl Dispatcher {
         style: Option<crate::widgets::MenuStyle>,
         selected_name: Option<String>,
     ) {
-        if items.is_empty() {
+        let style = style.unwrap_or_default();
+        let entries = items
+            .into_iter()
+            .map(|(label, name)| crate::widgets::MenuEntry::item(label, name))
+            .collect();
+        self.open_styled_menu_entries(anchor, entries, style, selected_name);
+    }
+
+    /// 打开可带图标与子菜单的上下文菜单。
+    pub fn open_styled_menu_entries(
+        &mut self,
+        anchor: Rect,
+        entries: Vec<crate::widgets::MenuEntry>,
+        style: crate::widgets::MenuStyle,
+        selected_name: Option<String>,
+    ) {
+        if entries.is_empty() {
             return;
         }
-        let style = style.unwrap_or_default();
-        let menu = crate::widgets::build_menu_styled(
-            &items,
-            None,
-            &style,
-            selected_name.as_deref(),
-        );
+        let menu = crate::widgets::build_menu_entries(&entries, &style, selected_name.as_deref());
         self.overlays.push(Overlay {
             root: menu,
             anchor,
             owner: None,
             dismiss_outside: true,
             window_margin: style.window_margin,
+            entries,
+            style,
+            parent_item: None,
         });
         self.needs_redraw = true;
     }
@@ -291,17 +309,37 @@ impl Dispatcher {
         for i in 0..self.overlays.len() {
             let anchor = self.overlays[i].anchor;
             let window_margin = self.overlays[i].window_margin;
+            let is_submenu = self.overlays[i].parent_item.is_some();
+            let alignment = self.overlays[i].style.alignment;
             let min_w = anchor.size.width; // 菜单至少与锚点同宽
             let node = self.overlays[i].root.as_mut();
             let desired = node.measure(window, &*cv);
-            let rect = place_overlay(anchor, desired, window, min_w, window_margin);
+            let rect = if is_submenu {
+                place_submenu(anchor, desired, window, window_margin)
+            } else {
+                place_overlay(
+                    anchor,
+                    desired,
+                    window,
+                    min_w,
+                    window_margin,
+                    alignment,
+                )
+            };
             layout_node(node, rect, &*cv);
             paint_tree(&*node, cv);
         }
         if let Some(tip) = &mut self.tooltip {
             let node = tip.root.as_mut();
             let desired = node.measure(window, &*cv);
-            let rect = place_overlay(tip.anchor, desired, window, 0.0, flexui_geometry::Insets::default());
+            let rect = place_overlay(
+                tip.anchor,
+                desired,
+                window,
+                0.0,
+                flexui_geometry::Insets::default(),
+                crate::widgets::MenuAlignment::Start,
+            );
             layout_node(node, rect, &*cv);
             paint_tree(&*node, cv);
         }
@@ -373,97 +411,121 @@ impl Dispatcher {
         self.needs_redraw = true;
     }
 
-    /// 有浮层时的事件路由：仅作用于栈顶浮层，不触及主树状态。
+    /// 有浮层时的事件路由：从最上层向下命中，父子菜单作为一个整体交互。
     fn handle_with_overlay(&mut self, main_root: &mut dyn Widget, ev: &Event) {
-        // 取出栈顶浮层到局部，规避 self 与浮层 root 的自借用冲突。
-        let mut ov = match self.overlays.pop() {
-            Some(o) => o,
-            None => return,
-        };
-        let mut keep = true;
         match ev {
             Event::MouseMove { pos } => {
-                let hit = hit_test(ov.root.as_ref(), *pos);
-                self.overlay_hover(ov.root.as_mut(), hit);
+                let Some(level) = self.overlay_level_at(*pos) else {
+                    self.clear_overlay_hover();
+                    return;
+                };
+                self.overlays.truncate(level + 1);
+                let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
+                self.overlay_hover(level, hit);
+                self.open_hovered_submenu(level, hit);
             }
             Event::MouseDown { pos, button: MouseButton::Left } => {
-                match hit_test(ov.root.as_ref(), *pos) {
-                    Some(id) => self.overlay_press(ov.root.as_mut(), Some(id)),
-                    None if ov.dismiss_outside => keep = false,
-                    None => {}
+                if let Some(level) = self.overlay_level_at(*pos) {
+                    let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
+                    self.overlay_press(level, hit);
+                } else {
+                    self.close_overlays();
                 }
             }
             Event::MouseUp { pos, button: MouseButton::Left } => {
-                let hit = hit_test(ov.root.as_ref(), *pos);
-                if self.overlay_release(ov.root.as_mut(), main_root, ov.owner, hit) {
-                    keep = false; // 选中即关闭
+                if let Some(level) = self.overlay_level_at(*pos) {
+                    let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
+                    if self.overlay_release(level, main_root, hit) {
+                        self.close_overlays();
+                    }
                 }
             }
             Event::KeyDown { key, .. } if *key == crate::event::keys::ESCAPE => {
-                keep = false;
-            }
-            Event::MouseWheel { pos, dy, .. }
-                if scroll_tree_at(ov.root.as_mut(), *pos, *dy).is_some() =>
-            {
+                self.overlays.pop();
+                self.overlay_hover = None;
+                self.overlay_pressed = None;
                 self.needs_redraw = true;
             }
+            Event::MouseWheel { pos, dy, .. } => {
+                if let Some(level) = self.overlay_level_at(*pos) {
+                    if scroll_tree_at(self.overlays[level].root.as_mut(), *pos, *dy).is_some() {
+                        self.overlays.truncate(level + 1);
+                        self.needs_redraw = true;
+                    }
+                }
+            }
             _ => {}
-        }
-        if keep {
-            self.overlays.push(ov);
-        } else {
-            // ov 已出栈丢弃；清其余浮层与交互态。
-            self.close_overlays();
         }
     }
 
     /// 浮层内 hover（只动浮层树的 hover 标记，主树不受影响）。
-    fn overlay_hover(&mut self, ov_root: &mut dyn Widget, hit: Option<WidgetId>) {
-        if self.overlay_hover == hit {
+    fn overlay_hover(&mut self, level: usize, hit: Option<WidgetId>) {
+        let hover = hit.map(|id| (level, id));
+        if self.overlay_hover == hover {
             return;
         }
-        self.overlay_hover = hit;
-        for_each_mut(ov_root, &mut |w| {
-            let b = w.base_mut();
-            b.hover = Some(b.id) == hit && b.enabled;
-        });
+        self.overlay_hover = hover;
+        for (overlay_level, overlay) in self.overlays.iter_mut().enumerate() {
+            for_each_mut(overlay.root.as_mut(), &mut |w| {
+                let b = w.base_mut();
+                b.hover = hover == Some((overlay_level, b.id)) && b.enabled;
+            });
+        }
+        self.needs_redraw = true;
+    }
+
+    fn clear_overlay_hover(&mut self) {
+        if self.overlay_hover.take().is_none() {
+            return;
+        }
+        for overlay in &mut self.overlays {
+            for_each_mut(overlay.root.as_mut(), &mut |w| w.base_mut().hover = false);
+        }
         self.needs_redraw = true;
     }
 
     /// 浮层内按下（记录 overlay_pressed）。
-    fn overlay_press(&mut self, ov_root: &mut dyn Widget, hit: Option<WidgetId>) {
-        self.overlay_pressed = hit;
-        for_each_mut(ov_root, &mut |w| {
-            let b = w.base_mut();
-            b.pressed = Some(b.id) == hit && b.enabled;
-        });
+    fn overlay_press(&mut self, level: usize, hit: Option<WidgetId>) {
+        self.overlay_pressed = hit.map(|id| (level, id));
+        for (overlay_level, overlay) in self.overlays.iter_mut().enumerate() {
+            for_each_mut(overlay.root.as_mut(), &mut |w| {
+                let b = w.base_mut();
+                b.pressed = self.overlay_pressed == Some((overlay_level, b.id)) && b.enabled;
+            });
+        }
         self.needs_redraw = true;
     }
 
     /// 浮层内抬起：若按下/抬起同为某 MenuItem，则应用选择并返回 true（应关闭）。
     fn overlay_release(
         &mut self,
-        ov_root: &mut dyn Widget,
+        level: usize,
         main_root: &mut dyn Widget,
-        owner: Option<WidgetId>,
         hit: Option<WidgetId>,
     ) -> bool {
         let pressed = self.overlay_pressed.take();
-        for_each_mut(ov_root, &mut |w| w.base_mut().pressed = false);
-        let Some(pid) = pressed else { return false };
-        if Some(pid) != hit {
+        for overlay in &mut self.overlays {
+            for_each_mut(overlay.root.as_mut(), &mut |w| w.base_mut().pressed = false);
+        }
+        let Some((pressed_level, pid)) = pressed else { return false };
+        if pressed_level != level || Some(pid) != hit {
             return false;
         }
         // 取该 MenuItem 的行号与 name。
         let mut idx: Option<usize> = None;
         let mut item_name: Option<String> = None;
-        visit_mut(ov_root, pid, &mut |w| {
+        visit_mut(self.overlays[level].root.as_mut(), pid, &mut |w| {
             if w.base().role == WidgetRole::MenuItem {
                 idx = w.selected_index();
                 item_name = w.base().name.clone();
             }
         });
         let Some(idx) = idx else { return false };
+        if self.overlays[level].entries.get(idx).is_some_and(crate::widgets::MenuEntry::is_submenu) {
+            self.open_hovered_submenu(level, Some(pid));
+            return false;
+        }
+        let owner = self.overlays[level].owner;
         match owner {
             // 下拉框：在主树回填 owner 并按 owner 名上报激活。
             Some(oid) => {
@@ -484,6 +546,58 @@ impl Dispatcher {
             }
         }
         true
+    }
+
+    fn overlay_level_at(&self, pos: Point) -> Option<usize> {
+        self.overlays.iter().rposition(|overlay| overlay.root.base().rect.contains(pos))
+    }
+
+    fn open_hovered_submenu(&mut self, level: usize, hit: Option<WidgetId>) {
+        let Some(item_id) = hit else {
+            self.overlays.truncate(level + 1);
+            return;
+        };
+        let mut index = None;
+        let mut anchor = Rect::default();
+        visit_mut(self.overlays[level].root.as_mut(), item_id, &mut |widget| {
+            if widget.base().role == WidgetRole::MenuItem {
+                index = widget.selected_index();
+                anchor = widget.base().rect;
+            }
+        });
+        let Some(entry) = index.and_then(|index| self.overlays[level].entries.get(index)).cloned() else {
+            self.overlays.truncate(level + 1);
+            return;
+        };
+        if !entry.is_submenu() {
+            self.overlays.truncate(level + 1);
+            return;
+        }
+        if self.overlays.get(level + 1).is_some_and(|overlay| overlay.parent_item == Some(item_id)) {
+            return;
+        }
+        self.overlays.truncate(level + 1);
+        if self.overlays[level].style.submenu_align_panel_top {
+            anchor.origin.y = self.overlays[level].root.base().rect.top();
+        }
+        let style = self.overlays[level]
+            .style
+            .submenu_style
+            .as_deref()
+            .unwrap_or(&self.overlays[level].style)
+            .clone();
+        let root = crate::widgets::build_menu_entries(&entry.children, &style, None);
+        self.overlays.push(Overlay {
+            root,
+            anchor,
+            owner: None,
+            dismiss_outside: true,
+            window_margin: style.window_margin,
+            entries: entry.children,
+            style,
+            parent_item: Some(item_id),
+        });
+        self.needs_redraw = true;
     }
 
     /// 复制焦点控件的选中文本（无选区返回 None）。供后端写系统剪贴板。
@@ -825,6 +939,11 @@ impl Dispatcher {
         // 打开下拉的控件（ComboBox）：本次点击只负责弹出菜单，不上报激活
         //（激活留给选中项，避免 on_activate 在打开与选中各触发一次）。
         if let Some(items) = menu {
+            let entries = items
+                .iter()
+                .map(|label| crate::widgets::MenuEntry::item(label.clone(), ""))
+                .collect();
+            let style = crate::widgets::MenuStyle::default();
             let dropdown = crate::widgets::build_menu_labels(&items, Some(id));
             self.overlays.push(Overlay {
                 root: dropdown,
@@ -832,6 +951,9 @@ impl Dispatcher {
                 owner: Some(id),
                 dismiss_outside: true,
                 window_margin: flexui_geometry::Insets::default(),
+                entries,
+                style,
+                parent_item: None,
             });
             self.needs_redraw = true;
             return;
@@ -917,13 +1039,17 @@ fn place_overlay(
     window: Size,
     min_width: f32,
     margin: flexui_geometry::Insets,
+    alignment: crate::widgets::MenuAlignment,
 ) -> Rect {
     let available_w = (window.width - margin.horizontal()).max(0.0);
     let available_h = (window.height - margin.vertical()).max(0.0);
     let w = desired.width.max(min_width).min(available_w);
     let h = desired.height.min(available_h);
     // X：锚点左对齐，超出右边则左移，再夹到 0。
-    let mut x = anchor.left();
+    let mut x = match alignment {
+        crate::widgets::MenuAlignment::Start => anchor.left(),
+        crate::widgets::MenuAlignment::End => anchor.right() - w,
+    };
     if x + w > window.width - margin.right {
         x = window.width - margin.right - w;
     }
@@ -942,6 +1068,26 @@ fn place_overlay(
             (window.height - margin.bottom - h).max(margin.top)
         }
     };
+    Rect::new(x, y, w, h)
+}
+
+/// 子菜单优先贴父项右侧展开，空间不足时翻到左侧，Y 与父项顶边对齐。
+fn place_submenu(
+    anchor: Rect,
+    desired: Size,
+    window: Size,
+    margin: flexui_geometry::Insets,
+) -> Rect {
+    let available_w = (window.width - margin.horizontal()).max(0.0);
+    let available_h = (window.height - margin.vertical()).max(0.0);
+    let w = desired.width.min(available_w);
+    let h = desired.height.min(available_h);
+    let x = if anchor.right() + w <= window.width - margin.right {
+        anchor.right()
+    } else {
+        (anchor.left() - w).max(margin.left)
+    };
+    let y = anchor.top().min(window.height - margin.bottom - h).max(margin.top);
     Rect::new(x, y, w, h)
 }
 
@@ -1230,14 +1376,14 @@ mod tests {
     fn place_overlay_下方上翻夹取() {
         let win = Size::new(200.0, 100.0);
         // 下方够放：y=锚点底部；宽取 max(desired,min)。
-        let r = place_overlay(Rect::new(10.0, 10.0, 50.0, 20.0), Size::new(40.0, 30.0), win, 50.0, flexui_geometry::Insets::default());
+        let r = place_overlay(Rect::new(10.0, 10.0, 50.0, 20.0), Size::new(40.0, 30.0), win, 50.0, flexui_geometry::Insets::default(), crate::widgets::MenuAlignment::Start);
         assert_eq!(r.top(), 30.0);
         assert_eq!(r.size.width, 50.0);
         // 下方放不下 → 上翻到锚点上方。
-        let r2 = place_overlay(Rect::new(10.0, 80.0, 50.0, 15.0), Size::new(40.0, 30.0), win, 0.0, flexui_geometry::Insets::default());
+        let r2 = place_overlay(Rect::new(10.0, 80.0, 50.0, 15.0), Size::new(40.0, 30.0), win, 0.0, flexui_geometry::Insets::default(), crate::widgets::MenuAlignment::Start);
         assert_eq!(r2.top(), 50.0);
         // 锚点靠右 → X 夹到窗内。
-        let r3 = place_overlay(Rect::new(180.0, 10.0, 10.0, 10.0), Size::new(40.0, 10.0), win, 0.0, flexui_geometry::Insets::default());
+        let r3 = place_overlay(Rect::new(180.0, 10.0, 10.0, 10.0), Size::new(40.0, 10.0), win, 0.0, flexui_geometry::Insets::default(), crate::widgets::MenuAlignment::Start);
         assert_eq!(r3.left(), 160.0);
         // 原版登录菜单在 580 宽窗口内保留 14px 右边距。
         let r4 = place_overlay(
@@ -1246,6 +1392,7 @@ mod tests {
             Size::new(580.0, 416.0),
             68.0,
             flexui_geometry::Insets::new(0.0, 0.0, 14.0, 28.0),
+            crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r4, Rect::new(272.0, 160.0, 294.0, 228.0));
     }
@@ -1479,6 +1626,49 @@ mod tests {
         assert_eq!(root.base().text, "hi");
         // 无选区复制返回 None。
         assert_eq!(disp.copy_selection(&mut root), None);
+    }
+
+    #[test]
+    fn 子菜单_hover展开且叶项只激活一次() {
+        let mut root = Panel::new().size(300.0, 300.0);
+        let mut disp = Dispatcher::new();
+        let entries = vec![
+            crate::widgets::MenuEntry::submenu(
+                "提交问题",
+                vec![
+                    crate::widgets::MenuEntry::item("问题百科", "faq"),
+                    crate::widgets::MenuEntry::item("自助修复", "repair"),
+                ],
+            ),
+            crate::widgets::MenuEntry::item("设置", "settings"),
+        ];
+        disp.open_styled_menu_entries(
+            Rect::new(260.0, 10.0, 24.0, 24.0),
+            entries,
+            crate::widgets::MenuStyle {
+                width: Some(120.0),
+                row_height: 40.0,
+                alignment: crate::widgets::MenuAlignment::End,
+                submenu_align_panel_top: true,
+                ..Default::default()
+            },
+            None,
+        );
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+        assert_eq!(disp.overlays[0].root.base().rect.right(), 284.0);
+
+        let parent = disp.top_overlay_item_center(0).unwrap();
+        disp.handle(&mut root, &Event::MouseMove { pos: parent });
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+        assert_eq!(disp.overlays.len(), 2);
+        assert_eq!(disp.overlays[1].root.base().rect.top(), disp.overlays[0].root.base().rect.top());
+        assert!(disp.take_activations().is_empty());
+
+        let child = disp.top_overlay_item_center(1).unwrap();
+        disp.handle(&mut root, &Event::MouseDown { pos: child, button: MouseButton::Left });
+        disp.handle(&mut root, &Event::MouseUp { pos: child, button: MouseButton::Left });
+        assert_eq!(disp.take_activations(), vec!["repair".to_string()]);
+        assert!(!disp.has_overlays());
     }
 
     #[test]
