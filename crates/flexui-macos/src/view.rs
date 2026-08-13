@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use objc2::rc::Retained;
+use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
@@ -16,7 +16,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound,
-    NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSSize, NSString, NSUInteger,
+    NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSSize, NSString, NSTimer,
+    NSUInteger,
 };
 
 use flexui_core::event::keys;
@@ -62,6 +63,20 @@ fn char_index_to_utf16(text: &str, char_index: usize) -> NSUInteger {
 /// macOS 窗口控制句柄（实现平台无关的 WindowHandle）。
 pub struct MacWindowHandle {
     window: Retained<NSWindow>,
+    close_requested: bool,
+}
+
+impl MacWindowHandle {
+    fn new(window: Retained<NSWindow>) -> Self {
+        Self {
+            window,
+            close_requested: false,
+        }
+    }
+
+    fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
+    }
 }
 
 impl WindowHandle for MacWindowHandle {
@@ -69,11 +84,9 @@ impl WindowHandle for MacWindowHandle {
         self.window.setTitle(&NSString::from_str(title));
     }
     fn close(&mut self) {
-        if let Some(owner) = self.window.sheetParent() {
-            owner.endSheet(&self.window);
-        } else {
-            self.window.close();
-        }
+        // AppKit 关闭 sheet 时会同步回调窗口委托。这里只记录请求，由外层在释放
+        // AppState 的 RefCell 借用后执行，避免重入导致进程因 borrow panic 退出。
+        self.close_requested = true;
     }
     fn minimize(&mut self) {
         self.window.miniaturize(None);
@@ -98,12 +111,14 @@ pub struct AppState {
     pub localized_title: Option<flexui_core::LocalizedStringResource>,
     /// 回调中动态打开的子窗口保活句柄。
     pub child_windows: Vec<Retained<NSWindow>>,
+    /// 重复定时器必须在窗口关闭时失效，避免 run loop 继续强持有 FlexView。
+    pub timers: Vec<Retained<NSTimer>>,
     /// 每窗口独立图片缓存，随窗口释放原生 NSImage。
     pub image_cache: SharedImageCache,
     /// 内容区精确拖动范围；平台默认策略由 NSWindow 自己处理。
     pub drag_region: WindowDragRegion,
     /// owned modal 的 owner；关闭时恢复 owner 输入。
-    pub modal_owner: Option<Retained<NSWindow>>,
+    pub modal_owner: Option<Weak<NSWindow>>,
 }
 
 pub struct FlexViewIvars {
@@ -266,21 +281,30 @@ define_class!(
     unsafe impl NSWindowDelegate for FlexView {
         #[unsafe(method(windowShouldClose:))]
         fn window_should_close(&self, _sender: &AnyObject) -> bool {
-            let allow = self.fire_close();
-            if allow {
+            let (allow, close_requested) = self.fire_close();
+            if allow || close_requested {
                 if let Some(window) = self.window() {
-                    if let Some(owner) = window.sheetParent() {
-                        owner.endSheet(&window);
+                    if window.sheetParent().is_some() {
+                        apply_close_request(&window);
                         return false.into();
                     }
                 }
             }
-            allow
+            allow || close_requested
         }
 
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _notification: &objc2_foundation::NSNotification) {
-            if let Some(owner) = self.ivars().state.borrow().modal_owner.as_ref() {
+            let (timers, owner) = {
+                let mut state = self.ivars().state.borrow_mut();
+                let timers = std::mem::take(&mut state.timers);
+                let owner = state.modal_owner.as_ref().and_then(Weak::load);
+                (timers, owner)
+            };
+            for timer in timers {
+                timer.invalidate();
+            }
+            if let Some(owner) = owner {
                 owner.makeKeyAndOrderFront(None);
             }
         }
@@ -447,13 +471,25 @@ fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
     topmost(root, p) == Some(true)
 }
 
+fn apply_close_request(window: &NSWindow) {
+    if let Some(owner) = window.sheetParent() {
+        owner.endSheet(window);
+        window.orderOut(None);
+    }
+    window.close();
+}
+
+fn request_close(window: &NSWindow) {
+    window.performClose(None);
+}
+
 /// 创建 FlexView 时随窗口传入的环境状态。
 pub struct FlexViewEnvironment {
     pub localizer: Option<flexui_core::Localizer>,
     pub locale_revision: u64,
     pub localized_title: Option<flexui_core::LocalizedStringResource>,
     pub drag_region: WindowDragRegion,
-    pub modal_owner: Option<Retained<NSWindow>>,
+    pub modal_owner: Option<Weak<NSWindow>>,
 }
 
 /// 把 NSString / NSAttributedString 参数转成 Rust String。
@@ -519,6 +555,7 @@ impl FlexView {
                 locale_revision: environment.locale_revision,
                 localized_title: environment.localized_title,
                 child_windows: Vec::new(),
+                timers: Vec::new(),
                 image_cache: Rc::new(RefCell::new(ImageCache::default())),
                 drag_region: environment.drag_region,
                 modal_owner: environment.modal_owner,
@@ -530,25 +567,24 @@ impl FlexView {
     }
 
     /// 关闭请求 → 窗口委托 on_close，返回是否允许关闭。
-    pub fn fire_close(&self) -> bool {
+    pub fn fire_close(&self) -> (bool, bool) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
         let AppState { root, delegate, .. } = &mut *st;
         if let Some(win) = window {
-            let mut handle = MacWindowHandle { window: win };
+            let mut handle = MacWindowHandle::new(win);
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
-            delegate.on_close(&mut ctx)
+            let allow = delegate.on_close(&mut ctx);
+            (allow, handle.take_close_request())
         } else {
-            true
+            (true, false)
         }
     }
 
     /// 窗口创建后触发 on_init（≈ duilib InitWindow）。
-    pub fn fire_init(&self, window: &Retained<NSWindow>) {
-        let mut handle = MacWindowHandle {
-            window: window.clone(),
-        };
+    pub fn fire_init(&self, window: &Retained<NSWindow>) -> bool {
+        let mut handle = MacWindowHandle::new(window.clone());
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
         let AppState {
@@ -564,6 +600,7 @@ impl FlexView {
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
         let new_wins = ctx.take_new_windows();
+        let close_requested = handle.take_close_request();
         for r in overlays {
             open_overlay_request(disp, r);
         }
@@ -573,6 +610,15 @@ impl FlexView {
         drop(st);
         self.create_windows(new_wins);
         self.setNeedsDisplay(true);
+        close_requested
+    }
+
+    pub fn set_timers(&self, timers: Vec<Retained<NSTimer>>) {
+        self.ivars().state.borrow_mut().timers = timers;
+    }
+
+    pub fn close_after_callback(&self, window: &NSWindow) {
+        request_close(window);
     }
 
     /// 创建回调里请求的新窗口（多窗口）。
@@ -583,7 +629,12 @@ impl FlexView {
         let mtm = self.mtm();
         let mut created = Vec::with_capacity(specs.len());
         for spec in specs {
-            created.push(crate::make_window(mtm, spec, self.window().as_deref()));
+            let is_sheet = spec.presentation == flexui_core::WindowPresentation::ModalDialog
+                && self.window().is_some();
+            let window = crate::make_window(mtm, spec, self.window().as_deref());
+            if !is_sheet {
+                created.push(window);
+            }
         }
         self.ivars()
             .state
@@ -595,15 +646,21 @@ impl FlexView {
     /// 文件拖放 → 窗口委托 on_drop_files。
     fn fire_drop(&self, paths: Vec<String>) {
         let window = self.window();
+        let mut close_requested = false;
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
         let AppState { root, delegate, .. } = &mut *st;
-        if let Some(win) = window {
-            let mut handle = MacWindowHandle { window: win };
+        if let Some(win) = window.as_ref() {
+            let mut handle = MacWindowHandle::new(win.clone());
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             delegate.on_drop_files(&paths, &mut ctx);
+            close_requested = handle.take_close_request();
         }
         drop(st);
+        if close_requested {
+            request_close(window.as_ref().unwrap());
+            return;
+        }
         self.setNeedsDisplay(true);
     }
 
@@ -633,9 +690,10 @@ impl FlexView {
         let msgs = disp.drain_messages();
         let mut anim_reqs = Vec::new();
         let mut ov_reqs = Vec::new();
+        let mut close_requested = false;
         if !msgs.is_empty() {
-            if let Some(win) = window {
-                let mut handle = MacWindowHandle { window: win };
+            if let Some(win) = window.as_ref() {
+                let mut handle = MacWindowHandle::new(win.clone());
                 let mut ctx = WindowCtx::with_proxy_and_localizer(
                     root.as_mut(), &mut handle, disp.proxy(), localizer_for_ctx.clone(),
                 );
@@ -644,16 +702,23 @@ impl FlexView {
                 }
                 anim_reqs = ctx.take_anim_requests();
                 ov_reqs = ctx.take_overlay_requests();
+                close_requested = handle.take_close_request();
             }
         }
-        for r in ov_reqs {
-            open_overlay_request(disp, r);
-        }
-        for a in anim_reqs {
-            disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        if !close_requested {
+            for r in ov_reqs {
+                open_overlay_request(disp, r);
+            }
+            for a in anim_reqs {
+                disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+            }
         }
         let redraw = changed || !msgs.is_empty() || locale_changed;
         drop(st);
+        if close_requested {
+            request_close(window.as_ref().unwrap());
+            return;
+        }
         if redraw {
             self.setNeedsDisplay(true);
         }
@@ -699,9 +764,10 @@ impl FlexView {
         let mut reqs = Vec::new();
         let mut anim_reqs = Vec::new();
         let mut new_wins = Vec::new();
+        let mut close_requested = false;
         if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
-            if let Some(win) = window {
-                let mut handle = MacWindowHandle { window: win };
+            if let Some(win) = window.as_ref() {
+                let mut handle = MacWindowHandle::new(win.clone());
                 let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer.clone());
                 for name in &acts {
                     delegate.on_activate(name, &mut ctx);
@@ -715,17 +781,24 @@ impl FlexView {
                 reqs = ctx.take_overlay_requests();
                 anim_reqs = ctx.take_anim_requests();
                 new_wins = ctx.take_new_windows();
+                close_requested = handle.take_close_request();
             }
         }
         // 委托里请求的上下文菜单 / 动画 → 交分发器。
         let opened = !reqs.is_empty();
-        for r in reqs {
-            open_overlay_request(disp, r);
-        }
-        for a in anim_reqs {
-            disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        if !close_requested {
+            for r in reqs {
+                open_overlay_request(disp, r);
+            }
+            for a in anim_reqs {
+                disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+            }
         }
         drop(st);
+        if close_requested {
+            request_close(window.as_ref().unwrap());
+            return;
+        }
         self.create_windows(new_wins);
         // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。
         if need || opened || !acts.is_empty() || !doubles.is_empty() {
@@ -757,13 +830,19 @@ impl FlexView {
             return;
         };
         let window = self.window();
+        let mut close_requested = false;
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
         let AppState { root, delegate, .. } = &mut *st;
-        if let Some(win) = window {
-            let mut handle = MacWindowHandle { window: win };
+        if let Some(win) = window.as_ref() {
+            let mut handle = MacWindowHandle::new(win.clone());
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             delegate.on_key(ch as u32, &mut ctx);
+            close_requested = handle.take_close_request();
+        }
+        drop(st);
+        if close_requested {
+            request_close(window.as_ref().unwrap());
         }
     }
 

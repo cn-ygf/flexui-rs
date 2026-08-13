@@ -13,9 +13,9 @@ pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_te
 pub use dialog::show_dialog;
 pub use view::{FlexView, MacWindowHandle};
 
-use objc2::rc::Retained;
+use objc2::rc::{Retained, Weak};
 use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, MainThreadOnly, Message};
+use objc2::{AnyThread, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSImage, NSWindow,
     NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
@@ -163,7 +163,7 @@ pub(crate) fn make_window(
             locale_revision,
             localized_title: config.localized_title.clone(),
             drag_region: config.drag_region,
-            modal_owner: modal_owner.map(Message::retain),
+            modal_owner: modal_owner.map(Weak::new),
         },
     );
     // 注册文件拖放类型（接收拖入的文件路径 → on_drop_files）。
@@ -174,7 +174,7 @@ pub(crate) fn make_window(
     window.setDelegate(Some(ProtocolObject::from_ref(&*view)));
 
     // 窗口/控件就绪后触发 on_init（≈ InitWindow）。
-    view.fire_init(&window);
+    let close_requested = view.fire_init(&window);
 
     // 光标闪烁定时器（0.53s 切换一次）。
     #[allow(non_snake_case)]
@@ -199,6 +199,7 @@ pub(crate) fn make_window(
             true,
         )
     };
+    view.set_timers(vec![_blink, _frame]);
 
     if let Some(owner) = modal_owner {
         let owner_frame = owner.frame();
@@ -211,6 +212,9 @@ pub(crate) fn make_window(
     } else {
         window.center();
         window.makeKeyAndOrderFront(None);
+    }
+    if close_requested {
+        view.close_after_callback(&window);
     }
     window
 }
