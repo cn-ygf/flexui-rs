@@ -18,7 +18,7 @@
       <CheckBox text-verbatim="Receive update notifications" height="26"/>
       <HBox height="28" spacing="12" align="center">
         <Label text-verbatim="Automatic updates" width="150"/>
-        <CheckBox switch="true" checked="true" width="48" height="26"/>
+        <Switch checked="true" width="48" height="26"/>
       </HBox>
       <Radio text-verbatim="Standard plan" group="21" selected="true" height="26"/>
       <Radio text-verbatim="Professional plan" group="21" height="26"/>

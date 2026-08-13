@@ -87,6 +87,8 @@ pub struct StyleSpec {
     pub accent_color: Option<Color>,
     /// 滑块拖柄等可移动指示器的填充色。
     pub thumb_color: Option<Color>,
+    /// Slider、Switch 等控件内部轨道颜色，不作为控件整体背景绘制。
+    pub track_color: Option<Color>,
     /// 列表选中行等局部选择区域的背景色。
     pub selection_color: Option<Color>,
     /// 控件内部滚动条颜色。
@@ -210,6 +212,7 @@ impl StyleSpec {
             border_width: self.border_width.or(base.border_width),
             accent_color: self.accent_color.or(base.accent_color),
             thumb_color: self.thumb_color.or(base.thumb_color),
+            track_color: self.track_color.or(base.track_color),
             selection_color: self.selection_color.or(base.selection_color),
             scrollbar_color: self.scrollbar_color.or(base.scrollbar_color),
             placeholder_color: self.placeholder_color.or(base.placeholder_color),

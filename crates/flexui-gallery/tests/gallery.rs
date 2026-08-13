@@ -46,7 +46,7 @@ fn embedded_gallery_loads_all_included_pages() {
         .unwrap()
         .base()
         .kind,
-        flexui::WidgetKind::CheckBox
+        flexui::WidgetKind::Switch
     );
     for name in ["nav_basic", "nav_forms", "default_button", "primary_button"] {
         let widget = find_by_id(

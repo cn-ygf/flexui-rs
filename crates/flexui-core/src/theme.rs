@@ -25,6 +25,7 @@ pub enum WidgetKind {
     Label,
     Button,
     CheckBox,
+    Switch,
     Radio,
     TabBox,
     Edit,
@@ -48,6 +49,7 @@ pub enum ThemeColorProperty {
     ForegroundTint,
     Accent,
     Thumb,
+    Track,
     Selection,
     Scrollbar,
     Placeholder,
@@ -338,6 +340,61 @@ impl Theme {
             );
         self.set_builtin_component_style(WidgetKind::CheckBox, "default", selection.clone());
         self.set_builtin_component_style(WidgetKind::Radio, "default", selection);
+        let mut switch = StyleSet::new().with_normal(StyleSpec {
+            track_color: Some(p.border),
+            thumb_color: Some(p.on_brand),
+            ..Default::default()
+        });
+        switch.set(
+            VisualState::new(BaseState::Hot, false),
+            StyleSpec {
+                track_color: Some(p.border_hover),
+                ..Default::default()
+            },
+        );
+        switch.set(
+            VisualState::new(BaseState::Pushed, false),
+            StyleSpec {
+                track_color: Some(p.text_secondary),
+                ..Default::default()
+            },
+        );
+        switch.set(
+            VisualState::new(BaseState::Disabled, false),
+            StyleSpec {
+                track_color: Some(p.border_light),
+                ..Default::default()
+            },
+        );
+        switch.set(
+            VisualState::with_selected(BaseState::Normal, false, true),
+            StyleSpec {
+                track_color: Some(p.brand),
+                ..Default::default()
+            },
+        );
+        switch.set(
+            VisualState::with_selected(BaseState::Hot, false, true),
+            StyleSpec {
+                track_color: Some(p.brand_hover),
+                ..Default::default()
+            },
+        );
+        switch.set(
+            VisualState::with_selected(BaseState::Pushed, false, true),
+            StyleSpec {
+                track_color: Some(p.brand_pressed),
+                ..Default::default()
+            },
+        );
+        switch.set(
+            VisualState::with_selected(BaseState::Disabled, false, true),
+            StyleSpec {
+                track_color: Some(p.text_disabled),
+                ..Default::default()
+            },
+        );
+        self.set_builtin_component_style(WidgetKind::Switch, "default", switch);
 
         let bordered = StyleSet::new()
             .with_normal(StyleSpec {
@@ -374,12 +431,7 @@ impl Theme {
                     ..Default::default()
                 },
             );
-        for kind in [
-            WidgetKind::Button,
-            WidgetKind::Edit,
-            WidgetKind::ComboBox,
-            WidgetKind::ListView,
-        ] {
+        for kind in [WidgetKind::Button, WidgetKind::Edit, WidgetKind::ComboBox] {
             self.set_builtin_component_style(kind, "default", bordered.clone());
         }
 
@@ -423,16 +475,46 @@ impl Theme {
         );
         self.set_builtin_component_style(WidgetKind::Radio, "variant:nav", nav);
 
-        let gauge = StyleSet::new().with_normal(StyleSpec {
+        let progress = StyleSet::new().with_normal(StyleSpec {
             bg_color: Some(p.border_light),
             accent_color: Some(p.brand),
-            thumb_color: Some(p.on_brand),
-            border_color: Some(p.border),
-            scrollbar_color: Some(p.text_secondary),
             ..Default::default()
         });
-        self.set_builtin_component_style(WidgetKind::Progress, "default", gauge.clone());
-        self.set_builtin_component_style(WidgetKind::Slider, "default", gauge);
+        self.set_builtin_component_style(WidgetKind::Progress, "default", progress);
+        self.set_builtin_component_style(
+            WidgetKind::Slider,
+            "default",
+            StyleSet::new().with_normal(StyleSpec {
+                track_color: Some(p.border_light),
+                accent_color: Some(p.brand),
+                thumb_color: Some(p.on_brand),
+                border_color: Some(p.border),
+                ..Default::default()
+            }),
+        );
+        self.set_builtin_component_style(
+            WidgetKind::ListView,
+            "default",
+            StyleSet::new()
+                .with_normal(StyleSpec {
+                    bg_color: Some(p.fill),
+                    fg_color: Some(p.text_regular),
+                    border_color: Some(p.border),
+                    border_width: Some(1.0),
+                    corner_radius: Some(Corners::all(4.0)),
+                    scrollbar_color: Some(p.text_secondary),
+                    ..Default::default()
+                })
+                .with_state(
+                    BaseState::Disabled,
+                    StyleSpec {
+                        bg_color: Some(p.fill_disabled),
+                        fg_color: Some(p.text_disabled),
+                        border_color: Some(p.border_light),
+                        ..Default::default()
+                    },
+                ),
+        );
         self.set_builtin_component_style(
             WidgetKind::Separator,
             "default",
@@ -536,6 +618,7 @@ fn set_theme_color(spec: &mut StyleSpec, property: ThemeColorProperty, color: Co
         ThemeColorProperty::ForegroundTint => spec.fg_tint = Some(color),
         ThemeColorProperty::Accent => spec.accent_color = Some(color),
         ThemeColorProperty::Thumb => spec.thumb_color = Some(color),
+        ThemeColorProperty::Track => spec.track_color = Some(color),
         ThemeColorProperty::Selection => spec.selection_color = Some(color),
         ThemeColorProperty::Scrollbar => spec.scrollbar_color = Some(color),
         ThemeColorProperty::Placeholder => spec.placeholder_color = Some(color),
@@ -648,6 +731,43 @@ mod tests {
             .resolve(VisualState::default());
         assert_eq!(resolved.border_width, Some(3.0));
         assert_eq!(theme.palette.brand, rgb(10, 20, 30));
+    }
+
+    #[test]
+    fn checkbox_slider_不绘制控件整体背景() {
+        let theme = Theme::light();
+        for kind in [WidgetKind::CheckBox, WidgetKind::Slider] {
+            let resolved = theme
+                .style_for(kind, "", &[])
+                .resolve(VisualState::default());
+            assert_eq!(resolved.bg_color, None, "{kind:?}");
+        }
+        let slider = theme
+            .style_for(WidgetKind::Slider, "", &[])
+            .resolve(VisualState::default());
+        assert!(slider.track_color.is_some());
+    }
+
+    #[test]
+    fn switch_选中状态只改变内部轨道() {
+        let theme = Theme::light();
+        let style = theme.style_for(WidgetKind::Switch, "", &[]);
+        let normal = style.resolve(VisualState::default());
+        let selected = style.resolve(VisualState::with_selected(BaseState::Normal, false, true));
+        assert_eq!(normal.bg_color, None);
+        assert_eq!(selected.bg_color, None);
+        assert_eq!(normal.track_color, Some(theme.palette.border));
+        assert_eq!(selected.track_color, Some(theme.palette.brand));
+    }
+
+    #[test]
+    fn listview_按下不改变整体背景() {
+        let theme = Theme::light();
+        let style = theme.style_for(WidgetKind::ListView, "", &[]);
+        let normal = style.resolve(VisualState::default());
+        let pushed = style.resolve(VisualState::new(BaseState::Pushed, false));
+        assert_eq!(pushed.bg_color, normal.bg_color);
+        assert_eq!(pushed.border_color, normal.border_color);
     }
 
     struct TestWindow;

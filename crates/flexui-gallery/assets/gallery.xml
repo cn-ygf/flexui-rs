@@ -7,8 +7,7 @@
       <Label text-verbatim="FlexUI Gallery" width="fill" font-size="20" bold="true"
              fgcolor="@text-primary"/>
       <Label text-verbatim="Dark mode" width="84" fgcolor="@text-secondary"/>
-      <CheckBox name="theme_switch" switch="true" width="48" height="26"
-                bgcolor="@border" selected-bgcolor="@brand" thumbcolor="@surface"/>
+      <Switch name="theme_switch" width="48" height="26" thumbcolor="@surface"/>
     </HBox>
     <HBox width="fill" height="fill">
       <VBox width="176" height="fill" padding="12" spacing="6" bgcolor="@surface"

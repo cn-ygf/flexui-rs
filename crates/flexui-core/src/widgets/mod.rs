@@ -22,6 +22,7 @@ mod radio;
 mod scroll;
 mod separator;
 mod slider;
+mod switch;
 mod tabbox;
 mod vbox;
 
@@ -43,6 +44,7 @@ pub use radio::Radio;
 pub use scroll::{ScrollBarStyle, ScrollView};
 pub use separator::Separator;
 pub use slider::Slider;
+pub use switch::Switch;
 pub use tabbox::TabBox;
 pub use vbox::VBox;
 

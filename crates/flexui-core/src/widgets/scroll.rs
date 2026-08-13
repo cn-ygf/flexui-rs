@@ -22,6 +22,8 @@ pub struct ScrollView {
 #[derive(Debug, Clone)]
 pub struct ScrollBarStyle {
     pub width: f32,
+    /// 内容与滚动条之间保留的间距。
+    pub gap: f32,
     pub min_thumb_height: f32,
     pub thumb_color: Color,
     pub thumb_image: Option<ImageSource>,
@@ -32,6 +34,7 @@ impl Default for ScrollBarStyle {
     fn default() -> Self {
         Self {
             width: 5.0,
+            gap: 4.0,
             min_thumb_height: 24.0,
             thumb_color: Color::from_u8(200, 210, 230, 160),
             thumb_image: None,
@@ -70,6 +73,25 @@ impl ScrollView {
         layout::content_rect(&self.base)
     }
 
+    /// 子控件使用的视口始终避开滚动条，避免内容宽度随滚动状态跳动。
+    fn content_viewport(&self) -> Rect {
+        let viewport = self.viewport();
+        let reserved = (self.scrollbar.width + self.scrollbar.gap).max(0.0);
+        Rect::new(
+            viewport.left(),
+            viewport.top(),
+            (viewport.size.width - reserved).max(0.0),
+            viewport.size.height,
+        )
+    }
+
+    fn clip_viewport(&self) -> Rect {
+        let content = self.content_viewport();
+        let left = (content.left() - 1.0).max(self.base.rect.left());
+        let right = (content.right() + 1.0).min(self.viewport().right());
+        Rect::new(left, content.top(), right - left, content.size.height)
+    }
+
     fn max_scroll(&self) -> f32 {
         (self.content_h - self.viewport().size.height).max(0.0)
     }
@@ -94,7 +116,8 @@ impl Widget for ScrollView {
         layout::size_from_content(&self.base, avail.width, avail.height)
     }
 
-    fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
+    fn arrange(&mut self, _content: Rect, cv: &dyn Canvas) {
+        let content = self.content_viewport();
         let inner = Size::new(content.size.width, content.size.height);
         // 先量各子控件高度，求内容总高。
         let n = self.base.children.len();
@@ -136,7 +159,7 @@ impl Widget for ScrollView {
     }
 
     fn children_viewport(&self) -> Rect {
-        self.viewport()
+        self.clip_viewport()
     }
 
     fn paint_foreground(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
@@ -246,8 +269,10 @@ mod tests {
         layout_node(&mut view, Rect::new(0.0, 0.0, 294.0, 228.0), &FakeCanvas);
         assert_eq!(
             view.children_viewport(),
-            Rect::new(24.0, 16.0, 250.0, 188.0)
+            Rect::new(23.0, 16.0, 243.0, 188.0)
         );
+        assert_eq!(view.base.children[0].base().rect.left(), 24.0);
+        assert_eq!(view.base.children[0].base().rect.size.width, 241.0);
         assert_eq!(view.max_scroll(), 52.0);
         let before = view.base.children[0].base().rect.top();
         assert!(view.scroll_by(-32.0));

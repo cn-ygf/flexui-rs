@@ -65,7 +65,7 @@ impl Widget for Slider {
         if content.size.width <= 0.0 || content.size.height <= 0.0 {
             return;
         }
-        let track_col = style.bg_color.unwrap_or(Color::from_u8(60, 64, 74, 255));
+        let track_col = style.track_color.unwrap_or(Color::from_u8(60, 64, 74, 255));
         let fill_col = style
             .accent_color
             .or(style.fg_color)

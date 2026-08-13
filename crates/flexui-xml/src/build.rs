@@ -6,7 +6,7 @@ use flexui_core::{
     Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
     FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, Image, ImageFit, ImageSource, Insets,
     Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
-    Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign,
+    Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, Switch, TabBox, TextAlign,
     ThemeColorBinding, ThemeColorProperty, TitlebarMode, VBox, VisualState, Widget, WidgetId,
     WidgetProperty, WindowConfig, WindowDragRegion,
 };
@@ -388,6 +388,7 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
         "label" => Box::new(Label::new("")),
         "button" => Box::new(Button::new("")),
         "checkbox" => Box::new(CheckBox::new("")),
+        "switch" => Box::new(Switch::new()),
         "radio" => Box::new(Radio::new("")),
         "tabbox" => Box::new(TabBox::new()),
         "scroll" | "scrollview" => Box::new(flexui_core::ScrollView::new()),
@@ -630,11 +631,6 @@ fn apply_attrs(
             "visible" => node.base_mut().visible = parse_bool(v),
             "focusable" | "tabstop" => node.base_mut().focusable = parse_bool(v),
             "focus-within" | "focuswithin" => node.base_mut().focus_within = parse_bool(v),
-            "switch" => {
-                node.apply_property(WidgetProperty::SwitchStyle(
-                    tag == "checkbox" && parse_bool(v),
-                ));
-            }
             "indicator" | "show-indicator" => {
                 node.apply_property(WidgetProperty::IndicatorVisible(parse_bool(v)));
             }
@@ -1080,6 +1076,7 @@ fn apply_style_attr(
             "fgtint" => Some(ThemeColorProperty::ForegroundTint),
             "accentcolor" => Some(ThemeColorProperty::Accent),
             "thumbcolor" => Some(ThemeColorProperty::Thumb),
+            "trackcolor" => Some(ThemeColorProperty::Track),
             "selectioncolor" => Some(ThemeColorProperty::Selection),
             "scrollbarcolor" => Some(ThemeColorProperty::Scrollbar),
             "placeholdercolor" => Some(ThemeColorProperty::Placeholder),
@@ -1102,6 +1099,7 @@ fn apply_style_attr(
         "borderwidth" => spec.border_width = val.parse().ok(),
         "accentcolor" => spec.accent_color = parse_color(val),
         "thumbcolor" => spec.thumb_color = parse_color(val),
+        "trackcolor" => spec.track_color = parse_color(val),
         "selectioncolor" => spec.selection_color = parse_color(val),
         "scrollbarcolor" => spec.scrollbar_color = parse_color(val),
         "placeholdercolor" => spec.placeholder_color = parse_color(val),
@@ -1599,9 +1597,18 @@ mod tests {
     }
 
     #[test]
-    fn xml_checkbox_switch_显式启用开关外观() {
-        let mut res = load_str(r#"<CheckBox switch="true"/>"#, &Context::new()).unwrap();
-        assert!(res.root.apply_property(WidgetProperty::SwitchStyle(false)));
+    fn xml_switch_使用独立控件类型() {
+        let res = load_str(
+            r##"<Switch checked="true" normal-trackcolor="#112233" selected-trackcolor="#00CFC4"/>"##,
+            &Context::new(),
+        )
+        .unwrap();
+        assert_eq!(res.root.base().kind, flexui_core::WidgetKind::Switch);
+        assert!(res.root.base().selected);
+        assert_eq!(
+            res.root.base().resolved_style().track_color,
+            Some(Color::from_u8(0, 207, 196, 255))
+        );
     }
 
     #[test]
