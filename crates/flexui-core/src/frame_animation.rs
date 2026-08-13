@@ -40,6 +40,8 @@ pub enum FrameLayer {
 pub struct FrameAnimation {
     pub frames: Arc<[ImageSource]>,
     pub fps: f32,
+    /// 循环播放时，一轮结束后额外停留在最后一帧的秒数。
+    pub loop_interval: f32,
     pub playback: FramePlayback,
     pub finish: FrameFinish,
 }
@@ -49,9 +51,16 @@ impl FrameAnimation {
         Self {
             frames: frames.into(),
             fps: valid_fps(fps),
+            loop_interval: 0.0,
             playback: FramePlayback::Loop,
             finish: FrameFinish::Restore,
         }
+    }
+
+    /// 设置循环之间的间隔秒数。负数、NaN 和无穷大按 0 处理。
+    pub fn loop_interval(mut self, interval_secs: f32) -> Self {
+        self.loop_interval = valid_interval(interval_secs);
+        self
     }
 
     pub fn playback(mut self, playback: FramePlayback) -> Self {
@@ -80,6 +89,14 @@ fn valid_fps(fps: f32) -> f32 {
         fps
     } else {
         25.0
+    }
+}
+
+fn valid_interval(interval_secs: f32) -> f32 {
+    if interval_secs.is_finite() && interval_secs > 0.0 {
+        interval_secs
+    } else {
+        0.0
     }
 }
 
@@ -155,12 +172,20 @@ impl FramePlayer {
         }
         let old = self.visible_frame();
         self.elapsed += dt.max(0.0);
-        let absolute = (self.elapsed * valid_fps(animation.fps)).floor() as usize;
         match animation.playback {
             FramePlayback::Loop | FramePlayback::Paused => {
-                self.frame = absolute % animation.frames.len()
+                let fps = valid_fps(animation.fps);
+                let playback_duration = animation.frames.len() as f32 / fps;
+                let cycle_duration = playback_duration + valid_interval(animation.loop_interval);
+                let cycle_elapsed = self.elapsed % cycle_duration;
+                self.frame = if cycle_elapsed >= playback_duration {
+                    animation.frames.len() - 1
+                } else {
+                    ((cycle_elapsed * fps).floor() as usize).min(animation.frames.len() - 1)
+                };
             }
             FramePlayback::Once => {
+                let absolute = (self.elapsed * valid_fps(animation.fps)).floor() as usize;
                 if absolute >= animation.frames.len() {
                     self.finished = true;
                     self.frame = animation.frames.len() - 1;
@@ -271,5 +296,28 @@ mod tests {
         assert!(player.resume());
         assert!(player.tick(0.21));
         assert_eq!(player.image(), animation.frames.get(2));
+    }
+
+    #[test]
+    fn loop_interval_holds_last_frame_before_restarting() {
+        let animation = sequence(FramePlayback::Loop, FrameFinish::Restore).loop_interval(0.2);
+        let mut player = FramePlayer::default();
+        player.start(animation.clone());
+
+        assert!(player.tick(0.21));
+        assert_eq!(player.image(), animation.frames.get(2));
+        assert!(!player.tick(0.18));
+        assert_eq!(player.image(), animation.frames.get(2));
+        assert!(player.tick(0.12));
+        assert_eq!(player.image(), animation.frames.first());
+    }
+
+    #[test]
+    fn once_playback_ignores_loop_interval() {
+        let animation = sequence(FramePlayback::Once, FrameFinish::Last).loop_interval(1.0);
+        let mut player = FramePlayer::default();
+        player.start(animation.clone());
+        assert!(player.tick(0.31));
+        assert_eq!(player.image(), animation.frames.last());
     }
 }

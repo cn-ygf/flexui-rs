@@ -21,7 +21,7 @@
     "controls.title": "Frame Animation Controls",
     "controls.subtitle": "One frame sequence can be bound to normal, hover, click, and pressed states.",
     "controls.autoplay.title": "Autoplay Loop",
-    "controls.autoplay.detail": "Starts automatically",
+    "controls.autoplay.detail": "Autoplay with a 300ms interval",
     "controls.hot.title": "Play on Hover",
     "controls.hot.detail": "Plays while hovered",
     "controls.click.title": "Play Once on Click",

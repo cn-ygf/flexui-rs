@@ -21,7 +21,7 @@
     "controls.title": "幀動畫控件",
     "controls.subtitle": "同一組幀資源可宣告到普通、懸停、點擊和按下狀態。",
     "controls.autoplay.title": "自動循環",
-    "controls.autoplay.detail": "普通控件載入後自動播放",
+    "controls.autoplay.detail": "自動播放，每輪間隔 300ms",
     "controls.hot.title": "懸停播放",
     "controls.hot.detail": "懸停時播放，移出停止",
     "controls.click.title": "點擊播放一次",

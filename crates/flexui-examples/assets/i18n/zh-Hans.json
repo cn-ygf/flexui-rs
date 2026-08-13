@@ -21,7 +21,7 @@
     "controls.title": "帧动画控件",
     "controls.subtitle": "同一组帧资源可声明到普通、悬停、点击和按下状态。",
     "controls.autoplay.title": "自动循环",
-    "controls.autoplay.detail": "普通控件加载后自动播放",
+    "controls.autoplay.detail": "自动播放，每轮间隔 300ms",
     "controls.hot.title": "悬停播放",
     "controls.hot.detail": "悬停时播放，移出停止",
     "controls.click.title": "点击播放一次",

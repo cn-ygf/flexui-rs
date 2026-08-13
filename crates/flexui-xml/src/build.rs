@@ -613,7 +613,7 @@ enum FrameTarget {
 #[derive(Clone, Copy)]
 enum FrameImageLayer { Background, Foreground }
 
-/// 解析帧动画主属性。附属的 fps/play/finish 属性按相同前缀读取，故不依赖属性顺序。
+/// 解析帧动画主属性。附属的 fps/interval/play/finish 属性按相同前缀读取，故不依赖属性顺序。
 fn apply_frame_animation_attrs(
     node: &mut dyn Widget,
     attrs: &[(String, String)],
@@ -638,7 +638,15 @@ fn apply_frame_animation_attrs(
             .map(parse_frame_playback).transpose()?.unwrap_or(default_playback);
         let finish = attr_value(attrs, &format!("{prefix}-finish"))
             .map(parse_frame_finish).transpose()?.unwrap_or_default();
-        let animation = FrameAnimation::new(frames, fps).playback(playback).finish(finish);
+        let interval_secs = attr_value(attrs, &format!("{prefix}-interval"))
+            .map(|value| value.parse::<f32>().ok().filter(|ms| ms.is_finite() && *ms >= 0.0)
+                .map(|ms| ms / 1000.0)
+                .ok_or_else(|| LoadError(format!("{prefix}-interval 必须是非负毫秒数: {value}"))))
+            .transpose()?.unwrap_or(0.0);
+        let animation = FrameAnimation::new(frames, fps)
+            .loop_interval(interval_secs)
+            .playback(playback)
+            .finish(finish);
         match target {
             FrameTarget::State(state, FrameImageLayer::Background) => {
                 slots.entry(state).or_default().bg_animation = Some(animation);
@@ -1358,6 +1366,7 @@ mod tests {
     #[test]
     fn xml_frame_animations_parse_state_combination_and_click() {
         let xml = r#"<Button normal-fgframes="normal_{1..2}.png" normal-fgframes-fps="12"
+            normal-fgframes-interval="300"
             hot-focus-fgframes="combined_{01..03}.png" hot-focus-fgframes-play="once"
             hot-focus-fgframes-finish="last"
             click-bgframes="click_{1..4}.png" click-bgframes-fps="20"/>"#;
@@ -1366,6 +1375,7 @@ mod tests {
         let normal_animation = base.style.resolve(VisualState::default()).fg_animation.unwrap();
         assert_eq!(normal_animation.frames.len(), 2);
         assert_eq!(normal_animation.fps, 12.0);
+        assert_eq!(normal_animation.loop_interval, 0.3);
         assert_eq!(normal_animation.playback, FramePlayback::Loop);
 
         let combined_animation = base.style.resolve(VisualState::new(BaseState::Hot, true)).fg_animation.unwrap();
@@ -1378,6 +1388,16 @@ mod tests {
         assert_eq!(click.fps, 20.0);
         assert_eq!(click.playback, FramePlayback::Once);
         assert_eq!(click.finish, FrameFinish::Restore);
+    }
+
+    #[test]
+    fn xml_frame_animation_rejects_invalid_interval() {
+        for interval in ["-1", "abc", "NaN", "inf"] {
+            let xml = format!(
+                r#"<Panel normal-fgframes="frame_{{1..2}}.png" normal-fgframes-interval="{interval}"/>"#
+            );
+            assert!(load_str(&xml, &Context::new()).is_err(), "interval={interval}");
+        }
     }
 
     #[test]
