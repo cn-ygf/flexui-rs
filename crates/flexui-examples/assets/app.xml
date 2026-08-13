@@ -21,19 +21,19 @@
         <Button tooltip="app.tooltip.back" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
                 hot-bgimage="button/back_hover@2.00x.png" normal-bgfit="center"/>
         <Radio name="nav_home" text="app.nav.home" group="1" tab-index="0" checked="true" indicator="false"
-               width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               width="72" height="42" normal-bgcolor="#181D42"
                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
                font-size="18" normal-textalign="center"/>
         <Radio name="nav_examples" text="app.nav.examples" group="1" tab-index="1" indicator="false"
-               width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               width="72" height="42" normal-bgcolor="#181D42"
                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
                font-size="17" normal-textalign="center"/>
         <Radio name="nav_cloud_play" text="app.nav.cloud_play" group="1" tab-index="2" indicator="false"
-               width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               width="84" height="42" normal-bgcolor="#181D42"
                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
                font-size="17" normal-textalign="center"/>
         <Radio name="nav_cloud_saves" text="app.nav.cloud_saves" group="1" tab-index="3" indicator="false"
-               width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               width="84" height="42" normal-bgcolor="#181D42"
                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
                font-size="17" normal-textalign="center"/>
         <Panel flex="1" mouse="transparent"/>
