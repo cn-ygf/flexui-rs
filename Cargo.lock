@@ -259,7 +259,6 @@ name = "flexui-examples"
 version = "0.1.0"
 dependencies = [
  "flexui",
- "roxmltree",
  "winresource",
  "zip",
 ]

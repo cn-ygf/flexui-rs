@@ -1,17 +1,9 @@
-use std::collections::HashMap;
-use std::sync::OnceLock;
-
 use flexui::{
     Color, ImageFit, Insets, MenuStyle, Rect, ResourceManager, ScrollBarStyle, Size, Skin,
     WindowCtx, WindowImpl,
 };
 
 use crate::resources::{original_bitmap, resources};
-
-const ORIGINAL_LOGIN_XML: &str = include_str!("../assets/data/original_login.xml");
-const ORIGINAL_CHS_XML: &str = include_str!("../assets/data/chs.xml");
-const ORIGINAL_CHT_XML: &str = include_str!("../assets/data/cht_tw.xml");
-const ORIGINAL_EN_XML: &str = include_str!("../assets/data/en.xml");
 
 pub(crate) struct LoginDialog {
     nation_code: String,
@@ -22,7 +14,7 @@ impl Default for LoginDialog {
     fn default() -> Self {
         Self {
             nation_code: "86".into(),
-            nation_item: "nation_entry_1063_86".into(),
+            nation_item: "nation_entry_86".into(),
         }
     }
 }
@@ -45,7 +37,7 @@ impl WindowImpl for LoginDialog {
                     .unwrap_or(Rect::new(326.0, 128.0, 68.0, 44.0));
                 ctx.open_styled_menu(
                     anchor,
-                    nation_codes(ctx.locale().as_deref()).to_vec(),
+                    nation_codes(ctx.locale().as_deref()),
                     nation_menu_style(),
                     Some(self.nation_item.clone()),
                 );
@@ -84,10 +76,6 @@ fn nation_menu_style() -> MenuStyle {
             "../assets/label/ic_selected@2.00x.png"
         ))),
         selected_image_size: Size::new(12.0, 9.0),
-        header_name_prefix: Some("nation_header_".into()),
-        header_text: Color::from_u8(87, 94, 169, 255),
-        header_height: 20.0,
-        header_padding: Insets::new(16.0, 0.0, 0.0, 0.0),
         scrollbar: ScrollBarStyle {
             width: 6.0,
             min_thumb_height: 16.0,
@@ -109,6 +97,64 @@ enum NationLanguage {
     English,
 }
 
+struct Nation {
+    code: &'static str,
+    simplified: &'static str,
+    traditional: &'static str,
+    english: &'static str,
+}
+
+const NATIONS: &[Nation] = &[
+    Nation {
+        code: "86",
+        simplified: "中国(+86)",
+        traditional: "中國(+86)",
+        english: "China (+86)",
+    },
+    Nation {
+        code: "852",
+        simplified: "中国香港(+852)",
+        traditional: "中國香港(+852)",
+        english: "Hong Kong, China (+852)",
+    },
+    Nation {
+        code: "853",
+        simplified: "中国澳门(+853)",
+        traditional: "中國澳門(+853)",
+        english: "Macao, China (+853)",
+    },
+    Nation {
+        code: "886",
+        simplified: "中国台湾(+886)",
+        traditional: "中國台灣(+886)",
+        english: "Taiwan, China (+886)",
+    },
+    Nation {
+        code: "81",
+        simplified: "日本(+81)",
+        traditional: "日本(+81)",
+        english: "Japan (+81)",
+    },
+    Nation {
+        code: "82",
+        simplified: "韩国(+82)",
+        traditional: "韓國(+82)",
+        english: "South Korea (+82)",
+    },
+    Nation {
+        code: "1",
+        simplified: "美国(+1)",
+        traditional: "美國(+1)",
+        english: "United States (+1)",
+    },
+    Nation {
+        code: "61",
+        simplified: "澳大利亚(+61)",
+        traditional: "澳大利亞(+61)",
+        english: "Australia (+61)",
+    },
+];
+
 fn nation_language(locale: Option<&str>) -> NationLanguage {
     let locale = locale.unwrap_or("zh-Hans").to_ascii_lowercase();
     if locale == "en" || locale.starts_with("en-") {
@@ -124,72 +170,19 @@ fn nation_language(locale: Option<&str>) -> NationLanguage {
     }
 }
 
-fn escape_bare_ampersands(xml: &str) -> String {
-    let mut escaped = String::with_capacity(xml.len());
-    for (index, character) in xml.char_indices() {
-        if character == '&' {
-            let tail = &xml[index..];
-            if !["&amp;", "&quot;", "&apos;", "&lt;", "&gt;", "&#"]
-                .iter()
-                .any(|entity| tail.starts_with(entity))
-            {
-                escaped.push_str("&amp;");
-                continue;
-            }
-        }
-        escaped.push(character);
-    }
-    escaped
-}
-
-fn parse_nation_codes(language_xml: &str) -> Vec<(String, String)> {
-    let language_xml = escape_bare_ampersands(language_xml);
-    let language = roxmltree::Document::parse(&language_xml).expect("原版语言文件必须是有效 XML");
-    let labels: HashMap<&str, &str> = language
-        .descendants()
-        .filter(|node| node.has_tag_name("rlang"))
-        .filter_map(|node| Some((node.attribute("id")?, node.attribute("text")?)))
-        .collect();
-    let layout =
-        roxmltree::Document::parse(ORIGINAL_LOGIN_XML).expect("原版登录布局必须是有效 XML");
-    let list = layout
-        .descendants()
-        .find(|node| node.attribute("name") == Some("nation_flags_list"))
-        .expect("原版登录布局必须包含 nation_flags_list");
-    list.children()
-        .filter(|node| node.is_element())
-        .filter_map(|node| {
-            if node.attribute("userdata") == Some("national_flag") {
-                let code = node.attribute("name")?;
-                let resource = node.attribute("text")?;
-                let id = resource.strip_prefix("%{")?.strip_suffix('}')?;
-                Some((
-                    labels.get(id)?.to_string(),
-                    format!("nation_entry_{id}_{code}"),
-                ))
-            } else if node.has_tag_name("Label") {
-                let title = node.attribute("text")?;
-                Some((title.to_string(), format!("nation_header_{title}")))
-            } else {
-                None
-            }
+fn nation_codes(locale: Option<&str>) -> Vec<(String, String)> {
+    let language = nation_language(locale);
+    NATIONS
+        .iter()
+        .map(|nation| {
+            let text = match language {
+                NationLanguage::SimplifiedChinese => nation.simplified,
+                NationLanguage::TraditionalChinese => nation.traditional,
+                NationLanguage::English => nation.english,
+            };
+            (text.to_owned(), format!("nation_entry_{}", nation.code))
         })
         .collect()
-}
-
-fn nation_codes(locale: Option<&str>) -> &'static [(String, String)] {
-    static SIMPLIFIED: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    static TRADITIONAL: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    static ENGLISH: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    match nation_language(locale) {
-        NationLanguage::SimplifiedChinese => {
-            SIMPLIFIED.get_or_init(|| parse_nation_codes(ORIGINAL_CHS_XML))
-        }
-        NationLanguage::TraditionalChinese => {
-            TRADITIONAL.get_or_init(|| parse_nation_codes(ORIGINAL_CHT_XML))
-        }
-        NationLanguage::English => ENGLISH.get_or_init(|| parse_nation_codes(ORIGINAL_EN_XML)),
-    }
 }
 
 #[cfg(test)]
@@ -199,12 +192,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nation_code_catalogs_match_the_original_layout() {
+    fn nation_code_catalogs_are_localized_and_unique() {
         let simplified = nation_codes(Some("zh-Hans"));
         let traditional = nation_codes(Some("zh-TW"));
         let english = nation_codes(Some("en-US"));
         assert_eq!(simplified.len(), traditional.len());
         assert_eq!(simplified.len(), english.len());
+        assert_eq!(simplified.len(), NATIONS.len());
         assert_eq!(simplified[0].0, "中国(+86)");
         assert_eq!(traditional[0].0, "中國(+86)");
         assert_eq!(english[0].0, "China (+86)");
