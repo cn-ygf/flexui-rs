@@ -1,4 +1,0 @@
-<HBox height="36" spacing="8">
-  <Button name="save" text="保存" width="80" height="32" normal-bgcolor="#3478F6" hot-bgcolor="#4A8CFF" normal-fgcolor="#FFFFFF" corner-radius="6"/>
-  <Button name="open" text="打开" width="80" height="32" normal-bgcolor="#2A2E38" hot-bgcolor="#353A46" normal-fgcolor="#E6EBF5" corner-radius="6"/>
-</HBox>

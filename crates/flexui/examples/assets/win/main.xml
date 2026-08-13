@@ -1,9 +1,0 @@
-<Window title="flexui-rs · Window根 + Include" width="560" height="380" titlebar="system" resizable="true">
-  <VBox spacing="10" padding="16" normal-bgcolor="#1A1C22">
-    <Include src="toolbar.xml"/>
-    <Label name="status" text="Window 作为 XML 根；上方工具栏由 Include 展开" height="22" normal-fgcolor="#8FE3A0"/>
-    <Panel flex="1" normal-bgcolor="#2C3E5A" corner-radius="10">
-      <Label text="内容区（点上方按钮看状态更新）" normal-fgcolor="#FFFFFF" normal-textalign="center"/>
-    </Panel>
-  </VBox>
-</Window>

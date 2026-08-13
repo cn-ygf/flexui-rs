@@ -10,8 +10,7 @@ macOS 用 NSView 自绘 + NSWindow，Windows 用 GDI+ + Win32，统一 Rust API�
 ## 示例
 
 ```bash
-cargo run -p flexui --example showcase
+cargo run -p flexui-examples
 ```
 
-覆盖：VBox/HBox/Box/Label/Button(4 状态)/CheckBox/Radio+分组/TabBox/Edit(选区/剪贴板/IME/多行)/
-Image/Progress/Slider/Separator/ComboBox/ListView，以及 Tooltip、右键菜单、动画、文件对话框等。
+包含主窗口、登录与设置对话框，演示 XML 布局、图片资源、本地化、菜单和多窗口。
