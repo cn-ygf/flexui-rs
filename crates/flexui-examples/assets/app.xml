@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Window title="app.window_title" width="1000" height="688" resizable="false"
-        titlebar="none" system-corners="true" system-shadow="true" drag-region="0 0 1000 94">
+        titlebar="hidden" system-corners="true" system-shadow="true" drag-region="0 0 1000 94">
 <Panel normal-bgcolor="#181D42" mouse="transparent" font-family="Microsoft YaHei">
   <VBox spacing="0" normal-bgcolor="#181D42" mouse="transparent">
     <VBox height="94" spacing="0" mouse="transparent">
@@ -9,10 +9,10 @@
         <Button name="open_settings" tooltip="app.tooltip.menu" width="24" height="24"
                 normal-bgimage="button/menu_normal.svg" hot-bgimage="button/menu_hover.svg"
                 pushed-bgimage="button/menu_pushed.svg" normal-bgfit="center"/>
-        <Button name="minimize" tooltip="app.tooltip.minimize" width="24" height="24"
+        <Button v-if="!platform.macos" name="minimize" tooltip="app.tooltip.minimize" width="24" height="24"
                 normal-bgimage="button/mini_normal.svg" hot-bgimage="button/mini_hover.svg"
                 pushed-bgimage="button/mini_pushed.svg" normal-bgfit="center"/>
-        <Button name="close_window" tooltip="app.tooltip.close" width="24" height="24"
+        <Button v-if="!platform.macos" name="close_window" tooltip="app.tooltip.close" width="24" height="24"
                 normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
                 pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
       </HBox>

@@ -210,6 +210,10 @@ pub(crate) fn make_window(
                 control.setHidden(true);
             }
         }
+    } else if config.titlebar == TitlebarMode::HiddenKeepControls {
+        if let Some(control) = window.standardWindowButton(NSWindowButton::ZoomButton) {
+            control.setHidden(true);
+        }
     }
     // 平台默认策略保持旧行为；精确矩形由 FlexView 的 mouseDown 处理。
     if config.titlebar != TitlebarMode::System
