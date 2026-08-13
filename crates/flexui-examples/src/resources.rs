@@ -82,6 +82,12 @@ mod tests {
             .read("label/uu_logo@2.00x.png")
             .unwrap()
             .is_empty());
+        for frame in 1..=25 {
+            assert!(!resources
+                .read(&format!("animations/btn_loading/loading_{frame}@2.00x.png"))
+                .unwrap()
+                .is_empty());
+        }
         assert!(resources
             .read_string("i18n/zh-Hans.json")
             .unwrap()

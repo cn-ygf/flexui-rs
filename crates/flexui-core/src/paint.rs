@@ -84,7 +84,10 @@ fn paint_tree_impl(
         }
     }
     // 2. 背景图（支持换色 tint 与渲染方式 fit）
-    if let Some(img) = &style.bg_image {
+    let bg_image = b.click_bg_frame_player.image()
+        .or_else(|| b.bg_frame_player.image_for_state(style.bg_animation.as_ref()))
+        .or(style.bg_image.as_ref());
+    if let Some(img) = bg_image {
         cv.draw_image(img, rect, style.bg_tint, style.bg_fit.clone().unwrap_or_default());
     }
     // 3. 控件内容（文字/图标）；透明时用降低 alpha 的前景色。
@@ -96,7 +99,10 @@ fn paint_tree_impl(
         node.paint_content(cv, &style);
     }
     // 4. 前景图
-    if let Some(img) = &style.fg_image {
+    let fg_image = b.click_fg_frame_player.image()
+        .or_else(|| b.fg_frame_player.image_for_state(style.fg_animation.as_ref()))
+        .or(style.fg_image.as_ref());
+    if let Some(img) = fg_image {
         cv.draw_image(img, rect, style.fg_tint, style.fg_fit.clone().unwrap_or_default());
     }
     // 5. 边框

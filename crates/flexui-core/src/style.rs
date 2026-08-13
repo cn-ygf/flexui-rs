@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use flexui_geometry::{Color, Corners};
 use flexui_gfx::{Font, ImageFit, ImageSource, TextAlign};
 
+use crate::frame_animation::FrameAnimation;
+
 /// 基础状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BaseState {
@@ -68,11 +70,15 @@ pub struct StyleSpec {
     pub bg_color: Option<Color>,
     pub fg_color: Option<Color>,
     pub bg_image: Option<ImageSource>,
+    /// 背景帧动画；活动时替换 `bg_image`。
+    pub bg_animation: Option<FrameAnimation>,
     /// 背景图换色（None=原色）。
     pub bg_tint: Option<Color>,
     /// 背景图渲染方式。
     pub bg_fit: Option<ImageFit>,
     pub fg_image: Option<ImageSource>,
+    /// 前景帧动画；活动时替换 `fg_image`。
+    pub fg_animation: Option<FrameAnimation>,
     pub fg_tint: Option<Color>,
     pub fg_fit: Option<ImageFit>,
     pub border_color: Option<Color>,
@@ -168,9 +174,11 @@ impl StyleSpec {
             bg_color: self.bg_color.or(base.bg_color),
             fg_color: self.fg_color.or(base.fg_color),
             bg_image: self.bg_image.clone().or_else(|| base.bg_image.clone()),
+            bg_animation: self.bg_animation.clone().or_else(|| base.bg_animation.clone()),
             bg_tint: self.bg_tint.or(base.bg_tint),
             bg_fit: self.bg_fit.clone().or_else(|| base.bg_fit.clone()),
             fg_image: self.fg_image.clone().or_else(|| base.fg_image.clone()),
+            fg_animation: self.fg_animation.clone().or_else(|| base.fg_animation.clone()),
             fg_tint: self.fg_tint.or(base.fg_tint),
             fg_fit: self.fg_fit.clone().or_else(|| base.fg_fit.clone()),
             border_color: self.border_color.or(base.border_color),

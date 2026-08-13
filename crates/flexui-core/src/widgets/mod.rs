@@ -68,6 +68,16 @@ macro_rules! common_builders {
                 self.base.style = s;
                 self
             }
+            /// 设置点击后播放的背景帧动画。
+            pub fn click_bg_animation(mut self, animation: $crate::FrameAnimation) -> Self {
+                self.base.click_bg_animation = Some(animation);
+                self
+            }
+            /// 设置点击后播放的前景帧动画。
+            pub fn click_fg_animation(mut self, animation: $crate::FrameAnimation) -> Self {
+                self.base.click_fg_animation = Some(animation);
+                self
+            }
             /// 固定宽高。
             pub fn size(mut self, w: f32, h: f32) -> Self {
                 self.base.width = $crate::sizing::Sizing::Fixed(w);

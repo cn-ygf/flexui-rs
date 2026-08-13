@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use flexui_core::{
-    Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, Gradient, HBox,
+    Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
+    FrameFinish, FramePlayback, Gradient, HBox,
     HitPolicy, Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel,
     PlaceholderStyleSet, PlaceholderStyleSpec, Progress, Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox,
     TextAlign, TitlebarMode, VBox, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
@@ -295,7 +296,7 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
     }
 
     let mut node = make_node(&tag, el, env)?;
-    apply_attrs(node.as_mut(), &tag, &el.attrs, env);
+    apply_attrs(node.as_mut(), &tag, &el.attrs, env)?;
     let initial_text = node.base().text.clone();
     node.set_text_value(initial_text);
 
@@ -470,7 +471,7 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
 }
 
 /// 把属性应用到 Base（通用属性 + 分状态样式）。
-fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env: &Env) {
+fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env: &Env) -> Result<(), LoadError> {
     let res = env.res;
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
@@ -585,6 +586,8 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
         }
     }
 
+    apply_frame_animation_attrs(node, attrs, &mut slots, res)?;
+
     // 组装 StyleSet。
     if !slots.is_empty() {
         let mut set = StyleSet::new();
@@ -598,6 +601,131 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
         for (vs, spec) in placeholder_slots { set.set(vs, spec); }
         node.apply_property(WidgetProperty::PlaceholderStyle(set));
     }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum FrameTarget {
+    State(VisualState, FrameImageLayer),
+    Click(FrameImageLayer),
+}
+
+#[derive(Clone, Copy)]
+enum FrameImageLayer { Background, Foreground }
+
+/// 解析帧动画主属性。附属的 fps/play/finish 属性按相同前缀读取，故不依赖属性顺序。
+fn apply_frame_animation_attrs(
+    node: &mut dyn Widget,
+    attrs: &[(String, String)],
+    slots: &mut HashMap<VisualState, StyleSpec>,
+    res: Option<&ResourceManager>,
+) -> Result<(), LoadError> {
+    for (key, pattern) in attrs {
+        let key = key.to_ascii_lowercase();
+        let Some((target, prefix)) = parse_frame_target(&key) else { continue };
+        let frames = expand_frame_pattern(pattern)?.into_iter()
+            .map(|path| resolve_image(res, &path)).collect::<Vec<_>>();
+        let fps = attr_value(attrs, &format!("{prefix}-fps"))
+            .map(|value| value.parse::<f32>().ok().filter(|fps| fps.is_finite() && *fps > 0.0)
+                .ok_or_else(|| LoadError(format!("{prefix}-fps 必须是大于 0 的数字: {value}"))))
+            .transpose()?.unwrap_or(25.0);
+        let default_playback = if matches!(target, FrameTarget::Click(_)) {
+            FramePlayback::Once
+        } else {
+            FramePlayback::Loop
+        };
+        let playback = attr_value(attrs, &format!("{prefix}-play"))
+            .map(parse_frame_playback).transpose()?.unwrap_or(default_playback);
+        let finish = attr_value(attrs, &format!("{prefix}-finish"))
+            .map(parse_frame_finish).transpose()?.unwrap_or_default();
+        let animation = FrameAnimation::new(frames, fps).playback(playback).finish(finish);
+        match target {
+            FrameTarget::State(state, FrameImageLayer::Background) => {
+                slots.entry(state).or_default().bg_animation = Some(animation);
+            }
+            FrameTarget::State(state, FrameImageLayer::Foreground) => {
+                slots.entry(state).or_default().fg_animation = Some(animation);
+            }
+            FrameTarget::Click(FrameImageLayer::Background) => node.base_mut().click_bg_animation = Some(animation),
+            FrameTarget::Click(FrameImageLayer::Foreground) => node.base_mut().click_fg_animation = Some(animation),
+        }
+    }
+    Ok(())
+}
+
+fn parse_frame_target(key: &str) -> Option<(FrameTarget, String)> {
+    let parts: Vec<&str> = key.split('-').collect();
+    let (mut idx, mut state, mut focused, mut selected, mut click) =
+        (0, BaseState::Normal, false, false, false);
+    while idx < parts.len() {
+        if let Some(parsed) = parse_state(parts[idx]) { state = parsed; }
+        else if parts[idx] == "focus" { focused = true; }
+        else if parts[idx] == "selected" { selected = true; }
+        else if parts[idx] == "click" { click = true; }
+        else { break; }
+        idx += 1;
+    }
+    if idx + 1 != parts.len() { return None; }
+    let layer = match parts[idx] {
+        "bgframes" => FrameImageLayer::Background,
+        "fgframes" => FrameImageLayer::Foreground,
+        _ => return None,
+    };
+    let target = if click {
+        if state != BaseState::Normal || focused || selected { return None; }
+        FrameTarget::Click(layer)
+    } else {
+        FrameTarget::State(VisualState::with_selected(state, focused, selected), layer)
+    };
+    Some((target, key.to_owned()))
+}
+
+fn parse_frame_playback(value: &str) -> Result<FramePlayback, LoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "loop" => Ok(FramePlayback::Loop),
+        "once" => Ok(FramePlayback::Once),
+        "paused" | "pause" => Ok(FramePlayback::Paused),
+        _ => Err(LoadError(format!("帧动画 play 只支持 loop/once/paused: {value}"))),
+    }
+}
+
+fn parse_frame_finish(value: &str) -> Result<FrameFinish, LoadError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "restore" => Ok(FrameFinish::Restore),
+        "first" => Ok(FrameFinish::First),
+        "last" => Ok(FrameFinish::Last),
+        _ => Err(LoadError(format!("帧动画 finish 只支持 restore/first/last: {value}"))),
+    }
+}
+
+/// 展开 `path/frame_{1..25}.png`，端点有前导零时保持补零宽度。
+fn expand_frame_pattern(pattern: &str) -> Result<Vec<String>, LoadError> {
+    let open = pattern.find('{').ok_or_else(|| LoadError(format!("帧动画路径需要 {{start..end}} 范围: {pattern}")))?;
+    let close = pattern[open + 1..].find('}').map(|offset| open + 1 + offset)
+        .ok_or_else(|| LoadError(format!("帧动画路径缺少 }}: {pattern}")))?;
+    if pattern[close + 1..].contains(['{', '}']) || pattern[..open].contains('}') {
+        return Err(LoadError(format!("帧动画路径只支持一个范围: {pattern}")));
+    }
+    let range = &pattern[open + 1..close];
+    let (start_text, end_text) = range.split_once("..")
+        .ok_or_else(|| LoadError(format!("帧动画范围格式应为 {{start..end}}: {pattern}")))?;
+    if start_text.is_empty() || end_text.is_empty() || end_text.contains("..") {
+        return Err(LoadError(format!("帧动画范围格式应为 {{start..end}}: {pattern}")));
+    }
+    let start = start_text.parse::<i32>().map_err(|_| LoadError(format!("帧动画起始序号无效: {start_text}")))?;
+    let end = end_text.parse::<i32>().map_err(|_| LoadError(format!("帧动画结束序号无效: {end_text}")))?;
+    let count = start.abs_diff(end) as usize + 1;
+    if count > 10_000 { return Err(LoadError(format!("帧动画范围过大（最多 10000 帧）: {pattern}"))); }
+    let padded = (start_text.starts_with('0') && start_text.len() > 1)
+        || (end_text.starts_with('0') && end_text.len() > 1);
+    let width = start_text.len().max(end_text.len());
+    let (prefix, suffix) = (&pattern[..open], &pattern[close + 1..]);
+    let step = if start <= end { 1 } else { -1 };
+    Ok((0..count).map(|index| {
+        let value = start + step * index as i32;
+        let number = if padded { format!("{value:0width$}", width = width) } else { value.to_string() };
+        format!("{prefix}{number}{suffix}")
+    }).collect())
 }
 
 fn attr_value<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
@@ -1208,6 +1336,48 @@ mod tests {
         assert!(g.vertical);
         let sh = s.shadow.unwrap();
         assert_eq!((sh.dx, sh.dy), (0.0, 2.0));
+    }
+
+    #[test]
+    fn frame_pattern_supports_padding_and_descending_ranges() {
+        assert_eq!(
+            expand_frame_pattern("loading_{01..03}@2.00x.png").unwrap(),
+            ["loading_01@2.00x.png", "loading_02@2.00x.png", "loading_03@2.00x.png"]
+        );
+        assert_eq!(expand_frame_pattern("frame_{3..1}.png").unwrap(), ["frame_3.png", "frame_2.png", "frame_1.png"]);
+    }
+
+    #[test]
+    fn invalid_frame_patterns_are_reported() {
+        assert!(expand_frame_pattern("loading.png").is_err());
+        assert!(expand_frame_pattern("loading_{1-3}.png").is_err());
+        assert!(expand_frame_pattern("loading_{1..20000}.png").is_err());
+        assert!(load_str(r#"<Panel normal-fgframes="loading.png"/>"#, &Context::new()).is_err());
+    }
+
+    #[test]
+    fn xml_frame_animations_parse_state_combination_and_click() {
+        let xml = r#"<Button normal-fgframes="normal_{1..2}.png" normal-fgframes-fps="12"
+            hot-focus-fgframes="combined_{01..03}.png" hot-focus-fgframes-play="once"
+            hot-focus-fgframes-finish="last"
+            click-bgframes="click_{1..4}.png" click-bgframes-fps="20"/>"#;
+        let result = load_str(xml, &Context::new()).unwrap();
+        let base = result.root.base();
+        let normal_animation = base.style.resolve(VisualState::default()).fg_animation.unwrap();
+        assert_eq!(normal_animation.frames.len(), 2);
+        assert_eq!(normal_animation.fps, 12.0);
+        assert_eq!(normal_animation.playback, FramePlayback::Loop);
+
+        let combined_animation = base.style.resolve(VisualState::new(BaseState::Hot, true)).fg_animation.unwrap();
+        assert_eq!(combined_animation.frames.len(), 3);
+        assert_eq!(combined_animation.playback, FramePlayback::Once);
+        assert_eq!(combined_animation.finish, FrameFinish::Last);
+
+        let click = base.click_bg_animation.as_ref().unwrap();
+        assert_eq!(click.frames.len(), 4);
+        assert_eq!(click.fps, 20.0);
+        assert_eq!(click.playback, FramePlayback::Once);
+        assert_eq!(click.finish, FrameFinish::Restore);
     }
 
     #[test]

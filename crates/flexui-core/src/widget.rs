@@ -11,6 +11,7 @@ use flexui_gfx::{Canvas, Font};
 
 use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow};
+use crate::frame_animation::{FrameAnimation, FramePlayer};
 use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
 use crate::localization::LocalizationBinding;
@@ -104,6 +105,13 @@ pub struct Base {
     pub localizations: Vec<LocalizationBinding>,
     pub font: Font,
     pub style: StyleSet,
+    /// 点击触发的背景/前景动画定义（覆盖当前状态图片，结束后恢复）。
+    pub click_bg_animation: Option<FrameAnimation>,
+    pub click_fg_animation: Option<FrameAnimation>,
+    pub(crate) bg_frame_player: FramePlayer,
+    pub(crate) fg_frame_player: FramePlayer,
+    pub(crate) click_bg_frame_player: FramePlayer,
+    pub(crate) click_fg_frame_player: FramePlayer,
 
     // —— 运行时交互状态（由分发器维护）——
     pub enabled: bool,
@@ -159,6 +167,12 @@ impl Base {
             localizations: Vec::new(),
             font: Font::default(),
             style: StyleSet::new(),
+            click_bg_animation: None,
+            click_fg_animation: None,
+            bg_frame_player: FramePlayer::default(),
+            fg_frame_player: FramePlayer::default(),
+            click_bg_frame_player: FramePlayer::default(),
+            click_fg_frame_player: FramePlayer::default(),
             enabled: true,
             hover: false,
             pressed: false,

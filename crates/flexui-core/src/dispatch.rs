@@ -10,6 +10,7 @@ use flexui_gfx::Canvas;
 
 use crate::anim::{Anim, AnimProp, Easing};
 use crate::event::{Event, EventFlow, MouseButton};
+use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
 use crate::widget::{find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
@@ -82,6 +83,35 @@ impl<'a> EventCtx<'a> {
     /// 便捷：设置某控件及其子树是否参与布局、绘制与命中测试。
     pub fn set_visible(&mut self, name: &str, visible: bool) {
         self.with(name, move |w| w.base_mut().visible = visible);
+    }
+
+    /// 在指定控件上播放一段运行时帧动画。它覆盖状态图片，结束后按 `finish` 处理。
+    pub fn play_frame_animation(&mut self, name: &str, layer: FrameLayer, animation: FrameAnimation) -> bool {
+        self.with(name, move |w| match layer {
+            FrameLayer::Background => w.base_mut().click_bg_frame_player.start(animation),
+            FrameLayer::Foreground => w.base_mut().click_fg_frame_player.start(animation),
+        }).is_some()
+    }
+
+    pub fn pause_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
+        self.with(name, move |w| match layer {
+            FrameLayer::Background => w.base_mut().click_bg_frame_player.pause(),
+            FrameLayer::Foreground => w.base_mut().click_fg_frame_player.pause(),
+        }).unwrap_or(false)
+    }
+
+    pub fn resume_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
+        self.with(name, move |w| match layer {
+            FrameLayer::Background => w.base_mut().click_bg_frame_player.resume(),
+            FrameLayer::Foreground => w.base_mut().click_fg_frame_player.resume(),
+        }).unwrap_or(false)
+    }
+
+    pub fn stop_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
+        self.with(name, move |w| match layer {
+            FrameLayer::Background => w.base_mut().click_bg_frame_player.stop(),
+            FrameLayer::Foreground => w.base_mut().click_fg_frame_player.stop(),
+        }).unwrap_or(false)
     }
 }
 
@@ -212,23 +242,32 @@ impl Dispatcher {
         true
     }
 
-    /// 按帧推进所有动画 dt 秒；应用插值到目标控件，移除结束的。返回是否有变化（需重绘）。
+    /// 按帧推进补间动画与帧动画 dt 秒。返回是否有可见变化（需重绘）。
     pub fn tick_anims(&mut self, root: &mut dyn Widget, dt: f32) -> bool {
-        if self.anims.is_empty() {
-            return false;
+        let mut changed = false;
+        if !self.anims.is_empty() {
+            for a in &mut self.anims {
+                a.elapsed += dt;
+            }
+            // 快照 (target, prop, value) 后应用，避免与 self 的可变借用冲突。
+            let apply: Vec<(WidgetId, AnimProp, f32)> =
+                self.anims.iter().map(|a| (a.target, a.prop, a.value_at())).collect();
+            for (id, prop, v) in apply {
+                visit_mut(root, id, &mut |w| { w.set_animation_value(prop, v); });
+            }
+            self.anims.retain(|a| !a.done());
+            changed = true;
         }
-        for a in &mut self.anims {
-            a.elapsed += dt;
+
+        let mut dirty = None;
+        tick_frame_animations(root, dt, false, &mut dirty);
+        if let Some(rect) = dirty {
+            self.mark_dirty(rect);
+            changed = true;
+        } else if changed {
+            self.needs_redraw = true;
         }
-        // 快照 (target, prop, value) 后应用，避免与 self 的可变借用冲突。
-        let apply: Vec<(WidgetId, AnimProp, f32)> =
-            self.anims.iter().map(|a| (a.target, a.prop, a.value_at())).collect();
-        for (id, prop, v) in apply {
-            visit_mut(root, id, &mut |w| { w.set_animation_value(prop, v); });
-        }
-        self.anims.retain(|a| !a.done());
-        self.needs_redraw = true;
-        true
+        changed
     }
 
     /// 是否有活动模态浮层。
@@ -950,6 +989,16 @@ impl Dispatcher {
         if !enabled {
             return;
         }
+        // 点击动画是一次独立覆盖，不依赖抬起后立即消失的 pushed 状态。
+        visit_mut(root, id, &mut |w| {
+            let b = w.base_mut();
+            if let Some(animation) = b.click_bg_animation.clone() {
+                b.click_bg_frame_player.start(animation);
+            }
+            if let Some(animation) = b.click_fg_animation.clone() {
+                b.click_fg_frame_player.start(animation);
+            }
+        });
         // 打开下拉的控件（ComboBox）：本次点击只负责弹出菜单，不上报激活
         //（激活留给选中项，避免 on_activate 在打开与选中各触发一次）。
         if let Some(items) = menu {
@@ -1215,6 +1264,35 @@ fn for_each_visible_mut(
     for i in 0..n {
         for_each_visible_mut(node.base_mut().children[i].as_mut(), visible, f);
     }
+}
+
+/// 只推进有效可见子树中的帧动画，并联合真正发生帧变化的控件区域。
+fn tick_frame_animations(node: &mut dyn Widget, dt: f32, inherited_focus: bool, dirty: &mut Option<Rect>) {
+    if !node.base().visible {
+        return;
+    }
+    let subtree_has_focus = subtree_focused_for_frames(node);
+    let b = node.base_mut();
+    let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
+    let state = crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
+    let style = b.style.resolve(state);
+    let changed = b.bg_frame_player.tick_state(style.bg_animation.as_ref(), dt)
+        | b.fg_frame_player.tick_state(style.fg_animation.as_ref(), dt)
+        | b.click_bg_frame_player.tick(dt)
+        | b.click_fg_frame_player.tick(dt);
+    let rect = b.rect;
+    let pass_focus = focus_active && b.focus_within;
+    if changed {
+        *dirty = Some(dirty.map_or(rect, |current| union_rect(current, rect)));
+    }
+    let child_count = b.children.len();
+    for i in 0..child_count {
+        tick_frame_animations(b.children[i].as_mut(), dt, pass_focus, dirty);
+    }
+}
+
+fn subtree_focused_for_frames(node: &dyn Widget) -> bool {
+    node.base().focused || node.base().children.iter().any(|child| subtree_focused_for_frames(child.as_ref()))
 }
 
 /// id 对应控件是否位于有效可见子树，且自身可聚焦、可用。
@@ -1606,6 +1684,50 @@ mod tests {
         assert!(!disp.has_anims());
         // 结束后无变化
         assert!(!disp.tick_anims(&mut root, 0.5));
+    }
+
+    #[test]
+    fn frame_animation_only_advances_visible_widgets() {
+        let animation = FrameAnimation::new(
+            vec![flexui_gfx::ImageSource::path("1.png"), flexui_gfx::ImageSource::path("2.png")],
+            10.0,
+        );
+        let style = crate::style::StyleSet::new().with_normal(crate::style::StyleSpec {
+            fg_animation: Some(animation),
+            ..Default::default()
+        });
+        let visible = Panel::new().name("visible").size(40.0, 40.0).style(style.clone());
+        let hidden = Panel::new().name("hidden").size(40.0, 40.0).style(style);
+        let mut root = VBox::new().push(visible).push(hidden);
+        root.base_mut().children[1].base_mut().visible = false;
+        let mut dispatcher = Dispatcher::new();
+
+        assert!(dispatcher.tick_anims(&mut root, 0.0));
+        assert!(root.base().children[0].base().fg_frame_player.image().is_some());
+        assert!(root.base().children[1].base().fg_frame_player.image().is_none());
+        assert!(dispatcher.tick_anims(&mut root, 0.11));
+        assert!(root.base().children[1].base().fg_frame_player.image().is_none());
+    }
+
+    #[test]
+    fn click_frame_animation_survives_mouse_release_and_finishes() {
+        let animation = FrameAnimation::new(
+            vec![flexui_gfx::ImageSource::path("1.png"), flexui_gfx::ImageSource::path("2.png")],
+            10.0,
+        )
+        .playback(crate::FramePlayback::Once)
+        .finish(crate::FrameFinish::Restore);
+        let mut root = Button::new("play").name("play").size(100.0, 40.0).click_fg_animation(animation);
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 40.0), &FakeCanvas);
+        let mut dispatcher = Dispatcher::new();
+        let point = Point::new(50.0, 20.0);
+        dispatcher.handle(&mut root, &Event::MouseDown { pos: point, button: MouseButton::Left });
+        dispatcher.handle(&mut root, &Event::MouseUp { pos: point, button: MouseButton::Left });
+
+        assert!(!root.base().pressed);
+        assert!(root.base().click_fg_frame_player.image().is_some());
+        assert!(dispatcher.tick_anims(&mut root, 0.21));
+        assert!(root.base().click_fg_frame_player.image().is_none());
     }
 
     #[test]
