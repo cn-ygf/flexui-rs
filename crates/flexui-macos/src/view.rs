@@ -479,10 +479,6 @@ fn apply_close_request(window: &NSWindow) {
     window.close();
 }
 
-fn request_close(window: &NSWindow) {
-    window.performClose(None);
-}
-
 /// 创建 FlexView 时随窗口传入的环境状态。
 pub struct FlexViewEnvironment {
     pub localizer: Option<flexui_core::Localizer>,
@@ -618,7 +614,20 @@ impl FlexView {
     }
 
     pub fn close_after_callback(&self, window: &NSWindow) {
-        request_close(window);
+        self.request_close(window);
+    }
+
+    /// 回调释放 AppState 借用后执行关闭。sheet 不能用 performClose 再进入
+    /// windowShouldClose，否则 AppKit 会在关闭委托尚未返回时结束同一个 sheet。
+    fn request_close(&self, window: &NSWindow) {
+        if window.sheetParent().is_some() {
+            let (allow, close_requested) = self.fire_close();
+            if allow || close_requested {
+                apply_close_request(window);
+            }
+        } else {
+            window.performClose(None);
+        }
     }
 
     /// 创建回调里请求的新窗口（多窗口）。
@@ -658,7 +667,7 @@ impl FlexView {
         }
         drop(st);
         if close_requested {
-            request_close(window.as_ref().unwrap());
+            self.request_close(window.as_ref().unwrap());
             return;
         }
         self.setNeedsDisplay(true);
@@ -716,7 +725,7 @@ impl FlexView {
         let redraw = changed || !msgs.is_empty() || locale_changed;
         drop(st);
         if close_requested {
-            request_close(window.as_ref().unwrap());
+            self.request_close(window.as_ref().unwrap());
             return;
         }
         if redraw {
@@ -796,7 +805,7 @@ impl FlexView {
         }
         drop(st);
         if close_requested {
-            request_close(window.as_ref().unwrap());
+            self.request_close(window.as_ref().unwrap());
             return;
         }
         self.create_windows(new_wins);
@@ -842,7 +851,7 @@ impl FlexView {
         }
         drop(st);
         if close_requested {
-            request_close(window.as_ref().unwrap());
+            self.request_close(window.as_ref().unwrap());
         }
     }
 
