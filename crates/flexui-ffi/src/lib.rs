@@ -25,7 +25,7 @@ use flexui_windows as backend;
 /// 库版本（主*10000 + 次*100 + 补丁）。
 #[no_mangle]
 pub extern "C" fn flex_version() -> u32 {
-    1 // 0.1.0 → 简单返回 1
+    1 // 0.0.1 → 简单返回 1
 }
 
 /// 把 C 字符串转 Rust &str（失败返回 None）。

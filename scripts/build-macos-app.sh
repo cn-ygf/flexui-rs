@@ -2,7 +2,7 @@
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-app_name="FlexUI Examples"
+app_name="FlexUIExamples"
 bundle_dir="$repo_dir/target/release/bundle/macos/$app_name.app"
 contents_dir="$bundle_dir/Contents"
 
@@ -21,7 +21,7 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>FlexUI Examples</string>
+  <string>FlexUIExamples</string>
   <key>CFBundleExecutable</key>
   <string>flexui-examples</string>
   <key>CFBundleIconFile</key>
@@ -31,11 +31,11 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>FlexUI Examples</string>
+  <string>FlexUIExamples</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>0.0.1</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

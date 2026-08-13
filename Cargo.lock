@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "flexui"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-core",
  "flexui-i18n",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-geometry",
  "flexui-gfx",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-examples"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui",
  "winresource",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-ffi"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-core",
  "flexui-macos",
@@ -275,18 +275,18 @@ dependencies = [
 
 [[package]]
 name = "flexui-geometry"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "flexui-gfx"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-geometry",
 ]
 
 [[package]]
 name = "flexui-i18n"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-resource",
  "intl_pluralrules",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-macos"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-core",
  "flexui-geometry",
@@ -311,21 +311,21 @@ dependencies = [
 
 [[package]]
 name = "flexui-resource"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "zip",
 ]
 
 [[package]]
 name = "flexui-svg"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "resvg",
 ]
 
 [[package]]
 name = "flexui-windows"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-core",
  "flexui-geometry",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-xml"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "flexui-core",
  "flexui-i18n",
