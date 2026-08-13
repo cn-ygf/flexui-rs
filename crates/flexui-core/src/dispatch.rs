@@ -9,14 +9,40 @@ use flexui_geometry::{Point, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::anim::{Anim, AnimProp, Easing};
-use crate::event::{Event, EventFlow, MouseButton};
+use crate::event::{ControlEvent, Event, EventFlow, MouseButton};
 use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
-use crate::widget::{find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+use crate::widget::{find_by_id, find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
 
 /// 点击回调类型别名。
 pub type ClickHandler = Box<dyn FnMut(&mut EventCtx)>;
+pub type ControlEventHandler = Box<dyn FnMut(&ControlEvent, &mut EventCtx)>;
+
+/// 运行时修改控件后需要执行的刷新级别。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Invalidation {
+    /// 没有可见变化。
+    #[default]
+    None,
+    /// 只重绘给定控件区域，不重新布局。
+    Paint(Rect),
+    /// 重绘整窗，不重新布局。
+    Redraw,
+    /// 重新布局并重绘整窗。
+    Layout,
+}
+
+impl Invalidation {
+    pub(crate) fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Layout, _) | (_, Self::Layout) => Self::Layout,
+            (Self::Redraw, _) | (_, Self::Redraw) => Self::Redraw,
+            (Self::Paint(a), Self::Paint(b)) => Self::Paint(union_rect(a, b)),
+            (Self::None, value) | (value, Self::None) => value,
+        }
+    }
+}
 
 /// 后台线程 → 主线程投递句柄（Clone + Send + Sync）。
 ///
@@ -41,15 +67,31 @@ impl MainProxy {
 /// 因此按钮点击能改别的控件（如更新状态标签），实现「可见的事件响应」。
 pub struct EventCtx<'a> {
     root: &'a mut dyn Widget,
+    invalidation: Invalidation,
 }
 
 impl<'a> EventCtx<'a> {
     pub(crate) fn new(root: &'a mut dyn Widget) -> Self {
-        Self { root }
+        Self {
+            root,
+            invalidation: Invalidation::None,
+        }
     }
 
-    /// 对名为 name 的控件执行 f；找到则返回 Some(f 的返回值)。
-    pub fn with<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
+    pub(crate) fn take_invalidation(&mut self) -> Invalidation {
+        std::mem::take(&mut self.invalidation)
+    }
+
+    fn invalidate(&mut self, invalidation: Invalidation) {
+        self.invalidation = self.invalidation.merge(invalidation);
+    }
+
+    fn rect(&self, name: &str) -> Option<Rect> {
+        let id = find_by_name(self.root, name)?;
+        rect_of(self.root, id)
+    }
+
+    fn mutate<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
         let id = find_by_name(self.root, name)?;
         let mut f = Some(f);
         let mut out = None;
@@ -61,57 +103,358 @@ impl<'a> EventCtx<'a> {
         out
     }
 
+    /// 只读访问具名控件，不产生刷新请求。
+    pub fn get<R>(&self, name: &str, f: impl FnOnce(&dyn Widget) -> R) -> Option<R> {
+        let id = find_by_name(self.root, name)?;
+        find_by_id(self.root, id).map(f)
+    }
+
+    /// 对名为 name 的控件执行 f；找到则返回 Some(f 的返回值)。
+    pub fn with<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
+        let out = self.mutate(name, f);
+        if out.is_some() {
+            self.invalidate(Invalidation::Layout);
+        }
+        out
+    }
+
+    /// 修改只影响绘制的属性。框架会自动重绘该控件区域。
+    pub fn with_paint<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
+        let rect = self.rect(name)?;
+        let out = self.mutate(name, f);
+        if out.is_some() {
+            self.invalidate(Invalidation::Paint(rect));
+        }
+        out
+    }
+
     /// 便捷：设置某控件的文本。
     pub fn set_text(&mut self, name: &str, text: impl Into<String>) {
         let text = text.into();
+        let changed = self.get(name, |w| w.base().text != text).unwrap_or(false);
+        if !changed {
+            return;
+        }
         self.with(name, move |w| {
-            w.base_mut().localizations.retain(|binding| !matches!(binding, crate::LocalizationBinding::Text(_)));
+            w.base_mut()
+                .localizations
+                .retain(|binding| !matches!(binding, crate::LocalizationBinding::Text(_)));
             w.set_text_value(text);
         });
     }
 
     /// 便捷：读取某控件的 selected（CheckBox/Radio）。
     pub fn is_selected(&mut self, name: &str) -> Option<bool> {
-        self.with(name, |w| w.base().selected)
+        self.get(name, |w| w.base().selected)
+    }
+
+    pub fn text(&self, name: &str) -> Option<String> {
+        self.get(name, |w| w.base().text.clone())
+    }
+
+    pub fn is_enabled(&self, name: &str) -> Option<bool> {
+        self.get(name, |w| w.base().enabled)
+    }
+
+    pub fn is_visible(&self, name: &str) -> Option<bool> {
+        self.get(name, |w| w.base().visible)
     }
 
     /// 便捷：设置某控件是否可用。
     pub fn set_enabled(&mut self, name: &str, enabled: bool) {
-        self.with(name, move |w| w.base_mut().enabled = enabled);
+        if self.is_enabled(name) == Some(enabled) {
+            return;
+        }
+        self.with_paint(name, move |w| w.base_mut().enabled = enabled);
     }
 
     /// 便捷：设置某控件及其子树是否参与布局、绘制与命中测试。
     pub fn set_visible(&mut self, name: &str, visible: bool) {
+        if self.is_visible(name) == Some(visible) {
+            return;
+        }
         self.with(name, move |w| w.base_mut().visible = visible);
     }
 
+    /// 设置 CheckBox/Radio 等控件的选中状态。
+    pub fn set_selected(&mut self, name: &str, selected: bool) -> bool {
+        if self.get(name, |w| w.base().selected) == Some(selected) {
+            return false;
+        }
+        self.with_paint(name, move |w| w.base_mut().selected = selected)
+            .is_some()
+    }
+
+    pub fn selected_index(&self, name: &str) -> Option<usize> {
+        self.get(name, |w| w.selected_index()).flatten()
+    }
+
+    pub fn set_selected_index(&mut self, name: &str, index: usize) -> bool {
+        let mut changed = false;
+        let found = self
+            .mutate(name, |w| changed = w.set_selected_index(index))
+            .is_some();
+        if found && changed {
+            self.invalidate(Invalidation::Layout);
+        }
+        changed
+    }
+
+    pub fn value(&self, name: &str) -> Option<f32> {
+        self.get(name, |w| w.animation_value(AnimProp::Value))
+            .flatten()
+    }
+
+    pub fn set_value(&mut self, name: &str, value: f32) -> bool {
+        let old = self.value(name);
+        let mut supported = false;
+        let rect = self.rect(name);
+        self.mutate(name, |w| {
+            supported = w.set_animation_value(AnimProp::Value, value)
+        });
+        let changed = supported && self.value(name) != old;
+        if changed {
+            self.invalidate(rect.map_or(Invalidation::Redraw, Invalidation::Paint));
+        }
+        changed
+    }
+
+    pub fn scroll_position(&self, name: &str) -> Option<f32> {
+        self.get(name, |w| w.scroll_position()).flatten()
+    }
+
+    /// 应用控件专属属性；保守地触发布局和整窗重绘。
+    pub fn set_property(&mut self, name: &str, property: crate::widget::WidgetProperty) -> bool {
+        use crate::widget::WidgetProperty as Property;
+        match property {
+            Property::Text(text) => {
+                let found = self.get(name, |_| ()).is_some();
+                self.set_text(name, text);
+                return found;
+            }
+            Property::Tooltip(value) => {
+                return self.set_base_property(name, false, move |base| base.tooltip = value)
+            }
+            Property::Font(value) => {
+                return self.set_base_property(name, true, move |base| base.font = value)
+            }
+            Property::Style(value) => {
+                return self.set_base_property(name, false, move |base| base.style = value)
+            }
+            Property::Width(value) => {
+                return self.set_base_property(name, true, move |base| base.width = value)
+            }
+            Property::Height(value) => {
+                return self.set_base_property(name, true, move |base| base.height = value)
+            }
+            Property::Padding(value) => {
+                return self.set_base_property(name, true, move |base| base.padding = value)
+            }
+            Property::Margin(value) => {
+                return self.set_base_property(name, true, move |base| base.margin = value)
+            }
+            Property::Spacing(value) => {
+                return self.set_base_property(name, true, move |base| base.spacing = value)
+            }
+            Property::Flex(value) => {
+                return self.set_base_property(name, true, move |base| base.flex_grow = value)
+            }
+            Property::Position(value) => {
+                return self.set_base_property(name, true, move |base| base.pos = value)
+            }
+            Property::Justify(value) => {
+                return self.set_base_property(name, true, move |base| base.justify = value)
+            }
+            Property::Align(value) => {
+                return self.set_base_property(name, true, move |base| base.align = value)
+            }
+            Property::Enabled(value) => {
+                let found = self.get(name, |_| ()).is_some();
+                self.set_enabled(name, value);
+                return found;
+            }
+            Property::Visible(value) => {
+                let found = self.get(name, |_| ()).is_some();
+                self.set_visible(name, value);
+                return found;
+            }
+            Property::Focusable(value) => {
+                return self.set_base_property(name, false, move |base| base.focusable = value)
+            }
+            Property::FocusWithin(value) => {
+                return self.set_base_property(name, false, move |base| base.focus_within = value)
+            }
+            Property::HitPolicy(value) => {
+                return self.set_base_property(name, false, move |base| base.hit = value)
+            }
+            Property::Selected(selected) => return self.set_selected(name, selected),
+            property => {
+                let mut applied = false;
+                self.mutate(name, |w| applied = w.apply_property(property));
+                if applied {
+                    self.invalidate(Invalidation::Layout);
+                }
+                return applied;
+            }
+        }
+    }
+
+    fn set_base_property(
+        &mut self,
+        name: &str,
+        layout: bool,
+        update: impl FnOnce(&mut crate::widget::Base),
+    ) -> bool {
+        let rect = self.rect(name);
+        let found = self
+            .mutate(name, |widget| update(widget.base_mut()))
+            .is_some();
+        if found {
+            self.invalidate(if layout {
+                Invalidation::Layout
+            } else {
+                rect.map_or(Invalidation::Redraw, Invalidation::Paint)
+            });
+        }
+        found
+    }
+
+    pub fn property(
+        &self,
+        name: &str,
+        key: crate::widget::WidgetPropertyKey,
+    ) -> Option<crate::widget::WidgetProperty> {
+        use crate::widget::{WidgetProperty as Property, WidgetPropertyKey as Key};
+        let common = self
+            .get(name, |widget| {
+                let base = widget.base();
+                match key {
+                    Key::Text => Some(Property::Text(base.text.clone())),
+                    Key::Tooltip => Some(Property::Tooltip(base.tooltip.clone())),
+                    Key::Font => Some(Property::Font(base.font.clone())),
+                    Key::Style => Some(Property::Style(base.style.clone())),
+                    Key::Width => Some(Property::Width(base.width)),
+                    Key::Height => Some(Property::Height(base.height)),
+                    Key::Padding => Some(Property::Padding(base.padding)),
+                    Key::Margin => Some(Property::Margin(base.margin)),
+                    Key::Spacing => Some(Property::Spacing(base.spacing)),
+                    Key::Flex => Some(Property::Flex(base.flex_grow)),
+                    Key::Position => Some(Property::Position(base.pos)),
+                    Key::Justify => Some(Property::Justify(base.justify)),
+                    Key::Align => Some(Property::Align(base.align)),
+                    Key::Enabled => Some(Property::Enabled(base.enabled)),
+                    Key::Visible => Some(Property::Visible(base.visible)),
+                    Key::Focusable => Some(Property::Focusable(base.focusable)),
+                    Key::FocusWithin => Some(Property::FocusWithin(base.focus_within)),
+                    Key::HitPolicy => Some(Property::HitPolicy(base.hit)),
+                    Key::Selected => Some(Property::Selected(base.selected)),
+                    _ => None,
+                }
+            })
+            .flatten();
+        if common.is_some() {
+            return common;
+        }
+        self.get(name, |w| w.property(key)).flatten()
+    }
+
+    /// 向容器末尾添加一个子控件。
+    pub fn add_child(&mut self, name: &str, child: Node) -> bool {
+        self.mutate(name, move |w| w.base_mut().children.push(child))
+            .is_some_and(|_| {
+                self.invalidate(Invalidation::Layout);
+                true
+            })
+    }
+
+    /// 删除并返回容器指定位置的子控件。
+    pub fn remove_child(&mut self, name: &str, index: usize) -> Option<Node> {
+        let child = self
+            .mutate(name, |w| {
+                (index < w.base().children.len()).then(|| w.base_mut().children.remove(index))
+            })
+            .flatten();
+        if child.is_some() {
+            self.invalidate(Invalidation::Layout);
+        }
+        child
+    }
+
+    /// 替换并返回容器指定位置的原子控件。
+    pub fn replace_child(&mut self, name: &str, index: usize, child: Node) -> Option<Node> {
+        let old = self
+            .mutate(name, move |w| {
+                (index < w.base().children.len())
+                    .then(|| std::mem::replace(&mut w.base_mut().children[index], child))
+            })
+            .flatten();
+        if old.is_some() {
+            self.invalidate(Invalidation::Layout);
+        }
+        old
+    }
+
+    /// 清空容器子控件并返回原节点。
+    pub fn clear_children(&mut self, name: &str) -> Option<Vec<Node>> {
+        let children = self.mutate(name, |w| std::mem::take(&mut w.base_mut().children))?;
+        if !children.is_empty() {
+            self.invalidate(Invalidation::Layout);
+        }
+        Some(children)
+    }
+
+    pub fn request_paint(&mut self, name: &str) -> bool {
+        let Some(rect) = self.rect(name) else {
+            return false;
+        };
+        self.invalidate(Invalidation::Paint(rect));
+        true
+    }
+
+    pub fn request_redraw(&mut self) {
+        self.invalidate(Invalidation::Redraw);
+    }
+
+    pub fn request_layout(&mut self) {
+        self.invalidate(Invalidation::Layout);
+    }
+
     /// 在指定控件上播放一段运行时帧动画。它覆盖状态图片，结束后按 `finish` 处理。
-    pub fn play_frame_animation(&mut self, name: &str, layer: FrameLayer, animation: FrameAnimation) -> bool {
+    pub fn play_frame_animation(
+        &mut self,
+        name: &str,
+        layer: FrameLayer,
+        animation: FrameAnimation,
+    ) -> bool {
         self.with(name, move |w| match layer {
             FrameLayer::Background => w.base_mut().click_bg_frame_player.start(animation),
             FrameLayer::Foreground => w.base_mut().click_fg_frame_player.start(animation),
-        }).is_some()
+        })
+        .is_some()
     }
 
     pub fn pause_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
         self.with(name, move |w| match layer {
             FrameLayer::Background => w.base_mut().click_bg_frame_player.pause(),
             FrameLayer::Foreground => w.base_mut().click_fg_frame_player.pause(),
-        }).unwrap_or(false)
+        })
+        .unwrap_or(false)
     }
 
     pub fn resume_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
         self.with(name, move |w| match layer {
             FrameLayer::Background => w.base_mut().click_bg_frame_player.resume(),
             FrameLayer::Foreground => w.base_mut().click_fg_frame_player.resume(),
-        }).unwrap_or(false)
+        })
+        .unwrap_or(false)
     }
 
     pub fn stop_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
         self.with(name, move |w| match layer {
             FrameLayer::Background => w.base_mut().click_bg_frame_player.stop(),
             FrameLayer::Foreground => w.base_mut().click_fg_frame_player.stop(),
-        }).unwrap_or(false)
+        })
+        .unwrap_or(false)
     }
 }
 
@@ -152,6 +495,7 @@ pub struct Dispatcher {
     pressed: Option<WidgetId>,
     focus: Option<WidgetId>,
     needs_redraw: bool,
+    needs_layout: bool,
     /// 局部脏矩形（联合），后端据此只失效这块区域（脏区重绘）。
     dirty: Option<Rect>,
     bindings: Vec<TabBinding>,
@@ -161,6 +505,8 @@ pub struct Dispatcher {
     double_clicked: Vec<String>,
     /// 本轮右键的具名控件 + 位置（供上下文菜单）。
     context_clicked: Vec<(String, Point)>,
+    /// 本轮控件语义事件，供窗口层统一通知。
+    control_events: Vec<(String, ControlEvent)>,
     /// 模态浮层栈（下拉/菜单）；顶部为当前活动浮层。
     overlays: Vec<Overlay>,
     /// 浮层内的悬停项（与主树 hover 分离，避免打开菜单清掉主树状态）。
@@ -184,11 +530,13 @@ impl Dispatcher {
             pressed: None,
             focus: None,
             needs_redraw: false,
+            needs_layout: false,
             dirty: None,
             bindings: Vec::new(),
             activated: Vec::new(),
             double_clicked: Vec::new(),
             context_clicked: Vec::new(),
+            control_events: Vec::new(),
             overlays: Vec::new(),
             overlay_hover: None,
             overlay_pressed: None,
@@ -201,12 +549,17 @@ impl Dispatcher {
 
     /// 取一个可跨线程投递消息的句柄（发给工作线程）。
     pub fn proxy(&self) -> MainProxy {
-        MainProxy { queue: Arc::clone(&self.mailbox) }
+        MainProxy {
+            queue: Arc::clone(&self.mailbox),
+        }
     }
 
     /// 取走后台线程投递的所有消息（主线程调用）。
     pub fn drain_messages(&self) -> Vec<String> {
-        self.mailbox.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
+        self.mailbox
+            .lock()
+            .map(|mut q| std::mem::take(&mut *q))
+            .unwrap_or_default()
     }
 
     /// 是否有进行中的动画（后端据此决定是否驱动帧定时器）。
@@ -225,7 +578,9 @@ impl Dispatcher {
         dur_secs: f32,
         easing: Easing,
     ) -> bool {
-        let Some(id) = find_by_name(root, name) else { return false };
+        let Some(id) = find_by_name(root, name) else {
+            return false;
+        };
         let mut from = None;
         visit_mut(root, id, &mut |w| from = w.animation_value(prop));
         let Some(from) = from else { return false };
@@ -250,17 +605,28 @@ impl Dispatcher {
                 a.elapsed += dt;
             }
             // 快照 (target, prop, value) 后应用，避免与 self 的可变借用冲突。
-            let apply: Vec<(WidgetId, AnimProp, f32)> =
-                self.anims.iter().map(|a| (a.target, a.prop, a.value_at())).collect();
+            let apply: Vec<(WidgetId, AnimProp, f32)> = self
+                .anims
+                .iter()
+                .map(|a| (a.target, a.prop, a.value_at()))
+                .collect();
             for (id, prop, v) in apply {
-                visit_mut(root, id, &mut |w| { w.set_animation_value(prop, v); });
+                visit_mut(root, id, &mut |w| {
+                    w.set_animation_value(prop, v);
+                });
             }
             self.anims.retain(|a| !a.done());
             changed = true;
         }
 
         let mut dirty = None;
-        tick_frame_animations(root, dt, false, &mut dirty);
+        let mut finished = Vec::new();
+        tick_frame_animations(root, dt, false, &mut dirty, &mut finished);
+        finished.sort_unstable_by_key(|(id, layer)| (*id, *layer as u8));
+        finished.dedup();
+        for (id, layer) in finished {
+            self.emit_control_event(root, id, ControlEvent::FrameAnimationFinished(layer));
+        }
         if let Some(rect) = dirty {
             self.mark_dirty(rect);
             changed = true;
@@ -288,7 +654,10 @@ impl Dispatcher {
         let ov = self.overlays.last()?;
         let item = ov.root.base().children.get(i)?;
         let r = item.base().rect;
-        Some(Point::new(r.left() + r.size.width / 2.0, r.top() + r.size.height / 2.0))
+        Some(Point::new(
+            r.left() + r.size.width / 2.0,
+            r.top() + r.size.height / 2.0,
+        ))
     }
 
     /// 测试辅助：栈顶浮层归属 id。
@@ -364,14 +733,7 @@ impl Dispatcher {
             let mut rect = if is_submenu {
                 place_submenu(anchor, desired, window, window_margin)
             } else {
-                place_overlay(
-                    anchor,
-                    desired,
-                    window,
-                    min_w,
-                    window_margin,
-                    alignment,
-                )
+                place_overlay(anchor, desired, window, min_w, window_margin, alignment)
             };
             rect.origin.x += offset.x;
             rect.origin.y += offset.y;
@@ -409,6 +771,10 @@ impl Dispatcher {
         std::mem::take(&mut self.context_clicked)
     }
 
+    pub fn take_control_events(&mut self) -> Vec<(String, ControlEvent)> {
+        std::mem::take(&mut self.control_events)
+    }
+
     /// 注册一个「Radio 组 → TabBox」绑定。
     pub fn bind_tab(&mut self, group: u32, tabbox: WidgetId) {
         self.bindings.push(TabBinding { group, tabbox });
@@ -419,6 +785,25 @@ impl Dispatcher {
         let r = self.needs_redraw;
         self.needs_redraw = false;
         r
+    }
+
+    /// 取走「下一次绘制前需要重新布局」标志。
+    pub fn take_layout(&mut self) -> bool {
+        let value = self.needs_layout;
+        self.needs_layout = false;
+        value
+    }
+
+    pub fn invalidate(&mut self, invalidation: Invalidation) {
+        match invalidation {
+            Invalidation::None => {}
+            Invalidation::Paint(rect) => self.mark_dirty(rect),
+            Invalidation::Redraw => self.needs_redraw = true,
+            Invalidation::Layout => {
+                self.needs_layout = true;
+                self.needs_redraw = true;
+            }
+        }
     }
 
     /// 取走局部脏矩形（后端优先按此失效；无则看 take_redraw）。
@@ -473,7 +858,10 @@ impl Dispatcher {
                 self.overlay_hover(level, hit);
                 self.open_hovered_submenu(level, hit);
             }
-            Event::MouseDown { pos, button: MouseButton::Left } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+            } => {
                 if let Some(level) = self.overlay_level_at(*pos) {
                     let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
                     self.overlay_press(level, hit);
@@ -481,7 +869,10 @@ impl Dispatcher {
                     self.close_overlays();
                 }
             }
-            Event::MouseUp { pos, button: MouseButton::Left } => {
+            Event::MouseUp {
+                pos,
+                button: MouseButton::Left,
+            } => {
                 if let Some(level) = self.overlay_level_at(*pos) {
                     let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
                     if self.overlay_release(level, main_root, hit) {
@@ -556,7 +947,9 @@ impl Dispatcher {
         for overlay in &mut self.overlays {
             for_each_mut(overlay.root.as_mut(), &mut |w| w.base_mut().pressed = false);
         }
-        let Some((pressed_level, pid)) = pressed else { return false };
+        let Some((pressed_level, pid)) = pressed else {
+            return false;
+        };
         if pressed_level != level || Some(pid) != hit {
             return false;
         }
@@ -570,7 +963,11 @@ impl Dispatcher {
             }
         });
         let Some(idx) = idx else { return false };
-        if self.overlays[level].entries.get(idx).is_some_and(crate::widgets::MenuEntry::is_submenu) {
+        if self.overlays[level]
+            .entries
+            .get(idx)
+            .is_some_and(crate::widgets::MenuEntry::is_submenu)
+        {
             self.open_hovered_submenu(level, Some(pid));
             return false;
         }
@@ -578,11 +975,15 @@ impl Dispatcher {
         match owner {
             // 下拉框：在主树回填 owner 并按 owner 名上报激活。
             Some(oid) => {
+                let before = control_snapshot(main_root, oid);
                 let mut owner_name = None;
                 visit_mut(main_root, oid, &mut |w| {
                     w.set_selected_item(idx);
                     owner_name = w.base().name.clone();
                 });
+                if let (Some(before), Some(after)) = (before, control_snapshot(main_root, oid)) {
+                    self.emit_snapshot_changes(main_root, oid, before, after);
+                }
                 if let Some(n) = owner_name {
                     self.activated.push(n);
                 }
@@ -598,7 +999,9 @@ impl Dispatcher {
     }
 
     fn overlay_level_at(&self, pos: Point) -> Option<usize> {
-        self.overlays.iter().rposition(|overlay| overlay.root.base().rect.contains(pos))
+        self.overlays
+            .iter()
+            .rposition(|overlay| overlay.root.base().rect.contains(pos))
     }
 
     fn open_hovered_submenu(&mut self, level: usize, hit: Option<WidgetId>) {
@@ -614,7 +1017,10 @@ impl Dispatcher {
                 anchor = widget.base().rect;
             }
         });
-        let Some(entry) = index.and_then(|index| self.overlays[level].entries.get(index)).cloned() else {
+        let Some(entry) = index
+            .and_then(|index| self.overlays[level].entries.get(index))
+            .cloned()
+        else {
             self.overlays.truncate(level + 1);
             return;
         };
@@ -622,7 +1028,11 @@ impl Dispatcher {
             self.overlays.truncate(level + 1);
             return;
         }
-        if self.overlays.get(level + 1).is_some_and(|overlay| overlay.parent_item == Some(item_id)) {
+        if self
+            .overlays
+            .get(level + 1)
+            .is_some_and(|overlay| overlay.parent_item == Some(item_id))
+        {
             return;
         }
         self.overlays.truncate(level + 1);
@@ -706,6 +1116,7 @@ impl Dispatcher {
 
     /// 把事件转发给指定 id 的控件 on_event；消费则脏其区域。
     fn forward_to_widget(&mut self, root: &mut dyn Widget, id: WidgetId, ev: &Event) {
+        let before = control_snapshot(root, id);
         let mut consumed = false;
         visit_mut(root, id, &mut |w| {
             consumed = w.on_event(ev) == EventFlow::Consumed;
@@ -713,6 +1124,9 @@ impl Dispatcher {
         if consumed {
             if let Some(r) = rect_of(root, id) {
                 self.mark_dirty(r);
+            }
+            if let (Some(before), Some(after)) = (before, control_snapshot(root, id)) {
+                self.emit_snapshot_changes(root, id, before, after);
             }
         }
     }
@@ -799,16 +1213,7 @@ impl Dispatcher {
             }
             Event::KeyDown { .. } | Event::KeyUp { .. } | Event::Char { .. } => {
                 if let Some(fid) = self.focus {
-                    let mut consumed = false;
-                    visit_mut(root, fid, &mut |w| {
-                        consumed = w.on_event(ev) == EventFlow::Consumed;
-                    });
-                    if consumed {
-                        // 只脏焦点控件区域（打字只重绘输入框）。
-                        if let Some(r) = rect_of(root, fid) {
-                            self.mark_dirty(r);
-                        }
-                    }
+                    self.forward_to_widget(root, fid, ev);
                 }
             }
             // 滚轮：滚动光标下最内层可滚动容器。
@@ -831,10 +1236,14 @@ impl Dispatcher {
         if order.is_empty() {
             return;
         }
-        let next = match self.focus.and_then(|f| order.iter().position(|&id| id == f)) {
+        let next = match self
+            .focus
+            .and_then(|f| order.iter().position(|&id| id == f))
+        {
             Some(i) => order[(i + 1) % order.len()],
             None => order[0],
         };
+        let old = self.focus;
         self.focus = Some(next);
         for_each_mut(root, &mut |w| {
             let focused = w.base().id == next;
@@ -845,6 +1254,12 @@ impl Dispatcher {
             }
         });
         self.needs_redraw = true;
+        if old != Some(next) {
+            if let Some(id) = old {
+                self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
+            }
+            self.emit_control_event(root, next, ControlEvent::FocusChanged(true));
+        }
     }
 
     /// 隐藏或禁用当前焦点控件后，立即停止向它分发键盘与剪贴板事件。
@@ -856,12 +1271,16 @@ impl Dispatcher {
         self.focus = None;
         for_each_mut(root, &mut |w| w.base_mut().focused = false);
         self.needs_redraw = true;
+        self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
     }
 
     /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
     fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dy: f32) {
-        if let Some(rect) = scroll_tree_at(root, pos, dy) {
+        if let Some((id, rect)) = scroll_tree_at(root, pos, dy) {
             self.mark_dirty(rect); // 只脏滚动区
+            if let Some(position) = find_by_id(root, id).and_then(Widget::scroll_position) {
+                self.emit_control_event(root, id, ControlEvent::ScrollChanged(position));
+            }
         }
     }
 
@@ -885,6 +1304,13 @@ impl Dispatcher {
             if let Some(r) = rect_of(root, id) {
                 self.mark_dirty(r);
             }
+        }
+        if let Some(id) = old {
+            self.emit_control_event(root, id, ControlEvent::HoverChanged(false));
+        }
+        if let Some(id) = hit {
+            let hovered = find_by_id(root, id).is_some_and(|w| w.base().hover);
+            self.emit_control_event(root, id, ControlEvent::HoverChanged(hovered));
         }
     }
 
@@ -913,7 +1339,10 @@ impl Dispatcher {
         self.tip_ticks += 1;
         // 累计满 1 个 tick（≈0.53s）后显示。
         if self.tip_ticks >= 1 {
-            self.tooltip = Some(Tooltip { root: crate::widgets::build_tooltip(&text), anchor: rect });
+            self.tooltip = Some(Tooltip {
+                root: crate::widgets::build_tooltip(&text),
+                anchor: rect,
+            });
             self.needs_redraw = true;
             return Some(rect);
         }
@@ -922,6 +1351,7 @@ impl Dispatcher {
 
     /// 处理按下：设置 pressed 与 focus。
     fn press(&mut self, root: &mut dyn Widget, hit: Option<WidgetId>) {
+        let old_focus = self.focus;
         self.pressed = hit;
 
         // 判断命中控件是否可获得焦点。
@@ -945,6 +1375,18 @@ impl Dispatcher {
             }
         });
         self.needs_redraw = true;
+        if old_focus != focus_target {
+            if let Some(id) = old_focus {
+                self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
+            }
+            if let Some(id) = focus_target {
+                self.emit_control_event(root, id, ControlEvent::FocusChanged(true));
+            }
+        }
+        if let Some(id) = hit {
+            let pressed = find_by_id(root, id).is_some_and(|w| w.base().pressed);
+            self.emit_control_event(root, id, ControlEvent::PressedChanged(pressed));
+        }
     }
 
     /// 处理抬起：清 pressed；若与按下目标一致则触发点击。
@@ -952,6 +1394,9 @@ impl Dispatcher {
         let pressed = self.pressed.take();
         for_each_mut(root, &mut |w| w.base_mut().pressed = false);
         self.needs_redraw = true;
+        if let Some(id) = pressed {
+            self.emit_control_event(root, id, ControlEvent::PressedChanged(false));
+        }
 
         if let Some(pid) = pressed {
             if Some(pid) == hit {
@@ -962,6 +1407,7 @@ impl Dispatcher {
 
     /// 触发某控件的点击语义：选择切换 + Radio 互斥 + tabbar 翻页 + 回调。
     fn activate(&mut self, root: &mut dyn Widget, id: WidgetId) {
+        let before = control_snapshot(root, id);
         // 1. 选择态变化 + 采集信息（此时不触发回调）。
         let mut info: Option<(WidgetRole, Option<u32>, Option<usize>)> = None;
         let mut enabled = false;
@@ -1028,14 +1474,21 @@ impl Dispatcher {
 
         // 2. Radio：同组互斥 + tabbar 联动。
         if let Some((WidgetRole::Radio, Some(g), tab_index)) = info {
+            let mut deselected = Vec::new();
             for_each_mut(root, &mut |w| {
                 if w.base().role == WidgetRole::Radio
                     && w.selection_group() == Some(g)
                     && w.base().id != id
                 {
+                    if w.base().selected {
+                        deselected.push(w.base().id);
+                    }
                     w.base_mut().selected = false;
                 }
             });
+            for radio_id in deselected {
+                self.emit_control_event(root, radio_id, ControlEvent::SelectedChanged(false));
+            }
             if let Some(ti) = tab_index {
                 // 找到该组绑定的 TabBox，设置当前页。
                 let targets: Vec<WidgetId> = self
@@ -1044,10 +1497,22 @@ impl Dispatcher {
                     .filter(|bd| bd.group == g)
                     .map(|bd| bd.tabbox)
                     .collect();
+                let mut targets = targets;
+                collect_bound_tabboxes(root, g, &mut targets);
+                targets.sort_unstable();
+                targets.dedup();
                 for tb_id in targets {
+                    let before = control_snapshot(root, tb_id);
                     visit_mut(root, tb_id, &mut |w| { w.set_selected_index(ti); });
+                    if let (Some(before), Some(after)) = (before, control_snapshot(root, tb_id)) {
+                        self.emit_snapshot_changes(root, tb_id, before, after);
+                    }
                 }
             }
+        }
+
+        if let (Some(before), Some(after)) = (before, control_snapshot(root, id)) {
+            self.emit_snapshot_changes(root, id, before, after);
         }
 
         // 3. 触发点击回调：先把闭包取出（释放对该节点的借用），再以 EventCtx 调用
@@ -1059,11 +1524,89 @@ impl Dispatcher {
         if let Some(mut cb) = taken {
             let mut ctx = EventCtx::new(root);
             cb(&mut ctx);
+            self.invalidate(ctx.take_invalidation());
             let mut slot = Some(cb);
             visit_mut(root, id, &mut |w| {
                 w.base_mut().on_click = slot.take();
             });
         }
+    }
+
+    fn emit_snapshot_changes(
+        &mut self,
+        root: &mut dyn Widget,
+        id: WidgetId,
+        before: ControlSnapshot,
+        after: ControlSnapshot,
+    ) {
+        if before.text != after.text {
+            self.emit_control_event(root, id, ControlEvent::TextChanged(after.text));
+        }
+        if before.selected != after.selected {
+            self.emit_control_event(root, id, ControlEvent::SelectedChanged(after.selected));
+        }
+        if before.selection != after.selection {
+            self.emit_control_event(root, id, ControlEvent::SelectionChanged(after.selection));
+        }
+        if before.value != after.value {
+            if let Some(value) = after.value {
+                self.emit_control_event(root, id, ControlEvent::ValueChanged(value));
+            }
+        }
+        if before.scroll != after.scroll {
+            if let Some(value) = after.scroll {
+                self.emit_control_event(root, id, ControlEvent::ScrollChanged(value));
+            }
+        }
+    }
+
+    fn emit_control_event(&mut self, root: &mut dyn Widget, id: WidgetId, event: ControlEvent) {
+        let name = name_of(root, id);
+        let mut handler = None;
+        visit_mut(root, id, &mut |w| {
+            handler = w.base_mut().on_control_event.take()
+        });
+        if let Some(mut callback) = handler {
+            let mut ctx = EventCtx::new(root);
+            callback(&event, &mut ctx);
+            self.invalidate(ctx.take_invalidation());
+            let mut handler = Some(callback);
+            visit_mut(root, id, &mut |w| {
+                w.base_mut().on_control_event = handler.take()
+            });
+        }
+        if let Some(name) = name {
+            self.control_events.push((name, event));
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct ControlSnapshot {
+    text: String,
+    selected: bool,
+    selection: Option<usize>,
+    value: Option<f32>,
+    scroll: Option<f32>,
+}
+
+fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> {
+    let widget = find_by_id(root, id)?;
+    Some(ControlSnapshot {
+        text: widget.base().text.clone(),
+        selected: widget.base().selected,
+        selection: widget.selected_index(),
+        value: widget.animation_value(AnimProp::Value),
+        scroll: widget.scroll_position(),
+    })
+}
+
+fn collect_bound_tabboxes(node: &dyn Widget, group: u32, targets: &mut Vec<WidgetId>) {
+    if node.tab_bind_group() == Some(group) {
+        targets.push(node.base().id);
+    }
+    for child in &node.base().children {
+        collect_bound_tabboxes(child.as_ref(), group, targets);
     }
 }
 
@@ -1150,12 +1693,15 @@ fn place_submenu(
     } else {
         (anchor.left() - w).max(margin.left)
     };
-    let y = anchor.top().min(window.height - margin.bottom - h).max(margin.top);
+    let y = anchor
+        .top()
+        .min(window.height - margin.bottom - h)
+        .max(margin.top);
     Rect::new(x, y, w, h)
 }
 
 /// 滚动光标下最深的可滚动控件，返回实际发生变化的视口矩形。
-fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<Rect> {
+fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<(WidgetId, Rect)> {
     let mut target = None;
     for_each_visible_mut(root, true, &mut |widget| {
         if widget.is_scrollable() && widget.children_viewport().contains(pos) {
@@ -1170,7 +1716,7 @@ fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<Rect> {
             changed_rect = Some(viewport);
         }
     });
-    changed_rect
+    changed_rect.map(|rect| (id, rect))
 }
 
 /// 两矩形的包围并集。
@@ -1267,19 +1813,35 @@ fn for_each_visible_mut(
 }
 
 /// 只推进有效可见子树中的帧动画，并联合真正发生帧变化的控件区域。
-fn tick_frame_animations(node: &mut dyn Widget, dt: f32, inherited_focus: bool, dirty: &mut Option<Rect>) {
+fn tick_frame_animations(
+    node: &mut dyn Widget,
+    dt: f32,
+    inherited_focus: bool,
+    dirty: &mut Option<Rect>,
+    finished: &mut Vec<(WidgetId, FrameLayer)>,
+) {
     if !node.base().visible {
         return;
     }
     let subtree_has_focus = subtree_focused_for_frames(node);
     let b = node.base_mut();
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
-    let state = crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
+    let state =
+        crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
     let style = b.style.resolve(state);
-    let changed = b.bg_frame_player.tick_state(style.bg_animation.as_ref(), dt)
-        | b.fg_frame_player.tick_state(style.fg_animation.as_ref(), dt)
+    let changed = b
+        .bg_frame_player
+        .tick_state(style.bg_animation.as_ref(), dt)
+        | b.fg_frame_player
+            .tick_state(style.fg_animation.as_ref(), dt)
         | b.click_bg_frame_player.tick(dt)
         | b.click_fg_frame_player.tick(dt);
+    if b.bg_frame_player.take_finished() || b.click_bg_frame_player.take_finished() {
+        finished.push((b.id, FrameLayer::Background));
+    }
+    if b.fg_frame_player.take_finished() || b.click_fg_frame_player.take_finished() {
+        finished.push((b.id, FrameLayer::Foreground));
+    }
     let rect = b.rect;
     let pass_focus = focus_active && b.focus_within;
     if changed {
@@ -1287,12 +1849,17 @@ fn tick_frame_animations(node: &mut dyn Widget, dt: f32, inherited_focus: bool, 
     }
     let child_count = b.children.len();
     for i in 0..child_count {
-        tick_frame_animations(b.children[i].as_mut(), dt, pass_focus, dirty);
+        tick_frame_animations(b.children[i].as_mut(), dt, pass_focus, dirty, finished);
     }
 }
 
 fn subtree_focused_for_frames(node: &dyn Widget) -> bool {
-    node.base().focused || node.base().children.iter().any(|child| subtree_focused_for_frames(child.as_ref()))
+    node.base().focused
+        || node
+            .base()
+            .children
+            .iter()
+            .any(|child| subtree_focused_for_frames(child.as_ref()))
 }
 
 /// id 对应控件是否位于有效可见子树，且自身可聚焦、可用。
@@ -1331,9 +1898,10 @@ mod tests {
     use crate::event::{Mods, MouseButton};
     use crate::layout::layout_node;
     use crate::widgets::{
-        Button, ComboBox, Edit, Label, ListView, Panel, Progress, Radio, ScrollView, Slider,
-        TabBox, VBox,
+        Button, CheckBox, ComboBox, Edit, Label, ListView, Panel, Progress, Radio, ScrollView,
+        Slider, TabBox, VBox,
     };
+    use crate::WidgetProperty;
     use flexui_geometry::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
@@ -1343,9 +1911,29 @@ mod tests {
     impl Canvas for FakeCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: flexui_geometry::Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: flexui_geometry::Color, _w: f32) {}
-        fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: flexui_geometry::Color) {}
-        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: flexui_geometry::Color, _w: f32) {}
-        fn draw_text(&mut self, _t: &str, _o: flexui_geometry::Point, _f: &Font, _c: flexui_geometry::Color) {}
+        fn fill_round_rect(
+            &mut self,
+            _r: Rect,
+            _rad: flexui_geometry::Corners,
+            _c: flexui_geometry::Color,
+        ) {
+        }
+        fn stroke_round_rect(
+            &mut self,
+            _r: Rect,
+            _rad: flexui_geometry::Corners,
+            _c: flexui_geometry::Color,
+            _w: f32,
+        ) {
+        }
+        fn draw_text(
+            &mut self,
+            _t: &str,
+            _o: flexui_geometry::Point,
+            _f: &Font,
+            _c: flexui_geometry::Color,
+        ) {
+        }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
         }
@@ -1353,12 +1941,27 @@ mod tests {
 
     /// 构造无修饰键的 KeyDown（测试便捷）。
     fn kd(key: u32) -> Event {
-        Event::KeyDown { key, mods: Mods::default() }
+        Event::KeyDown {
+            key,
+            mods: Mods::default(),
+        }
     }
 
     fn click_at(disp: &mut Dispatcher, root: &mut dyn Widget, p: Point) {
-        disp.handle(root, &Event::MouseDown { pos: p, button: MouseButton::Left });
-        disp.handle(root, &Event::MouseUp { pos: p, button: MouseButton::Left });
+        disp.handle(
+            root,
+            &Event::MouseDown {
+                pos: p,
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(
+            root,
+            &Event::MouseUp {
+                pos: p,
+                button: MouseButton::Left,
+            },
+        );
     }
 
     #[test]
@@ -1376,10 +1979,14 @@ mod tests {
         let mut disp = Dispatcher::new();
         disp.handle(
             &mut root,
-            &Event::MouseWheel { pos: Point::new(50.0, 50.0), dx: 0.0, dy: -60.0 },
+            &Event::MouseWheel {
+                pos: Point::new(50.0, 50.0),
+                dx: 0.0,
+                dy: -60.0,
+            },
         );
         assert_eq!(root.scroll_position(), Some(60.0)); // 视口100 内容200 → 可滚到 100，60 有效
-        // 重新布局后首个子应上移 60
+                                                        // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
     }
@@ -1390,11 +1997,19 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         let mut disp = Dispatcher::new();
-        disp.handle(&mut root, &Event::DoubleClick { pos: Point::new(25.0, 15.0) });
+        disp.handle(
+            &mut root,
+            &Event::DoubleClick {
+                pos: Point::new(25.0, 15.0),
+            },
+        );
         assert_eq!(disp.take_double_clicks(), vec!["b".to_string()]);
         disp.handle(
             &mut root,
-            &Event::MouseUp { pos: Point::new(25.0, 15.0), button: MouseButton::Right },
+            &Event::MouseUp {
+                pos: Point::new(25.0, 15.0),
+                button: MouseButton::Right,
+            },
         );
         let ctx = disp.take_context_clicks();
         assert_eq!(ctx.len(), 1);
@@ -1434,12 +2049,20 @@ mod tests {
         // 点击 x≈25 → 边界3；光标定位、锚点同处（无选区）。
         disp.handle(
             &mut root,
-            &Event::MouseDown { pos: Point::new(25.0, 20.0), button: MouseButton::Left },
+            &Event::MouseDown {
+                pos: Point::new(25.0, 20.0),
+                button: MouseButton::Left,
+            },
         );
         assert_eq!(root.cursor(), 3);
         assert_eq!(root.selection(), None);
         // 拖到 x≈8 → 边界1；选区 (1,3) = "el"。
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(8.0, 20.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(8.0, 20.0),
+            },
+        );
         assert_eq!(root.selection(), Some((1, 3)));
         assert_eq!(root.selected_text().as_deref(), Some("el"));
     }
@@ -1453,14 +2076,31 @@ mod tests {
         // 按下 x=50 → value≈0.5
         disp.handle(
             &mut root,
-            &Event::MouseDown { pos: Point::new(50.0, 10.0), button: MouseButton::Left },
+            &Event::MouseDown {
+                pos: Point::new(50.0, 10.0),
+                button: MouseButton::Left,
+            },
         );
-        assert!((root.current() - 0.5).abs() < 1e-3, "got {}", root.current());
+        assert!(
+            (root.current() - 0.5).abs() < 1e-3,
+            "got {}",
+            root.current()
+        );
         // 拖到 x=80 → 0.8
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(80.0, 10.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(80.0, 10.0),
+            },
+        );
         assert!((root.current() - 0.8).abs() < 1e-3);
         // 越界夹取
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(200.0, 10.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(200.0, 10.0),
+            },
+        );
         assert_eq!(root.current(), 1.0);
     }
 
@@ -1468,14 +2108,35 @@ mod tests {
     fn place_overlay_下方上翻夹取() {
         let win = Size::new(200.0, 100.0);
         // 下方够放：y=锚点底部；宽取 max(desired,min)。
-        let r = place_overlay(Rect::new(10.0, 10.0, 50.0, 20.0), Size::new(40.0, 30.0), win, 50.0, flexui_geometry::Insets::default(), crate::widgets::MenuAlignment::Start);
+        let r = place_overlay(
+            Rect::new(10.0, 10.0, 50.0, 20.0),
+            Size::new(40.0, 30.0),
+            win,
+            50.0,
+            flexui_geometry::Insets::default(),
+            crate::widgets::MenuAlignment::Start,
+        );
         assert_eq!(r.top(), 30.0);
         assert_eq!(r.size.width, 50.0);
         // 下方放不下 → 上翻到锚点上方。
-        let r2 = place_overlay(Rect::new(10.0, 80.0, 50.0, 15.0), Size::new(40.0, 30.0), win, 0.0, flexui_geometry::Insets::default(), crate::widgets::MenuAlignment::Start);
+        let r2 = place_overlay(
+            Rect::new(10.0, 80.0, 50.0, 15.0),
+            Size::new(40.0, 30.0),
+            win,
+            0.0,
+            flexui_geometry::Insets::default(),
+            crate::widgets::MenuAlignment::Start,
+        );
         assert_eq!(r2.top(), 50.0);
         // 锚点靠右 → X 夹到窗内。
-        let r3 = place_overlay(Rect::new(180.0, 10.0, 10.0, 10.0), Size::new(40.0, 10.0), win, 0.0, flexui_geometry::Insets::default(), crate::widgets::MenuAlignment::Start);
+        let r3 = place_overlay(
+            Rect::new(180.0, 10.0, 10.0, 10.0),
+            Size::new(40.0, 10.0),
+            win,
+            0.0,
+            flexui_geometry::Insets::default(),
+            crate::widgets::MenuAlignment::Start,
+        );
         assert_eq!(r3.left(), 160.0);
         // 原版登录菜单在 580 宽窗口内保留 14px 右边距。
         let r4 = place_overlay(
@@ -1528,12 +2189,7 @@ mod tests {
             .map(|i| (format!("item {i}"), format!("item_{i}")))
             .collect();
         let mut disp = Dispatcher::new();
-        disp.open_styled_menu(
-            Rect::new(20.0, 20.0, 80.0, 20.0),
-            items,
-            Some(style),
-            None,
-        );
+        disp.open_styled_menu(Rect::new(20.0, 20.0, 80.0, 20.0), items, Some(style), None);
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
         let menu_viewport = disp.overlays[0].root.children_viewport();
         let main_before = root.scroll_position();
@@ -1563,31 +2219,61 @@ mod tests {
             .map(|i| (format!("item {i}"), format!("item_{i}")))
             .collect::<Vec<_>>();
         let mut menu = crate::widgets::build_menu_styled(&items, None, &style, None);
-        layout_node(menu.as_mut(), Rect::new(0.0, 0.0, 160.0, 100.0), &FakeCanvas);
+        layout_node(
+            menu.as_mut(),
+            Rect::new(0.0, 0.0, 160.0, 100.0),
+            &FakeCanvas,
+        );
         assert!(menu.scroll_by(-20.0));
         let padding_point = Point::new(20.0, 10.0);
         assert!(menu.base().children[0].base().rect.contains(padding_point));
-        assert_ne!(hit_test(menu.as_ref(), padding_point), Some(menu.base().children[0].base().id));
+        assert_ne!(
+            hit_test(menu.as_ref(), padding_point),
+            Some(menu.base().children[0].base().id)
+        );
     }
 
     #[test]
     fn combobox_点击弹下拉_选中回填并上报() {
-        let mut root =
-            VBox::new().push(ComboBox::new().name("cb").options(["A", "B", "C"]).size(120.0, 30.0));
+        let mut root = VBox::new().push(
+            ComboBox::new()
+                .name("cb")
+                .options(["A", "B", "C"])
+                .size(120.0, 30.0),
+        );
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
         let mut disp = Dispatcher::new();
         let cb_rect = root.base().children[0].base().rect;
         // 点击 ComboBox → 打开下拉。
-        click_at(&mut disp, &mut root, Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0));
+        click_at(
+            &mut disp,
+            &mut root,
+            Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0),
+        );
         assert!(disp.has_overlays());
-        assert_eq!(disp.top_overlay_owner(), Some(root.base().children[0].base().id));
+        assert_eq!(
+            disp.top_overlay_owner(),
+            Some(root.base().children[0].base().id)
+        );
         let _ = disp.take_activations(); // 忽略点击 combo 本身的激活
-        // 布局浮层后点击第 2 项 "B"。
+                                         // 布局浮层后点击第 2 项 "B"。
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
         let c = disp.top_overlay_item_center(1).unwrap();
-        disp.handle(&mut root, &Event::MouseDown { pos: c, button: MouseButton::Left });
-        disp.handle(&mut root, &Event::MouseUp { pos: c, button: MouseButton::Left });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: c,
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(
+            &mut root,
+            &Event::MouseUp {
+                pos: c,
+                button: MouseButton::Left,
+            },
+        );
         assert!(!disp.has_overlays(), "选中后关闭");
         assert_eq!(disp.take_activations(), vec!["cb".to_string()]);
         assert_eq!(root.base().children[0].base().text, "B");
@@ -1598,7 +2284,12 @@ mod tests {
         // 先让一个 Edit 获焦，再打开下拉，验证关闭浮层不清 Edit 焦点。
         let mut root = VBox::new()
             .push(Edit::new().name("e").size(120.0, 30.0))
-            .push(ComboBox::new().name("cb").options(["A", "B"]).size(120.0, 30.0));
+            .push(
+                ComboBox::new()
+                    .name("cb")
+                    .options(["A", "B"])
+                    .size(120.0, 30.0),
+            );
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
         let mut disp = Dispatcher::new();
@@ -1608,14 +2299,28 @@ mod tests {
         assert!(edit_focus.is_some());
         // 打开下拉（点 combo，位于第二行 y≈45）。
         let cb_rect = root.base().children[1].base().rect;
-        click_at(&mut disp, &mut root, Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0));
+        click_at(
+            &mut disp,
+            &mut root,
+            Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0),
+        );
         assert!(disp.has_overlays());
         // 点浮层外部 → 关闭；主树焦点不变。
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
-        disp.handle(&mut root, &Event::MouseDown { pos: Point::new(280.0, 280.0), button: MouseButton::Left });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(280.0, 280.0),
+                button: MouseButton::Left,
+            },
+        );
         assert!(!disp.has_overlays(), "点外部关闭");
         // 再开一次，用 ESC 关。
-        click_at(&mut disp, &mut root, Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0));
+        click_at(
+            &mut disp,
+            &mut root,
+            Point::new(cb_rect.left() + 10.0, cb_rect.top() + 10.0),
+        );
         assert!(disp.has_overlays());
         disp.handle(&mut root, &kd(crate::event::keys::ESCAPE));
         assert!(!disp.has_overlays(), "ESC 关闭");
@@ -1629,26 +2334,52 @@ mod tests {
         let mut disp = Dispatcher::new();
         disp.open_menu(
             Rect::new(10.0, 10.0, 0.0, 0.0),
-            vec![("复制".to_string(), "copy".to_string()), ("粘贴".to_string(), "paste".to_string())],
+            vec![
+                ("复制".to_string(), "copy".to_string()),
+                ("粘贴".to_string(), "paste".to_string()),
+            ],
         );
         assert!(disp.has_overlays());
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
         // 点第 2 项 "粘贴"。
         let c = disp.top_overlay_item_center(1).unwrap();
-        disp.handle(&mut root, &Event::MouseDown { pos: c, button: MouseButton::Left });
-        disp.handle(&mut root, &Event::MouseUp { pos: c, button: MouseButton::Left });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: c,
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(
+            &mut root,
+            &Event::MouseUp {
+                pos: c,
+                button: MouseButton::Left,
+            },
+        );
         assert!(!disp.has_overlays());
         assert_eq!(disp.take_activations(), vec!["paste".to_string()]);
     }
 
     #[test]
     fn listview_点击选中并上报激活() {
-        let mut root = VBox::new().push(ListView::new().name("lv").items(["a", "b", "c"]).row_height(20.0));
+        let mut root = VBox::new().push(
+            ListView::new()
+                .name("lv")
+                .items(["a", "b", "c"])
+                .row_height(20.0),
+        );
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &cv);
         let mut disp = Dispatcher::new();
         // 点击第 2 行（y≈50 → row 2，列表在 (0,0,200,200)）。
-        disp.handle(&mut root, &Event::MouseDown { pos: Point::new(20.0, 50.0), button: MouseButton::Left });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(20.0, 50.0),
+                button: MouseButton::Left,
+            },
+        );
         assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
         assert_eq!(root.base().children[0].selected_index(), Some(2));
     }
@@ -1676,11 +2407,20 @@ mod tests {
         assert!(disp.has_anims());
         // 0.5s → 0.5
         assert!(disp.tick_anims(&mut root, 0.5));
-        let v = root.base().children[0].animation_value(AnimProp::Value).unwrap();
+        let v = root.base().children[0]
+            .animation_value(AnimProp::Value)
+            .unwrap();
         assert!((v - 0.5).abs() < 1e-3, "got {v}");
         // 再 0.5s → 1.0 且结束
         disp.tick_anims(&mut root, 0.5);
-        assert!((root.base().children[0].animation_value(AnimProp::Value).unwrap() - 1.0).abs() < 1e-3);
+        assert!(
+            (root.base().children[0]
+                .animation_value(AnimProp::Value)
+                .unwrap()
+                - 1.0)
+                .abs()
+                < 1e-3
+        );
         assert!(!disp.has_anims());
         // 结束后无变化
         assert!(!disp.tick_anims(&mut root, 0.5));
@@ -1689,40 +2429,76 @@ mod tests {
     #[test]
     fn frame_animation_only_advances_visible_widgets() {
         let animation = FrameAnimation::new(
-            vec![flexui_gfx::ImageSource::path("1.png"), flexui_gfx::ImageSource::path("2.png")],
+            vec![
+                flexui_gfx::ImageSource::path("1.png"),
+                flexui_gfx::ImageSource::path("2.png"),
+            ],
             10.0,
         );
         let style = crate::style::StyleSet::new().with_normal(crate::style::StyleSpec {
             fg_animation: Some(animation),
             ..Default::default()
         });
-        let visible = Panel::new().name("visible").size(40.0, 40.0).style(style.clone());
+        let visible = Panel::new()
+            .name("visible")
+            .size(40.0, 40.0)
+            .style(style.clone());
         let hidden = Panel::new().name("hidden").size(40.0, 40.0).style(style);
         let mut root = VBox::new().push(visible).push(hidden);
         root.base_mut().children[1].base_mut().visible = false;
         let mut dispatcher = Dispatcher::new();
 
         assert!(dispatcher.tick_anims(&mut root, 0.0));
-        assert!(root.base().children[0].base().fg_frame_player.image().is_some());
-        assert!(root.base().children[1].base().fg_frame_player.image().is_none());
+        assert!(root.base().children[0]
+            .base()
+            .fg_frame_player
+            .image()
+            .is_some());
+        assert!(root.base().children[1]
+            .base()
+            .fg_frame_player
+            .image()
+            .is_none());
         assert!(dispatcher.tick_anims(&mut root, 0.11));
-        assert!(root.base().children[1].base().fg_frame_player.image().is_none());
+        assert!(root.base().children[1]
+            .base()
+            .fg_frame_player
+            .image()
+            .is_none());
     }
 
     #[test]
     fn click_frame_animation_survives_mouse_release_and_finishes() {
         let animation = FrameAnimation::new(
-            vec![flexui_gfx::ImageSource::path("1.png"), flexui_gfx::ImageSource::path("2.png")],
+            vec![
+                flexui_gfx::ImageSource::path("1.png"),
+                flexui_gfx::ImageSource::path("2.png"),
+            ],
             10.0,
         )
         .playback(crate::FramePlayback::Once)
         .finish(crate::FrameFinish::Restore);
-        let mut root = Button::new("play").name("play").size(100.0, 40.0).click_fg_animation(animation);
+        let mut root = Button::new("play")
+            .name("play")
+            .size(100.0, 40.0)
+            .click_fg_animation(animation);
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 40.0), &FakeCanvas);
         let mut dispatcher = Dispatcher::new();
         let point = Point::new(50.0, 20.0);
-        dispatcher.handle(&mut root, &Event::MouseDown { pos: point, button: MouseButton::Left });
-        dispatcher.handle(&mut root, &Event::MouseUp { pos: point, button: MouseButton::Left });
+        dispatcher.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: point,
+                button: MouseButton::Left,
+            },
+        );
+        dispatcher.handle(
+            &mut root,
+            &Event::MouseUp {
+                pos: point,
+                button: MouseButton::Left,
+            },
+        );
 
         assert!(!root.base().pressed);
         assert!(root.base().click_fg_frame_player.image().is_some());
@@ -1732,21 +2508,36 @@ mod tests {
 
     #[test]
     fn tooltip_延时显示与移开清除() {
-        let mut root = VBox::new().push(Button::new("b").name("bt").tooltip("提示").size(100.0, 30.0));
+        let mut root = VBox::new().push(
+            Button::new("b")
+                .name("bt")
+                .tooltip("提示")
+                .size(100.0, 30.0),
+        );
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
         let mut disp = Dispatcher::new();
         // 无 hover → 不显示。
         assert!(disp.tooltip_tick(&mut root).is_none());
         // hover 到按钮。
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 15.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(50.0, 15.0),
+            },
+        );
         // 一个 tick 后显示。
         assert!(disp.tooltip_tick(&mut root).is_some());
         assert!(disp.has_tooltip());
         // 已显示：再 tick 不重复。
         assert!(disp.tooltip_tick(&mut root).is_none());
         // hover 移开 → 立即清除。
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(250.0, 250.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(250.0, 250.0),
+            },
+        );
         assert!(!disp.has_tooltip());
     }
 
@@ -1756,7 +2547,12 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 300.0), &cv);
         let mut disp = Dispatcher::new();
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 15.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(50.0, 15.0),
+            },
+        );
         assert!(disp.tooltip_tick(&mut root).is_none());
         assert!(!disp.has_tooltip());
     }
@@ -1770,7 +2566,10 @@ mod tests {
         // 点击以获得焦点。
         disp.handle(
             &mut root,
-            &Event::MouseDown { pos: Point::new(0.0, 20.0), button: MouseButton::Left },
+            &Event::MouseDown {
+                pos: Point::new(0.0, 20.0),
+                button: MouseButton::Left,
+            },
         );
         // 全选 + 复制。
         disp.select_all_focused(&mut root);
@@ -1818,12 +2617,27 @@ mod tests {
         disp.handle(&mut root, &Event::MouseMove { pos: parent });
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
         assert_eq!(disp.overlays.len(), 2);
-        assert_eq!(disp.overlays[1].root.base().rect.top(), disp.overlays[0].root.base().rect.top());
+        assert_eq!(
+            disp.overlays[1].root.base().rect.top(),
+            disp.overlays[0].root.base().rect.top()
+        );
         assert!(disp.take_activations().is_empty());
 
         let child = disp.top_overlay_item_center(1).unwrap();
-        disp.handle(&mut root, &Event::MouseDown { pos: child, button: MouseButton::Left });
-        disp.handle(&mut root, &Event::MouseUp { pos: child, button: MouseButton::Left });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: child,
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(
+            &mut root,
+            &Event::MouseUp {
+                pos: child,
+                button: MouseButton::Left,
+            },
+        );
         assert_eq!(disp.take_activations(), vec!["repair".to_string()]);
         assert!(!disp.has_overlays());
     }
@@ -1852,9 +2666,13 @@ mod tests {
         let mut root = Edit::new().text("secret").read_only(true);
         root.base_mut().rect = Rect::new(0.0, 0.0, 120.0, 30.0);
         let mut disp = Dispatcher::new();
-        disp.handle(&mut root, &Event::MouseDown {
-            pos: Point::new(2.0, 10.0), button: MouseButton::Left,
-        });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(2.0, 10.0),
+                button: MouseButton::Left,
+            },
+        );
         disp.select_all_focused(&mut root);
         assert_eq!(disp.copy_selection(&mut root).as_deref(), Some("secret"));
         assert_eq!(disp.cut_selection(&mut root), None);
@@ -1868,7 +2686,12 @@ mod tests {
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let mut disp = Dispatcher::new();
         // x≈40 落在 "bar" 内 → 选中整词。
-        disp.handle(&mut root, &Event::DoubleClick { pos: Point::new(40.0, 20.0) });
+        disp.handle(
+            &mut root,
+            &Event::DoubleClick {
+                pos: Point::new(40.0, 20.0),
+            },
+        );
         assert_eq!(root.selection(), Some((4, 7)));
         assert_eq!(root.selected_text().as_deref(), Some("bar"));
     }
@@ -1916,7 +2739,9 @@ mod tests {
     fn 点击按钮触发回调() {
         let hits = Rc::new(Cell::new(0));
         let h2 = hits.clone();
-        let btn = Button::new("ok").size(100.0, 40.0).on_click(move |_ctx| h2.set(h2.get() + 1));
+        let btn = Button::new("ok")
+            .size(100.0, 40.0)
+            .on_click(move |_ctx| h2.set(h2.get() + 1));
         let mut root = VBox::new().push(btn);
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &cv);
@@ -1928,9 +2753,12 @@ mod tests {
     #[test]
     fn 点击回调经_eventctx_可改别的控件() {
         // Button(name=btn) 点击 → 把 Label(name=out) 文本改成 "changed"
-        let btn = Button::new("go").name("btn").size(100.0, 40.0).on_click(|ctx| {
-            ctx.set_text("out", "changed");
-        });
+        let btn = Button::new("go")
+            .name("btn")
+            .size(100.0, 40.0)
+            .on_click(|ctx| {
+                ctx.set_text("out", "changed");
+            });
         let out = Label::new("").name("out").size(100.0, 20.0);
         let mut root = VBox::new().push(btn).push(out);
         let cv = FakeCanvas;
@@ -1948,9 +2776,19 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &cv);
         let mut disp = Dispatcher::new();
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 20.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(50.0, 20.0),
+            },
+        );
         assert!(root.base().children[0].base().hover);
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(150.0, 150.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(150.0, 150.0),
+            },
+        );
         assert!(!root.base().children[0].base().hover);
     }
 
@@ -1976,7 +2814,12 @@ mod tests {
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &FakeCanvas);
         let mut disp = Dispatcher::new();
 
-        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(50.0, 20.0) });
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(50.0, 20.0),
+            },
+        );
 
         assert_eq!(disp.take_dirty(), Some(Rect::new(0.0, 0.0, 208.0, 46.0)));
     }
@@ -2004,7 +2847,13 @@ mod tests {
             .page(Button::new("page1").size(100.0, 30.0));
         let tab_id = tab.base().id;
         let mut root = VBox::new()
-            .push(Radio::new("t0").group(9).tab_index(0).size(100.0, 20.0).selected(true))
+            .push(
+                Radio::new("t0")
+                    .group(9)
+                    .tab_index(0)
+                    .size(100.0, 20.0)
+                    .selected(true),
+            )
             .push(Radio::new("t1").group(9).tab_index(1).size(100.0, 20.0))
             .push(tab);
         let cv = FakeCanvas;
@@ -2015,5 +2864,156 @@ mod tests {
         click_at(&mut disp, &mut root, Point::new(50.0, 30.0));
         // TabBox 是第三个子节点
         assert_eq!(root.base().children[2].selected_index(), Some(1));
+    }
+
+    #[test]
+    fn eventctx_属性修改自动产生正确失效() {
+        let mut root = VBox::new()
+            .push(Label::new("old").name("label").size(100.0, 20.0))
+            .push(CheckBox::new("check").name("check").size(100.0, 20.0));
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 100.0), &FakeCanvas);
+
+        let mut ctx = EventCtx::new(&mut root);
+        assert_eq!(ctx.text("label").as_deref(), Some("old"));
+        assert_eq!(
+            ctx.take_invalidation(),
+            Invalidation::None,
+            "只读 getter 不应刷新"
+        );
+
+        ctx.set_enabled("check", false);
+        assert!(matches!(ctx.take_invalidation(), Invalidation::Paint(_)));
+
+        ctx.set_enabled("check", false);
+        assert_eq!(
+            ctx.take_invalidation(),
+            Invalidation::None,
+            "相同值不应重复刷新"
+        );
+
+        ctx.set_text("label", "new");
+        assert_eq!(ctx.take_invalidation(), Invalidation::Layout);
+    }
+
+    #[test]
+    fn eventctx_动态子节点操作触发布局() {
+        let mut root = Panel::new().name("root");
+        let mut ctx = EventCtx::new(&mut root);
+        assert!(ctx.add_child("root", Box::new(Label::new("one"))));
+        assert_eq!(ctx.take_invalidation(), Invalidation::Layout);
+        assert_eq!(ctx.get("root", |w| w.base().children.len()), Some(1));
+        assert_eq!(ctx.take_invalidation(), Invalidation::None);
+        assert!(ctx.remove_child("root", 0).is_some());
+        assert_eq!(ctx.take_invalidation(), Invalidation::Layout);
+    }
+
+    #[test]
+    fn 纯rust_tabbox_bind_group_驱动翻页() {
+        let tab = TabBox::new()
+            .bind_group(7)
+            .page(Button::new("page0").size(100.0, 30.0))
+            .page(Button::new("page1").size(100.0, 30.0));
+        let mut root = VBox::new()
+            .push(
+                Radio::new("t0")
+                    .group(7)
+                    .tab_index(0)
+                    .size(100.0, 20.0)
+                    .selected(true),
+            )
+            .push(Radio::new("t1").group(7).tab_index(1).size(100.0, 20.0))
+            .push(tab);
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 200.0), &FakeCanvas);
+        let mut disp = Dispatcher::new();
+
+        click_at(&mut disp, &mut root, Point::new(50.0, 30.0));
+
+        assert_eq!(root.base().children[2].selected_index(), Some(1));
+    }
+
+    #[test]
+    fn 控件语义事件同时到达控件回调和窗口队列() {
+        let events = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let captured = events.clone();
+        let mut root = VBox::new().push(
+            CheckBox::new("check")
+                .name("check")
+                .size(100.0, 30.0)
+                .on_control_event(move |event, _ctx| captured.borrow_mut().push(event.clone())),
+        );
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 100.0), &FakeCanvas);
+        let mut disp = Dispatcher::new();
+
+        click_at(&mut disp, &mut root, Point::new(50.0, 15.0));
+
+        assert!(events
+            .borrow()
+            .contains(&ControlEvent::SelectedChanged(true)));
+        assert!(disp
+            .take_control_events()
+            .contains(&("check".to_string(), ControlEvent::SelectedChanged(true),)));
+    }
+
+    #[test]
+    fn edit_键盘输入发送_text_changed() {
+        let mut root = Edit::new().name("edit").size(120.0, 30.0);
+        layout_node(&mut root, Rect::new(0.0, 0.0, 120.0, 30.0), &FakeCanvas);
+        let mut disp = Dispatcher::new();
+        disp.handle(&mut root, &Event::MouseDown {
+            pos: Point::new(10.0, 10.0),
+            button: MouseButton::Left,
+        });
+        disp.take_control_events();
+
+        disp.handle(&mut root, &Event::Char { ch: 'A' });
+
+        assert!(disp.take_control_events().contains(&(
+            "edit".to_string(),
+            ControlEvent::TextChanged("A".to_string()),
+        )));
+    }
+
+    #[test]
+    fn once帧动画完成发送事件() {
+        let animation = FrameAnimation::new(
+            vec![
+                flexui_gfx::ImageSource::path("1.png"),
+                flexui_gfx::ImageSource::path("2.png"),
+            ],
+            10.0,
+        )
+        .playback(crate::FramePlayback::Once);
+        let mut root = Button::new("run")
+            .name("run")
+            .size(100.0, 30.0)
+            .click_bg_animation(animation);
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 30.0), &FakeCanvas);
+        let mut disp = Dispatcher::new();
+        click_at(&mut disp, &mut root, Point::new(10.0, 10.0));
+        disp.take_control_events();
+
+        disp.tick_anims(&mut root, 0.21);
+
+        assert!(disp.take_control_events().contains(&(
+            "run".to_string(),
+            ControlEvent::FrameAnimationFinished(FrameLayer::Background),
+        )));
+    }
+
+    #[test]
+    fn 专属属性可对称设置读取() {
+        let mut root = VBox::new()
+            .push(Edit::new().name("edit"))
+            .push(ListView::new().name("list"));
+        let mut ctx = EventCtx::new(&mut root);
+        assert!(ctx.set_property("edit", WidgetProperty::Placeholder("hint".into())));
+        assert!(matches!(
+            ctx.property("edit", crate::WidgetPropertyKey::Placeholder),
+            Some(WidgetProperty::Placeholder(value)) if value == "hint"
+        ));
+        assert!(ctx.set_property("list", WidgetProperty::Items(vec!["a".into(), "b".into()])));
+        assert!(ctx.set_selected_index("list", 1));
+        assert_eq!(ctx.selected_index("list"), Some(1));
+        assert_eq!(ctx.take_invalidation(), Invalidation::Layout);
     }
 }

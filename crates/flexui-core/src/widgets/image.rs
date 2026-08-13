@@ -6,7 +6,7 @@ use flexui_gfx::{Canvas, ImageSource};
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetRole};
+use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 图片控件。
 pub struct Image {
@@ -45,6 +45,18 @@ impl Widget for Image {
             style.fg_tint,
             style.fg_fit.clone().unwrap_or_default(),
         );
+    }
+    fn apply_property(&mut self, property: WidgetProperty) -> bool {
+        if let WidgetProperty::ImageSource(source) = property {
+            self.source = source;
+            true
+        } else {
+            false
+        }
+    }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        (key == WidgetPropertyKey::ImageSource)
+            .then(|| WidgetProperty::ImageSource(self.source.clone()))
     }
 }
 

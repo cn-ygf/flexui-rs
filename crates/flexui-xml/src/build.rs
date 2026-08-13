@@ -4,14 +4,14 @@ use std::collections::HashMap;
 
 use flexui_core::{
     Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
-    FrameFinish, FramePlayback, Gradient, HBox,
-    HitPolicy, Image, ImageFit, ImageSource, Insets, Justify, Label, ListView, Node, Panel,
-    PlaceholderStyleSet, PlaceholderStyleSpec, Progress, Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox,
-    TextAlign, TitlebarMode, VBox, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
+    FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, Image, ImageFit, ImageSource, Insets,
+    Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
+    Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign,
+    TitlebarMode, VBox, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
     WindowDragRegion,
 };
+use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
-use flexui_i18n::{LocalizedStringResource, LocalizationValue, Localizer};
 
 use crate::parser::{self, Element};
 
@@ -27,7 +27,10 @@ impl Context {
         let mut vars = HashMap::new();
         vars.insert("platform.macos".to_string(), cfg!(target_os = "macos"));
         vars.insert("platform.windows".to_string(), cfg!(target_os = "windows"));
-        Self { vars, localizer: None }
+        Self {
+            vars,
+            localizer: None,
+        }
     }
 
     /// 设置/覆盖一个布尔变量（也可覆盖平台谓词用于测试）。
@@ -42,7 +45,9 @@ impl Context {
         self
     }
 
-    pub fn localizer(&self) -> Option<&Localizer> { self.localizer.as_ref() }
+    pub fn localizer(&self) -> Option<&Localizer> {
+        self.localizer.as_ref()
+    }
 
     fn get(&self, key: &str) -> bool {
         match key {
@@ -108,7 +113,11 @@ pub fn build_fragment_str(xml: &str, ctx: &Context) -> Result<Node, LoadError> {
 }
 
 /// 动态从资源路径构建布局片段（W8）。
-pub fn build_fragment_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<Node, LoadError> {
+pub fn build_fragment_res(
+    res: &ResourceManager,
+    path: &str,
+    ctx: &Context,
+) -> Result<Node, LoadError> {
     Ok(load_res(res, path, ctx)?.root)
 }
 
@@ -121,7 +130,11 @@ pub struct WindowDoc {
 }
 
 /// 加载以 `<Window>` 为根的窗口 XML（W6）；根非 Window 时 config 为 None、按普通片段处理。
-pub fn load_window_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<WindowDoc, LoadError> {
+pub fn load_window_res(
+    res: &ResourceManager,
+    path: &str,
+    ctx: &Context,
+) -> Result<WindowDoc, LoadError> {
     let xml = res
         .read_string(path)
         .map_err(|e| LoadError(format!("读取 skin 失败: {e}")))?;
@@ -133,7 +146,11 @@ pub fn load_window_str(xml: &str, ctx: &Context) -> Result<WindowDoc, LoadError>
     load_window(xml, ctx, None)
 }
 
-fn load_root(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Result<LoadResult, LoadError> {
+fn load_root(
+    xml: &str,
+    ctx: &Context,
+    res: Option<&ResourceManager>,
+) -> Result<LoadResult, LoadError> {
     let el = parser::parse(xml)?;
     let mut env = Env {
         ctx,
@@ -141,14 +158,19 @@ fn load_root(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Result<
         bindings: Vec::new(),
         includes: Vec::new(),
     };
-    let root = build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
+    let root =
+        build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
     Ok(LoadResult {
         root,
         bindings: env.bindings,
     })
 }
 
-fn load_window(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Result<WindowDoc, LoadError> {
+fn load_window(
+    xml: &str,
+    ctx: &Context,
+    res: Option<&ResourceManager>,
+) -> Result<WindowDoc, LoadError> {
     let el = parser::parse(xml)?;
     let mut env = Env {
         ctx,
@@ -181,7 +203,8 @@ fn load_window(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Resul
             bindings: env.bindings,
         })
     } else {
-        let root = build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
+        let root =
+            build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
         Ok(WindowDoc {
             config: None,
             root,
@@ -191,7 +214,10 @@ fn load_window(xml: &str, ctx: &Context, res: Option<&ResourceManager>) -> Resul
 }
 
 /// 从 `<Window>` 属性解析窗口配置。
-fn parse_window_config(el: &Element, localizer: Option<&Localizer>) -> Result<WindowConfig, LoadError> {
+fn parse_window_config(
+    el: &Element,
+    localizer: Option<&Localizer>,
+) -> Result<WindowConfig, LoadError> {
     let (title, localized_title) = if let Some(title) = el.attr("title-verbatim") {
         (title.to_owned(), None)
     } else {
@@ -203,8 +229,12 @@ fn parse_window_config(el: &Element, localizer: Option<&Localizer>) -> Result<Wi
     };
     let mut cfg = WindowConfig::new(
         title,
-        el.attr("width").and_then(|s| s.parse().ok()).unwrap_or(640.0),
-        el.attr("height").and_then(|s| s.parse().ok()).unwrap_or(440.0),
+        el.attr("width")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(640.0),
+        el.attr("height")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(440.0),
     );
     cfg.localized_title = localized_title;
     if let Some(r) = el.attr("resizable") {
@@ -303,6 +333,7 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
     // TabBox 的 tabbar 绑定。
     if tag == "tabbox" {
         if let Some(g) = el.attr("bindgroup").and_then(|s| s.parse::<u32>().ok()) {
+            node.apply_property(WidgetProperty::BindGroup(Some(g)));
             env.bindings.push((g, node.base().id));
         }
     }
@@ -328,9 +359,9 @@ fn build_include(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError>
         .attr("src")
         .ok_or_else(|| LoadError("<Include> 缺少 src".into()))?
         .to_string();
-    let rm = env
-        .res
-        .ok_or_else(|| LoadError("<Include> 需要资源管理器（用 load_res/load_window_res）".into()))?;
+    let rm = env.res.ok_or_else(|| {
+        LoadError("<Include> 需要资源管理器（用 load_res/load_window_res）".into())
+    })?;
     if env.includes.contains(&src) {
         return Err(LoadError(format!("<Include> 循环引用: {src}")));
     }
@@ -370,7 +401,11 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             let mut resources: Vec<LocalizedStringResource> = Vec::new();
             let mut has_binding = false;
             if let Some(o) = el.attr("options") {
-                for value in o.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+                for value in o
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
                     push_localized_item(
                         &mut opts,
                         &mut resources,
@@ -383,7 +418,9 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             }
             for c in &el.children {
                 if c.tag.eq_ignore_ascii_case("item") {
-                    if let Some(value) = c.attr("text-verbatim").or_else(|| c.attr("label-verbatim")) {
+                    if let Some(value) =
+                        c.attr("text-verbatim").or_else(|| c.attr("label-verbatim"))
+                    {
                         opts.push(value.to_owned());
                         resources.push(verbatim_resource(value));
                     } else if let Some(value) = c.attr("text").or_else(|| c.attr("label")) {
@@ -404,7 +441,9 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             }
             let mut node: Node = Box::new(cb);
             if has_binding {
-                node.base_mut().localizations.push(flexui_core::LocalizationBinding::Items(resources));
+                node.base_mut()
+                    .localizations
+                    .push(flexui_core::LocalizationBinding::Items(resources));
             }
             node
         }
@@ -413,7 +452,11 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             let mut resources: Vec<LocalizedStringResource> = Vec::new();
             let mut has_binding = false;
             if let Some(o) = el.attr("items") {
-                for value in o.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+                for value in o
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
                     push_localized_item(
                         &mut items,
                         &mut resources,
@@ -426,7 +469,9 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             }
             for c in &el.children {
                 if c.tag.eq_ignore_ascii_case("item") {
-                    if let Some(value) = c.attr("text-verbatim").or_else(|| c.attr("label-verbatim")) {
+                    if let Some(value) =
+                        c.attr("text-verbatim").or_else(|| c.attr("label-verbatim"))
+                    {
                         items.push(value.to_owned());
                         resources.push(verbatim_resource(value));
                     } else if let Some(value) = c.attr("text").or_else(|| c.attr("label")) {
@@ -450,7 +495,9 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             }
             let mut node: Node = Box::new(lv);
             if has_binding {
-                node.base_mut().localizations.push(flexui_core::LocalizationBinding::Items(resources));
+                node.base_mut()
+                    .localizations
+                    .push(flexui_core::LocalizationBinding::Items(resources));
             }
             node
         }
@@ -471,7 +518,12 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
 }
 
 /// 把属性应用到 Base（通用属性 + 分状态样式）。
-fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env: &Env) -> Result<(), LoadError> {
+fn apply_attrs(
+    node: &mut dyn Widget,
+    tag: &str,
+    attrs: &[(String, String)],
+    env: &Env,
+) -> Result<(), LoadError> {
     let res = env.res;
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
@@ -483,24 +535,41 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
             // 已在别处处理的属性（Separator orientation/thickness、Image src、
             // ComboBox options、ListView items/row-height）。
             "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
-            | "options-args" | "items-args"
-            | "row-height" | "text-args" | "placeholder-args" | "tooltip-args" | "title-args" => {}
+            | "options-args" | "items-args" | "row-height" | "text-args" | "placeholder-args"
+            | "tooltip-args" | "title-args" => {}
             "name" => node.base_mut().name = Some(v.clone()),
             "tooltip" if attr_value(attrs, "tooltip-verbatim").is_none() => {
-                let (value, binding) = resolve_localized(v, attr_value(attrs, "tooltip-args"), env.ctx.localizer());
+                let (value, binding) =
+                    resolve_localized(v, attr_value(attrs, "tooltip-args"), env.ctx.localizer());
                 node.base_mut().tooltip = Some(value);
-                if let Some(resource) = binding { node.base_mut().localizations.push(flexui_core::LocalizationBinding::Tooltip(resource)); }
+                if let Some(resource) = binding {
+                    node.base_mut()
+                        .localizations
+                        .push(flexui_core::LocalizationBinding::Tooltip(resource));
+                }
             }
             "tooltip" => {}
             "tooltip-verbatim" => node.base_mut().tooltip = Some(v.clone()),
             "placeholder" if attr_value(attrs, "placeholder-verbatim").is_none() => {
-                let (value, binding) = resolve_localized(v, attr_value(attrs, "placeholder-args"), env.ctx.localizer());
+                let (value, binding) = resolve_localized(
+                    v,
+                    attr_value(attrs, "placeholder-args"),
+                    env.ctx.localizer(),
+                );
                 node.apply_property(WidgetProperty::Placeholder(value));
-                if let Some(resource) = binding { node.base_mut().localizations.push(flexui_core::LocalizationBinding::Placeholder(resource)); }
+                if let Some(resource) = binding {
+                    node.base_mut()
+                        .localizations
+                        .push(flexui_core::LocalizationBinding::Placeholder(resource));
+                }
             }
             "placeholder" => {}
-            "placeholder-verbatim" => { node.apply_property(WidgetProperty::Placeholder(v.clone())); }
-            "value" => { node.apply_property(WidgetProperty::Value(v.parse::<f32>().unwrap_or(0.0))); }
+            "placeholder-verbatim" => {
+                node.apply_property(WidgetProperty::Placeholder(v.clone()));
+            }
+            "value" => {
+                node.apply_property(WidgetProperty::Value(v.parse::<f32>().unwrap_or(0.0)));
+            }
             "font-size" | "fontsize" => {
                 if let Ok(s) = v.parse::<f32>() {
                     node.base_mut().font.size = s;
@@ -511,9 +580,14 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
             "italic" => node.base_mut().font.italic = parse_bool(v),
             "underline" => node.base_mut().font.underline = parse_bool(v),
             "text" if attr_value(attrs, "text-verbatim").is_none() => {
-                let (value, binding) = resolve_localized(v, attr_value(attrs, "text-args"), env.ctx.localizer());
+                let (value, binding) =
+                    resolve_localized(v, attr_value(attrs, "text-args"), env.ctx.localizer());
                 node.base_mut().text = value;
-                if let Some(resource) = binding { node.base_mut().localizations.push(flexui_core::LocalizationBinding::Text(resource)); }
+                if let Some(resource) = binding {
+                    node.base_mut()
+                        .localizations
+                        .push(flexui_core::LocalizationBinding::Text(resource));
+                }
             }
             "text" => {}
             "text-verbatim" => node.base_mut().text = v.clone(),
@@ -547,18 +621,34 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
             "visible" => node.base_mut().visible = parse_bool(v),
             "focusable" | "tabstop" => node.base_mut().focusable = parse_bool(v),
             "focus-within" | "focuswithin" => node.base_mut().focus_within = parse_bool(v),
-            "switch" => { node.apply_property(WidgetProperty::SwitchStyle(tag == "checkbox" && parse_bool(v))); }
+            "switch" => {
+                node.apply_property(WidgetProperty::SwitchStyle(
+                    tag == "checkbox" && parse_bool(v),
+                ));
+            }
             "indicator" | "show-indicator" => {
                 node.apply_property(WidgetProperty::IndicatorVisible(parse_bool(v)));
             }
-            "multiline" => { node.apply_property(WidgetProperty::Multiline(parse_bool(v))); }
-            "readonly" | "read-only" => { node.apply_property(WidgetProperty::ReadOnly(parse_bool(v))); }
-            "numberonly" | "number-only" => { node.apply_property(WidgetProperty::NumberOnly(parse_bool(v))); }
-            "password" => { node.apply_property(WidgetProperty::Password(parse_bool(v))); }
-            "passwordchar" | "password-char" | "mask-char" => {
-                if let Some(ch) = v.chars().next() { node.apply_property(WidgetProperty::PasswordChar(ch)); }
+            "multiline" => {
+                node.apply_property(WidgetProperty::Multiline(parse_bool(v)));
             }
-            "maxchar" | "max-chars" | "max-length" => { node.apply_property(WidgetProperty::MaxChars(v.parse().ok())); }
+            "readonly" | "read-only" => {
+                node.apply_property(WidgetProperty::ReadOnly(parse_bool(v)));
+            }
+            "numberonly" | "number-only" => {
+                node.apply_property(WidgetProperty::NumberOnly(parse_bool(v)));
+            }
+            "password" => {
+                node.apply_property(WidgetProperty::Password(parse_bool(v)));
+            }
+            "passwordchar" | "password-char" | "mask-char" => {
+                if let Some(ch) = v.chars().next() {
+                    node.apply_property(WidgetProperty::PasswordChar(ch));
+                }
+            }
+            "maxchar" | "max-chars" | "max-length" => {
+                node.apply_property(WidgetProperty::MaxChars(v.parse().ok()));
+            }
             "autoselall" | "auto-select-all" | "select-all-on-focus" => {
                 node.apply_property(WidgetProperty::AutoSelectAll(parse_bool(v)));
             }
@@ -569,8 +659,12 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
                     HitPolicy::Solid
                 };
             }
-            "group" => { node.apply_property(WidgetProperty::Group(v.parse().ok())); }
-            "tab-index" | "tabindex" => { node.apply_property(WidgetProperty::TabIndex(v.parse().ok())); }
+            "group" => {
+                node.apply_property(WidgetProperty::Group(v.parse().ok()));
+            }
+            "tab-index" | "tabindex" => {
+                node.apply_property(WidgetProperty::TabIndex(v.parse().ok()));
+            }
             "checked" => node.base_mut().selected = parse_bool(v),
             "selected" => {
                 if matches!(tag, "tabbox" | "combobox" | "select" | "listview" | "list") {
@@ -580,9 +674,11 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
                 }
             }
             // 其余按分状态样式属性解析。
-            _ => if !apply_placeholder_style_attr(&mut placeholder_slots, &key, v) {
-                apply_style_attr(&mut slots, &key, v, res)
-            },
+            _ => {
+                if !apply_placeholder_style_attr(&mut placeholder_slots, &key, v) {
+                    apply_style_attr(&mut slots, &key, v, res)
+                }
+            }
         }
     }
 
@@ -598,7 +694,9 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
     }
     if !placeholder_slots.is_empty() {
         let mut set = PlaceholderStyleSet::new();
-        for (vs, spec) in placeholder_slots { set.set(vs, spec); }
+        for (vs, spec) in placeholder_slots {
+            set.set(vs, spec);
+        }
         node.apply_property(WidgetProperty::PlaceholderStyle(set));
     }
     Ok(())
@@ -611,7 +709,10 @@ enum FrameTarget {
 }
 
 #[derive(Clone, Copy)]
-enum FrameImageLayer { Background, Foreground }
+enum FrameImageLayer {
+    Background,
+    Foreground,
+}
 
 /// 解析帧动画主属性。附属的 fps/interval/play/finish 属性按相同前缀读取，故不依赖属性顺序。
 fn apply_frame_animation_attrs(
@@ -622,27 +723,49 @@ fn apply_frame_animation_attrs(
 ) -> Result<(), LoadError> {
     for (key, pattern) in attrs {
         let key = key.to_ascii_lowercase();
-        let Some((target, prefix)) = parse_frame_target(&key) else { continue };
-        let frames = expand_frame_pattern(pattern)?.into_iter()
-            .map(|path| resolve_image(res, &path)).collect::<Vec<_>>();
+        let Some((target, prefix)) = parse_frame_target(&key) else {
+            continue;
+        };
+        let frames = expand_frame_pattern(pattern)?
+            .into_iter()
+            .map(|path| resolve_image(res, &path))
+            .collect::<Vec<_>>();
         let fps = attr_value(attrs, &format!("{prefix}-fps"))
-            .map(|value| value.parse::<f32>().ok().filter(|fps| fps.is_finite() && *fps > 0.0)
-                .ok_or_else(|| LoadError(format!("{prefix}-fps 必须是大于 0 的数字: {value}"))))
-            .transpose()?.unwrap_or(25.0);
+            .map(|value| {
+                value
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|fps| fps.is_finite() && *fps > 0.0)
+                    .ok_or_else(|| LoadError(format!("{prefix}-fps 必须是大于 0 的数字: {value}")))
+            })
+            .transpose()?
+            .unwrap_or(25.0);
         let default_playback = if matches!(target, FrameTarget::Click(_)) {
             FramePlayback::Once
         } else {
             FramePlayback::Loop
         };
         let playback = attr_value(attrs, &format!("{prefix}-play"))
-            .map(parse_frame_playback).transpose()?.unwrap_or(default_playback);
+            .map(parse_frame_playback)
+            .transpose()?
+            .unwrap_or(default_playback);
         let finish = attr_value(attrs, &format!("{prefix}-finish"))
-            .map(parse_frame_finish).transpose()?.unwrap_or_default();
+            .map(parse_frame_finish)
+            .transpose()?
+            .unwrap_or_default();
         let interval_secs = attr_value(attrs, &format!("{prefix}-interval"))
-            .map(|value| value.parse::<f32>().ok().filter(|ms| ms.is_finite() && *ms >= 0.0)
-                .map(|ms| ms / 1000.0)
-                .ok_or_else(|| LoadError(format!("{prefix}-interval 必须是非负毫秒数: {value}"))))
-            .transpose()?.unwrap_or(0.0);
+            .map(|value| {
+                value
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|ms| ms.is_finite() && *ms >= 0.0)
+                    .map(|ms| ms / 1000.0)
+                    .ok_or_else(|| {
+                        LoadError(format!("{prefix}-interval 必须是非负毫秒数: {value}"))
+                    })
+            })
+            .transpose()?
+            .unwrap_or(0.0);
         let animation = FrameAnimation::new(frames, fps)
             .loop_interval(interval_secs)
             .playback(playback)
@@ -654,8 +777,12 @@ fn apply_frame_animation_attrs(
             FrameTarget::State(state, FrameImageLayer::Foreground) => {
                 slots.entry(state).or_default().fg_animation = Some(animation);
             }
-            FrameTarget::Click(FrameImageLayer::Background) => node.base_mut().click_bg_animation = Some(animation),
-            FrameTarget::Click(FrameImageLayer::Foreground) => node.base_mut().click_fg_animation = Some(animation),
+            FrameTarget::Click(FrameImageLayer::Background) => {
+                node.base_mut().click_bg_animation = Some(animation)
+            }
+            FrameTarget::Click(FrameImageLayer::Foreground) => {
+                node.base_mut().click_fg_animation = Some(animation)
+            }
         }
     }
     Ok(())
@@ -666,21 +793,31 @@ fn parse_frame_target(key: &str) -> Option<(FrameTarget, String)> {
     let (mut idx, mut state, mut focused, mut selected, mut click) =
         (0, BaseState::Normal, false, false, false);
     while idx < parts.len() {
-        if let Some(parsed) = parse_state(parts[idx]) { state = parsed; }
-        else if parts[idx] == "focus" { focused = true; }
-        else if parts[idx] == "selected" { selected = true; }
-        else if parts[idx] == "click" { click = true; }
-        else { break; }
+        if let Some(parsed) = parse_state(parts[idx]) {
+            state = parsed;
+        } else if parts[idx] == "focus" {
+            focused = true;
+        } else if parts[idx] == "selected" {
+            selected = true;
+        } else if parts[idx] == "click" {
+            click = true;
+        } else {
+            break;
+        }
         idx += 1;
     }
-    if idx + 1 != parts.len() { return None; }
+    if idx + 1 != parts.len() {
+        return None;
+    }
     let layer = match parts[idx] {
         "bgframes" => FrameImageLayer::Background,
         "fgframes" => FrameImageLayer::Foreground,
         _ => return None,
     };
     let target = if click {
-        if state != BaseState::Normal || focused || selected { return None; }
+        if state != BaseState::Normal || focused || selected {
+            return None;
+        }
         FrameTarget::Click(layer)
     } else {
         FrameTarget::State(VisualState::with_selected(state, focused, selected), layer)
@@ -693,7 +830,9 @@ fn parse_frame_playback(value: &str) -> Result<FramePlayback, LoadError> {
         "loop" => Ok(FramePlayback::Loop),
         "once" => Ok(FramePlayback::Once),
         "paused" | "pause" => Ok(FramePlayback::Paused),
-        _ => Err(LoadError(format!("帧动画 play 只支持 loop/once/paused: {value}"))),
+        _ => Err(LoadError(format!(
+            "帧动画 play 只支持 loop/once/paused: {value}"
+        ))),
     }
 }
 
@@ -702,42 +841,68 @@ fn parse_frame_finish(value: &str) -> Result<FrameFinish, LoadError> {
         "restore" => Ok(FrameFinish::Restore),
         "first" => Ok(FrameFinish::First),
         "last" => Ok(FrameFinish::Last),
-        _ => Err(LoadError(format!("帧动画 finish 只支持 restore/first/last: {value}"))),
+        _ => Err(LoadError(format!(
+            "帧动画 finish 只支持 restore/first/last: {value}"
+        ))),
     }
 }
 
 /// 展开 `path/frame_{1..25}.png`，端点有前导零时保持补零宽度。
 fn expand_frame_pattern(pattern: &str) -> Result<Vec<String>, LoadError> {
-    let open = pattern.find('{').ok_or_else(|| LoadError(format!("帧动画路径需要 {{start..end}} 范围: {pattern}")))?;
-    let close = pattern[open + 1..].find('}').map(|offset| open + 1 + offset)
+    let open = pattern
+        .find('{')
+        .ok_or_else(|| LoadError(format!("帧动画路径需要 {{start..end}} 范围: {pattern}")))?;
+    let close = pattern[open + 1..]
+        .find('}')
+        .map(|offset| open + 1 + offset)
         .ok_or_else(|| LoadError(format!("帧动画路径缺少 }}: {pattern}")))?;
     if pattern[close + 1..].contains(['{', '}']) || pattern[..open].contains('}') {
         return Err(LoadError(format!("帧动画路径只支持一个范围: {pattern}")));
     }
     let range = &pattern[open + 1..close];
-    let (start_text, end_text) = range.split_once("..")
+    let (start_text, end_text) = range
+        .split_once("..")
         .ok_or_else(|| LoadError(format!("帧动画范围格式应为 {{start..end}}: {pattern}")))?;
     if start_text.is_empty() || end_text.is_empty() || end_text.contains("..") {
-        return Err(LoadError(format!("帧动画范围格式应为 {{start..end}}: {pattern}")));
+        return Err(LoadError(format!(
+            "帧动画范围格式应为 {{start..end}}: {pattern}"
+        )));
     }
-    let start = start_text.parse::<i32>().map_err(|_| LoadError(format!("帧动画起始序号无效: {start_text}")))?;
-    let end = end_text.parse::<i32>().map_err(|_| LoadError(format!("帧动画结束序号无效: {end_text}")))?;
+    let start = start_text
+        .parse::<i32>()
+        .map_err(|_| LoadError(format!("帧动画起始序号无效: {start_text}")))?;
+    let end = end_text
+        .parse::<i32>()
+        .map_err(|_| LoadError(format!("帧动画结束序号无效: {end_text}")))?;
     let count = start.abs_diff(end) as usize + 1;
-    if count > 10_000 { return Err(LoadError(format!("帧动画范围过大（最多 10000 帧）: {pattern}"))); }
+    if count > 10_000 {
+        return Err(LoadError(format!(
+            "帧动画范围过大（最多 10000 帧）: {pattern}"
+        )));
+    }
     let padded = (start_text.starts_with('0') && start_text.len() > 1)
         || (end_text.starts_with('0') && end_text.len() > 1);
     let width = start_text.len().max(end_text.len());
     let (prefix, suffix) = (&pattern[..open], &pattern[close + 1..]);
     let step = if start <= end { 1 } else { -1 };
-    Ok((0..count).map(|index| {
-        let value = start + step * index as i32;
-        let number = if padded { format!("{value:0width$}", width = width) } else { value.to_string() };
-        format!("{prefix}{number}{suffix}")
-    }).collect())
+    Ok((0..count)
+        .map(|index| {
+            let value = start + step * index as i32;
+            let number = if padded {
+                format!("{value:0width$}", width = width)
+            } else {
+                value.to_string()
+            };
+            format!("{prefix}{number}{suffix}")
+        })
+        .collect())
 }
 
 fn attr_value<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    attrs.iter().find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| value.as_str())
+    attrs
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.as_str())
 }
 
 /// 目录中存在的普通字符串自动作为 key；`loc:key` 强制绑定，verbatim 属性强制字面量。
@@ -746,17 +911,25 @@ fn resolve_localized(
     args: Option<&str>,
     localizer: Option<&Localizer>,
 ) -> (String, Option<LocalizedStringResource>) {
-    let (key, forced) = value.strip_prefix("loc:").map_or((value, false), |key| (key, true));
-    let Some(localizer) = localizer else { return (key.to_owned(), None) };
+    let (key, forced) = value
+        .strip_prefix("loc:")
+        .map_or((value, false), |key| (key, true));
+    let Some(localizer) = localizer else {
+        return (key.to_owned(), None);
+    };
     if !forced && !localizer.contains(key, "Localizable") {
         return (value.to_owned(), None);
     }
     let mut resource = LocalizedStringResource::new(key);
     if let Some(args) = args {
         for pair in args.split([',', ';']) {
-            let Some((name, value)) = pair.split_once('=') else { continue };
+            let Some((name, value)) = pair.split_once('=') else {
+                continue;
+            };
             let value = value.trim();
-            let value = value.parse::<f64>().map(LocalizationValue::Number)
+            let value = value
+                .parse::<f64>()
+                .map(LocalizationValue::Number)
                 .unwrap_or_else(|_| LocalizationValue::String(value.to_owned()));
             resource.arguments.insert(name.trim().to_owned(), value);
         }
@@ -785,22 +958,37 @@ fn push_localized_item(
 
 /// 用不会与正常目录冲突的私有 table 表示列表中的字面量。
 fn verbatim_resource(value: &str) -> LocalizedStringResource {
-    LocalizedStringResource::new(value).table("__flexui_verbatim").default_value(value)
+    LocalizedStringResource::new(value)
+        .table("__flexui_verbatim")
+        .default_value(value)
 }
 
 /// 解析 `[state-][focus-][selected-]placeholder-*` 属性。
-fn apply_placeholder_style_attr(slots: &mut HashMap<VisualState, PlaceholderStyleSpec>, key: &str, val: &str) -> bool {
+fn apply_placeholder_style_attr(
+    slots: &mut HashMap<VisualState, PlaceholderStyleSpec>,
+    key: &str,
+    val: &str,
+) -> bool {
     let parts: Vec<&str> = key.split('-').collect();
     let (mut idx, mut state, mut focused, mut selected) = (0, BaseState::Normal, false, false);
     while idx < parts.len() {
-        if let Some(parsed) = parse_state(parts[idx]) { state = parsed; }
-        else if parts[idx] == "focus" { focused = true; }
-        else if parts[idx] == "selected" { selected = true; }
-        else { break; }
+        if let Some(parsed) = parse_state(parts[idx]) {
+            state = parsed;
+        } else if parts[idx] == "focus" {
+            focused = true;
+        } else if parts[idx] == "selected" {
+            selected = true;
+        } else {
+            break;
+        }
         idx += 1;
     }
-    if parts.get(idx) != Some(&"placeholder") || idx + 1 >= parts.len() { return false; }
-    let spec = slots.entry(VisualState::with_selected(state, focused, selected)).or_default();
+    if parts.get(idx) != Some(&"placeholder") || idx + 1 >= parts.len() {
+        return false;
+    }
+    let spec = slots
+        .entry(VisualState::with_selected(state, focused, selected))
+        .or_default();
     match parts[idx + 1..].join("").as_str() {
         "fontfamily" | "font" => spec.font_family = Some(val.to_string()),
         "fontsize" => spec.font_size = val.parse().ok(),
@@ -935,7 +1123,10 @@ fn parse_sizing(v: &str) -> Sizing {
     match v.trim().to_lowercase().as_str() {
         "auto" | "content" => Sizing::Content,
         "fill" | "stretch" => Sizing::Fill,
-        _ => v.parse::<f32>().map(Sizing::Fixed).unwrap_or(Sizing::Content),
+        _ => v
+            .parse::<f32>()
+            .map(Sizing::Fixed)
+            .unwrap_or(Sizing::Content),
     }
 }
 
@@ -1064,12 +1255,13 @@ mod expr {
                 i += 2;
             } else if c.is_ascii_alphanumeric() || c == b'_' || c == b'.' {
                 let start = i;
-                while i < b.len()
-                    && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.')
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.')
                 {
                     i += 1;
                 }
-                out.push(Tok::Ident(String::from_utf8_lossy(&b[start..i]).into_owned()));
+                out.push(Tok::Ident(
+                    String::from_utf8_lossy(&b[start..i]).into_owned(),
+                ));
             } else {
                 i += 1; // 跳过无法识别的字符
             }
@@ -1138,11 +1330,7 @@ mod expr {
         if toks.is_empty() {
             return false;
         }
-        let mut p = P {
-            toks,
-            pos: 0,
-            ctx,
-        };
+        let mut p = P { toks, pos: 0, ctx };
         p.or_expr()
     }
 }
@@ -1197,7 +1385,11 @@ mod tests {
     fn include_子xml展开() {
         let dir = std::env::temp_dir().join(format!("flexui_inc_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("parts.xml"), r#"<Label name="fromInclude" text="子"/>"#).unwrap();
+        std::fs::write(
+            dir.join("parts.xml"),
+            r#"<Label name="fromInclude" text="子"/>"#,
+        )
+        .unwrap();
         std::fs::write(
             dir.join("main.xml"),
             r#"<VBox><Include src="parts.xml"/></VBox>"#,
@@ -1243,7 +1435,11 @@ mod tests {
 
     #[test]
     fn build_fragment_动态构建() {
-        let frag = build_fragment_str(r#"<HBox><Button name="ok" text="确定"/></HBox>"#, &Context::new()).unwrap();
+        let frag = build_fragment_str(
+            r#"<HBox><Button name="ok" text="确定"/></HBox>"#,
+            &Context::new(),
+        )
+        .unwrap();
         assert!(find_by_name(frag.as_ref(), "ok").is_some());
     }
 
@@ -1261,7 +1457,10 @@ mod tests {
 
     #[test]
     fn 颜色解析() {
-        assert_eq!(parse_color("#FFFFFF"), Some(Color::from_u8(255, 255, 255, 255)));
+        assert_eq!(
+            parse_color("#FFFFFF"),
+            Some(Color::from_u8(255, 255, 255, 255))
+        );
         assert_eq!(parse_color("#F00"), Some(Color::from_u8(255, 0, 0, 255)));
         assert_eq!(parse_color("#80000000"), Some(Color::from_u8(0, 0, 0, 128)));
     }
@@ -1271,11 +1470,20 @@ mod tests {
         // 1 值：四边
         assert_eq!(parse_insets("10"), Some(Insets::all(10.0)));
         // 2 值：纵 横 → new(left=h, top=v, right=h, bottom=v)
-        assert_eq!(parse_insets("10 20"), Some(Insets::new(20.0, 10.0, 20.0, 10.0)));
+        assert_eq!(
+            parse_insets("10 20"),
+            Some(Insets::new(20.0, 10.0, 20.0, 10.0))
+        );
         // 3 值：上 横 下
-        assert_eq!(parse_insets("10 20 30"), Some(Insets::new(20.0, 10.0, 20.0, 30.0)));
+        assert_eq!(
+            parse_insets("10 20 30"),
+            Some(Insets::new(20.0, 10.0, 20.0, 30.0))
+        );
         // 4 值：上 右 下 左（CSS 顺序）→ new(left, top, right, bottom)
-        assert_eq!(parse_insets("10 20 30 40"), Some(Insets::new(40.0, 10.0, 20.0, 30.0)));
+        assert_eq!(
+            parse_insets("10 20 30 40"),
+            Some(Insets::new(40.0, 10.0, 20.0, 30.0))
+        );
         // 逗号分隔亦可
         assert_eq!(parse_insets("5,5"), Some(Insets::new(5.0, 5.0, 5.0, 5.0)));
         // 非法
@@ -1287,14 +1495,22 @@ mod tests {
     fn xml_combobox_选项与tooltip() {
         let ctx = Context::new();
         // options 属性 + selected 索引 + tooltip。
-        let res = load_str(r##"<combobox options="a,b,c" selected="1" tooltip="选一个"/>"##, &ctx).unwrap();
+        let res = load_str(
+            r##"<combobox options="a,b,c" selected="1" tooltip="选一个"/>"##,
+            &ctx,
+        )
+        .unwrap();
         let b = res.root.base();
         assert_eq!(b.text, "b");
         assert_eq!(res.root.selected_index(), Some(1));
         assert_eq!(b.tooltip.as_deref(), Some("选一个"));
         assert_eq!(b.children.len(), 0, "item 不作为子节点");
         // <item> 子元素形式。
-        let res2 = load_str(r##"<select><item text="X"/><item label="Y"/></select>"##, &ctx).unwrap();
+        let res2 = load_str(
+            r##"<select><item text="X"/><item label="Y"/></select>"##,
+            &ctx,
+        )
+        .unwrap();
         assert_eq!(res2.root.base().text, "X");
         assert_eq!(res2.root.base().children.len(), 0);
     }
@@ -1325,7 +1541,11 @@ mod tests {
     #[test]
     fn xml_listview_项与选中() {
         let ctx = Context::new();
-        let res = load_str(r##"<listview items="一,二,三" selected="2" row-height="24"/>"##, &ctx).unwrap();
+        let res = load_str(
+            r##"<listview items="一,二,三" selected="2" row-height="24"/>"##,
+            &ctx,
+        )
+        .unwrap();
         let b = res.root.base();
         assert_eq!(res.root.selected_index(), Some(2));
         assert_eq!(b.children.len(), 0, "item 不作为子节点");
@@ -1350,9 +1570,16 @@ mod tests {
     fn frame_pattern_supports_padding_and_descending_ranges() {
         assert_eq!(
             expand_frame_pattern("loading_{01..03}@2.00x.png").unwrap(),
-            ["loading_01@2.00x.png", "loading_02@2.00x.png", "loading_03@2.00x.png"]
+            [
+                "loading_01@2.00x.png",
+                "loading_02@2.00x.png",
+                "loading_03@2.00x.png"
+            ]
         );
-        assert_eq!(expand_frame_pattern("frame_{3..1}.png").unwrap(), ["frame_3.png", "frame_2.png", "frame_1.png"]);
+        assert_eq!(
+            expand_frame_pattern("frame_{3..1}.png").unwrap(),
+            ["frame_3.png", "frame_2.png", "frame_1.png"]
+        );
     }
 
     #[test]
@@ -1372,13 +1599,21 @@ mod tests {
             click-bgframes="click_{1..4}.png" click-bgframes-fps="20"/>"#;
         let result = load_str(xml, &Context::new()).unwrap();
         let base = result.root.base();
-        let normal_animation = base.style.resolve(VisualState::default()).fg_animation.unwrap();
+        let normal_animation = base
+            .style
+            .resolve(VisualState::default())
+            .fg_animation
+            .unwrap();
         assert_eq!(normal_animation.frames.len(), 2);
         assert_eq!(normal_animation.fps, 12.0);
         assert_eq!(normal_animation.loop_interval, 0.3);
         assert_eq!(normal_animation.playback, FramePlayback::Loop);
 
-        let combined_animation = base.style.resolve(VisualState::new(BaseState::Hot, true)).fg_animation.unwrap();
+        let combined_animation = base
+            .style
+            .resolve(VisualState::new(BaseState::Hot, true))
+            .fg_animation
+            .unwrap();
         assert_eq!(combined_animation.frames.len(), 3);
         assert_eq!(combined_animation.playback, FramePlayback::Once);
         assert_eq!(combined_animation.finish, FrameFinish::Last);
@@ -1396,7 +1631,10 @@ mod tests {
             let xml = format!(
                 r#"<Panel normal-fgframes="frame_{{1..2}}.png" normal-fgframes-interval="{interval}"/>"#
             );
-            assert!(load_str(&xml, &Context::new()).is_err(), "interval={interval}");
+            assert!(
+                load_str(&xml, &Context::new()).is_err(),
+                "interval={interval}"
+            );
         }
     }
 
@@ -1423,7 +1661,9 @@ mod tests {
 
     fn test_localizer() -> Localizer {
         let localizer = Localizer::new("en").unwrap();
-        localizer.load_json_str(r#"{
+        localizer
+            .load_json_str(
+                r#"{
             "locale":"en",
             "strings":{
                 "window.title":"Settings for {name}",
@@ -1433,8 +1673,12 @@ mod tests {
                 "choice.system":"System",
                 "choice.english":"English"
             }
-        }"#).unwrap();
-        localizer.load_json_str(r#"{
+        }"#,
+            )
+            .unwrap();
+        localizer
+            .load_json_str(
+                r#"{
             "locale":"zh-Hans",
             "strings":{
                 "window.title":"{name} 的设置",
@@ -1444,7 +1688,9 @@ mod tests {
                 "choice.system":"跟随系统",
                 "choice.english":"英语"
             }
-        }"#).unwrap();
+        }"#,
+            )
+            .unwrap();
         localizer.set_locale("en").unwrap();
         localizer
     }
@@ -1462,7 +1708,9 @@ mod tests {
                 <Label name="plain" text="not.in.catalog"/>
             </VBox>"#,
             &ctx,
-        ).unwrap().root;
+        )
+        .unwrap()
+        .root;
         assert_eq!(root.base().children[0].base().text, "Settings");
         assert_eq!(root.base().children[1].base().text, "missing.key");
         assert_eq!(root.base().children[2].base().text, "label.title");
@@ -1481,7 +1729,9 @@ mod tests {
         assert_eq!(root.base().text, "Fixed");
         assert_eq!(root.base().tooltip.as_deref(), Some("Tip"));
 
-        let key_only = load_str(r#"<Label text="loc:label.title"/>"#, &Context::new()).unwrap().root;
+        let key_only = load_str(r#"<Label text="loc:label.title"/>"#, &Context::new())
+            .unwrap()
+            .root;
         assert_eq!(key_only.base().text, "label.title");
     }
 
@@ -1498,17 +1748,28 @@ mod tests {
                 </VBox>
             </Window>"#,
             &ctx,
-        ).unwrap();
+        )
+        .unwrap();
         let config = doc.config.as_ref().unwrap();
         assert_eq!(config.title, "Settings for UU");
         assert!(config.localized_title.is_some());
-        assert_eq!(doc.root.base().children[0].base().tooltip.as_deref(), Some("Close"));
+        assert_eq!(
+            doc.root.base().children[0].base().tooltip.as_deref(),
+            Some("Close")
+        );
         assert_eq!(doc.root.base().children[1].base().text, "138");
 
         localizer.set_locale("zh-Hans").unwrap();
         apply_localizations(&mut doc.root, &localizer);
-        assert_eq!(doc.root.base().children[0].base().tooltip.as_deref(), Some("关闭"));
-        assert_eq!(doc.root.base().children[1].base().text, "138", "切换语言不能覆盖 Edit 输入");
+        assert_eq!(
+            doc.root.base().children[0].base().tooltip.as_deref(),
+            Some("关闭")
+        );
+        assert_eq!(
+            doc.root.base().children[1].base().text,
+            "138",
+            "切换语言不能覆盖 Edit 输入"
+        );
         assert_eq!(
             localizer.text(config.localized_title.clone().unwrap()),
             "UU 的设置"
@@ -1547,7 +1808,8 @@ mod tests {
         let doc = load_window_str(
             r#"<Window title="window.title" title-verbatim="Fixed"><Panel/></Window>"#,
             &ctx,
-        ).unwrap();
+        )
+        .unwrap();
         let config = doc.config.unwrap();
         assert_eq!(config.title, "Fixed");
         assert!(config.localized_title.is_none());
@@ -1634,7 +1896,11 @@ mod tests {
         let mut ctx = Context::new();
         ctx.set("platform.macos", true);
         let res = load_str(xml, &ctx).unwrap();
-        assert_eq!(res.root.base().children.len(), 0, "macOS 上不渲染系统按钮组");
+        assert_eq!(
+            res.root.base().children.len(),
+            0,
+            "macOS 上不渲染系统按钮组"
+        );
 
         // 强制 macos=false → 应生成
         let mut ctx2 = Context::new();

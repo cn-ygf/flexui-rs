@@ -3,12 +3,12 @@
 use flexui_geometry::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
 
-use crate::common_builders;
 use crate::anim::AnimProp;
+use crate::common_builders;
 use crate::layout;
 use crate::sizing::Sizing;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 进度条：轨道用 bg_color（或默认灰），进度用 fg_color（或默认蓝），圆角胶囊。
 pub struct Progress {
@@ -63,13 +63,26 @@ impl Widget for Progress {
         }
     }
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
-        if let WidgetProperty::Value(v) = property { self.value = v.clamp(0.0, 1.0); true } else { false }
+        if let WidgetProperty::Value(v) = property {
+            self.value = v.clamp(0.0, 1.0);
+            true
+        } else {
+            false
+        }
+    }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        (key == WidgetPropertyKey::Value).then_some(WidgetProperty::Value(self.value))
     }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         (prop == AnimProp::Value).then_some(self.value)
     }
     fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
-        if prop == AnimProp::Value { self.value = value.clamp(0.0, 1.0); true } else { false }
+        if prop == AnimProp::Value {
+            self.value = value.clamp(0.0, 1.0);
+            true
+        } else {
+            false
+        }
     }
 }
 

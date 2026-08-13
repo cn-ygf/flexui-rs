@@ -6,7 +6,9 @@ use flexui_gfx::Canvas;
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Clickable, TextControl, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{
+    Base, Clickable, TextControl, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole,
+};
 
 use super::paint_indicator_and_text;
 
@@ -22,7 +24,12 @@ impl Radio {
     pub fn new(text: impl Into<String>) -> Self {
         let mut base = Base::new(WidgetRole::Radio);
         base.text = text.into();
-        Self { base, group: None, tab_index: None, indicator_visible: true }
+        Self {
+            base,
+            group: None,
+            tab_index: None,
+            indicator_visible: true,
+        }
     }
     /// 所属分组。
     pub fn group(mut self, g: u32) -> Self {
@@ -82,8 +89,22 @@ impl Widget for Radio {
         }
         true
     }
-    fn selection_group(&self) -> Option<u32> { self.group }
-    fn tab_index(&self) -> Option<usize> { self.tab_index }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        match key {
+            WidgetPropertyKey::Group => Some(WidgetProperty::Group(self.group)),
+            WidgetPropertyKey::TabIndex => Some(WidgetProperty::TabIndex(self.tab_index)),
+            WidgetPropertyKey::IndicatorVisible => {
+                Some(WidgetProperty::IndicatorVisible(self.indicator_visible))
+            }
+            _ => None,
+        }
+    }
+    fn selection_group(&self) -> Option<u32> {
+        self.group
+    }
+    fn tab_index(&self) -> Option<usize> {
+        self.tab_index
+    }
 }
 
 common_builders!(Radio);

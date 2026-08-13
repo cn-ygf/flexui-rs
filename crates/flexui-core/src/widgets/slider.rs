@@ -5,13 +5,13 @@
 use flexui_geometry::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
 
-use crate::common_builders;
 use crate::anim::AnimProp;
+use crate::common_builders;
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::sizing::Sizing;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 滑块：轨道 + 已填充段 + 圆形拖柄。value 归一化 0~1。
 pub struct Slider {
@@ -89,18 +89,34 @@ impl Widget for Slider {
         cv.fill_round_rect(knob, Corners::all(d / 2.0), knob_col);
     }
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
-        if let WidgetProperty::Value(v) = property { self.value = v.clamp(0.0, 1.0); true } else { false }
+        if let WidgetProperty::Value(v) = property {
+            self.value = v.clamp(0.0, 1.0);
+            true
+        } else {
+            false
+        }
+    }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        (key == WidgetPropertyKey::Value).then_some(WidgetProperty::Value(self.value))
     }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         (prop == AnimProp::Value).then_some(self.value)
     }
     fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
-        if prop == AnimProp::Value { self.value = value.clamp(0.0, 1.0); true } else { false }
+        if prop == AnimProp::Value {
+            self.value = value.clamp(0.0, 1.0);
+            true
+        } else {
+            false
+        }
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         match ev {
             // 按下定位到点击处；拖动（分发器仅在按住本控件时转发 MouseMove）持续更新。
-            Event::MouseDown { pos, button: MouseButton::Left } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+            } => {
                 self.set_value_from_x(pos.x);
                 EventFlow::Consumed
             }

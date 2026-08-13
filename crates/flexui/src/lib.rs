@@ -15,8 +15,10 @@ pub use flexui_xml::{
 };
 
 // 资源系统（RM1-5）。
+pub use flexui_i18n::{
+    I18nError, LocalizationValue, LocalizedStringKey, LocalizedStringResource, Localizer,
+};
 pub use flexui_resource::{DirProvider, ResError, ResourceManager, ResourceProvider, ZipProvider};
-pub use flexui_i18n::{I18nError, LocalizedStringKey, LocalizedStringResource, LocalizationValue, Localizer};
 
 fn application_localizer_slot() -> &'static RwLock<Option<Localizer>> {
     static SLOT: OnceLock<RwLock<Option<Localizer>>> = OnceLock::new();
@@ -163,12 +165,18 @@ pub trait WindowImpl: 'static {
     }
 
     /// SwiftUI Environment 风格的共享本地化环境；None 表示全部文本按字面量处理。
-    fn localizer(&self) -> Option<Localizer> { application_localizer() }
+    fn localizer(&self) -> Option<Localizer> {
+        application_localizer()
+    }
 
     /// 窗口与控件创建完成（≈ InitWindow）：绑事件、预设文本等。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
     /// 某具名控件被点击（≈ Notify）。
     fn on_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
+    /// 具名控件的 hover、focus、文本、选择和值等语义变化。
+    fn on_control_event(&mut self, _name: &str, _event: &ControlEvent, _ctx: &mut WindowCtx) {}
+    /// 窗口焦点、尺寸、DPI、键盘及窗口状态等统一事件。
+    fn on_window_event(&mut self, _event: &WindowEvent, _ctx: &mut WindowCtx) {}
     /// 某具名控件被双击。
     fn on_double_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
     /// 某具名控件被右键（上下文菜单），坐标为逻辑像素。
@@ -199,6 +207,12 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
         self.imp.on_click(name, ctx);
     }
+    fn on_control_event(&mut self, name: &str, event: &ControlEvent, ctx: &mut WindowCtx) {
+        self.imp.on_control_event(name, event, ctx);
+    }
+    fn on_window_event(&mut self, event: &WindowEvent, ctx: &mut WindowCtx) {
+        self.imp.on_window_event(event, ctx);
+    }
     fn on_double_click(&mut self, name: &str, ctx: &mut WindowCtx) {
         self.imp.on_double_click(name, ctx);
     }
@@ -228,7 +242,9 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
 pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
     let localizer = imp.localizer();
     let mut ctx = Context::new();
-    if let Some(value) = localizer.clone() { ctx.set_localizer(value); }
+    if let Some(value) = localizer.clone() {
+        ctx.set_localizer(value);
+    }
     // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
     let (config, mut root, bindings) = match imp.skin() {
         Skin::Xml(xml) => {

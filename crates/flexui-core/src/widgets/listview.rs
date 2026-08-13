@@ -6,13 +6,13 @@
 use flexui_geometry::{Color, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
-use crate::common_builders;
 use crate::anim::AnimProp;
+use crate::common_builders;
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 选中行高亮色。
 const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.45);
@@ -101,8 +101,21 @@ impl Widget for ListView {
             if self.selection == Some(i) {
                 cv.fill_rect(row, SEL_COLOR);
             }
-            let text_rect = Rect::new(row.left() + 8.0, row.top(), (row.size.width - 8.0).max(0.0), row.size.height);
-            draw_aligned_text(cv, item, text_rect, &self.base.font, color, TextAlign::Left, true);
+            let text_rect = Rect::new(
+                row.left() + 8.0,
+                row.top(),
+                (row.size.width - 8.0).max(0.0),
+                row.size.height,
+            );
+            draw_aligned_text(
+                cv,
+                item,
+                text_rect,
+                &self.base.font,
+                color,
+                TextAlign::Left,
+                true,
+            );
         }
         cv.restore();
         // 简易滚动条：内容超出视口时右侧画一条滑块。
@@ -111,14 +124,22 @@ impl Widget for ListView {
             let vh = content.size.height;
             let thumb_h = (vh * vh / self.content_h).max(20.0);
             let max_scroll = self.content_h - vh;
-            let t = if max_scroll > 0.0 { scroll / max_scroll } else { 0.0 };
+            let t = if max_scroll > 0.0 {
+                scroll / max_scroll
+            } else {
+                0.0
+            };
             let ty = content.top() + t * (vh - thumb_h);
             let thumb = Rect::new(content.right() - track_w, ty, track_w, thumb_h);
             cv.fill_rect(thumb, Color::from_u8(120, 128, 148, 200));
         }
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
-        if let Event::MouseDown { pos, button: MouseButton::Left } = ev {
+        if let Event::MouseDown {
+            pos,
+            button: MouseButton::Left,
+        } = ev
+        {
             let content = layout::content_rect(&self.base);
             let rel = pos.y - content.top() + self.scroll_y;
             if rel >= 0.0 {
@@ -139,17 +160,35 @@ impl Widget for ListView {
                 self.selection = self.selection.filter(|index| *index < self.items.len());
                 true
             }
+            WidgetProperty::RowHeight(height) => {
+                self.row_h = height.max(1.0);
+                true
+            }
             _ => false,
         }
     }
-    fn selected_index(&self) -> Option<usize> { self.selection }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        match key {
+            WidgetPropertyKey::Items => Some(WidgetProperty::Items(self.items.clone())),
+            WidgetPropertyKey::SelectedIndex => self.selection.map(WidgetProperty::SelectedIndex),
+            WidgetPropertyKey::RowHeight => Some(WidgetProperty::RowHeight(self.row_h)),
+            _ => None,
+        }
+    }
+    fn selected_index(&self) -> Option<usize> {
+        self.selection
+    }
     fn set_selected_index(&mut self, index: usize) -> bool {
-        if index >= self.items.len() { return false; }
+        if index >= self.items.len() {
+            return false;
+        }
         let changed = self.selection != Some(index);
         self.selection = Some(index);
         changed
     }
-    fn is_scrollable(&self) -> bool { true }
+    fn is_scrollable(&self) -> bool {
+        true
+    }
     fn scroll_by(&mut self, dy: f32) -> bool {
         let max = (self.content_h - self.base.rect.size.height).max(0.0);
         let next = (self.scroll_y - dy).clamp(0.0, max);
@@ -157,12 +196,20 @@ impl Widget for ListView {
         self.scroll_y = next;
         changed
     }
-    fn scroll_position(&self) -> Option<f32> { Some(self.scroll_y) }
+    fn scroll_position(&self) -> Option<f32> {
+        Some(self.scroll_y)
+    }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
-        if prop == AnimProp::ScrollY { Some(self.scroll_y) } else { None }
+        if prop == AnimProp::ScrollY {
+            Some(self.scroll_y)
+        } else {
+            None
+        }
     }
     fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
-        if prop != AnimProp::ScrollY { return false; }
+        if prop != AnimProp::ScrollY {
+            return false;
+        }
         let max = (self.content_h - self.base.rect.size.height).max(0.0);
         self.scroll_y = value.clamp(0.0, max);
         true
@@ -183,11 +230,17 @@ mod tests {
         lv.arrange(Rect::new(0.0, 0.0, 100.0, 40.0), &Fake);
         assert_eq!(lv.content_h, 80.0);
         // 点击 y=10 → 第 0 行。
-        lv.on_event(&Event::MouseDown { pos: flexui_geometry::Point::new(10.0, 10.0), button: MouseButton::Left });
+        lv.on_event(&Event::MouseDown {
+            pos: flexui_geometry::Point::new(10.0, 10.0),
+            button: MouseButton::Left,
+        });
         assert_eq!(lv.selection(), Some(0));
         // 滚动后点击。
         lv.scroll_y = 20.0;
-        lv.on_event(&Event::MouseDown { pos: flexui_geometry::Point::new(10.0, 10.0), button: MouseButton::Left });
+        lv.on_event(&Event::MouseDown {
+            pos: flexui_geometry::Point::new(10.0, 10.0),
+            button: MouseButton::Left,
+        });
         assert_eq!(lv.selection(), Some(1), "滚动 20 后 y=10 对应第 1 行");
     }
 
@@ -196,8 +249,22 @@ mod tests {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: Color) {}
-        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: Color, _w: f32) {}
-        fn draw_text(&mut self, _t: &str, _o: flexui_geometry::Point, _f: &flexui_gfx::Font, _c: Color) {}
+        fn stroke_round_rect(
+            &mut self,
+            _r: Rect,
+            _rad: flexui_geometry::Corners,
+            _c: Color,
+            _w: f32,
+        ) {
+        }
+        fn draw_text(
+            &mut self,
+            _t: &str,
+            _o: flexui_geometry::Point,
+            _f: &flexui_gfx::Font,
+            _c: Color,
+        ) {
+        }
         fn measure_text(&self, t: &str, f: &flexui_gfx::Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
         }

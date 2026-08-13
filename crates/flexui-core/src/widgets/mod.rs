@@ -210,6 +210,14 @@ macro_rules! common_builders {
                 self.base.on_click = Some(Box::new(f));
                 self
             }
+            /// 控件 hover、focus、文本、选择和值变化等语义事件。
+            pub fn on_control_event(
+                mut self,
+                f: impl FnMut(&$crate::ControlEvent, &mut $crate::dispatch::EventCtx) + 'static,
+            ) -> Self {
+                self.base.on_control_event = Some(Box::new(f));
+                self
+            }
         }
     };
 }
@@ -227,7 +235,15 @@ pub(crate) fn paint_indicator_and_text(
     if style.bg_image.is_some() || style.fg_image.is_some() {
         let content = crate::layout::content_rect(base);
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
-        draw_aligned_text(cv, &base.text, content, &base.font, color, TextAlign::Left, true);
+        draw_aligned_text(
+            cv,
+            &base.text,
+            content,
+            &base.font,
+            color,
+            TextAlign::Left,
+            true,
+        );
         return;
     }
 
@@ -236,7 +252,9 @@ pub(crate) fn paint_indicator_and_text(
     let bx = content.left();
     let by = content.top() + (content.size.height - box_size) / 2.0;
     let ind = Rect::new(bx, by, box_size, box_size);
-    let border = style.border_color.unwrap_or(Color::from_u8(140, 150, 170, 255));
+    let border = style
+        .border_color
+        .unwrap_or(Color::from_u8(140, 150, 170, 255));
     let radius = if circular {
         Corners::all(box_size / 2.0)
     } else {
@@ -263,5 +281,13 @@ pub(crate) fn paint_indicator_and_text(
         content.size.height,
     );
     let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
-    draw_aligned_text(cv, &base.text, text_rect, &base.font, color, TextAlign::Left, true);
+    draw_aligned_text(
+        cv,
+        &base.text,
+        text_rect,
+        &base.font,
+        color,
+        TextAlign::Left,
+        true,
+    );
 }

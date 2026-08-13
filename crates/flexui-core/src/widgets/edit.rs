@@ -10,7 +10,9 @@ use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::{PlaceholderStyleSet, StyleSpec};
-use crate::widget::{Base, TextControl, TextInputState, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{
+    Base, TextControl, TextInputState, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole,
+};
 
 /// 选区高亮色（半透明蓝）。
 const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
@@ -38,9 +40,17 @@ pub struct EditConfig {
 
 impl Default for EditConfig {
     fn default() -> Self {
-        Self { placeholder: String::new(), placeholder_style: PlaceholderStyleSet::new(),
-            multiline: false, read_only: false, number_only: false, password: false,
-            password_char: '\u{2022}', max_chars: None, auto_select_all: false }
+        Self {
+            placeholder: String::new(),
+            placeholder_style: PlaceholderStyleSet::new(),
+            multiline: false,
+            read_only: false,
+            number_only: false,
+            password: false,
+            password_char: '\u{2022}',
+            max_chars: None,
+            auto_select_all: false,
+        }
     }
 }
 
@@ -101,21 +111,52 @@ impl Edit {
         self.config.multiline = on;
         self
     }
-    pub fn read_only(mut self, on: bool) -> Self { self.config.read_only = on; self }
-    pub fn number_only(mut self, on: bool) -> Self { self.config.number_only = on; self.normalize_text(); self }
-    pub fn password(mut self, on: bool) -> Self { self.config.password = on; self.cache_dirty = true; self }
-    pub fn password_char(mut self, ch: char) -> Self { self.config.password_char = ch; self.cache_dirty = true; self }
-    pub fn max_chars(mut self, max: usize) -> Self { self.config.max_chars = Some(max); self.normalize_text(); self }
-    pub fn auto_select_all(mut self, on: bool) -> Self { self.config.auto_select_all = on; self }
+    pub fn read_only(mut self, on: bool) -> Self {
+        self.config.read_only = on;
+        self
+    }
+    pub fn number_only(mut self, on: bool) -> Self {
+        self.config.number_only = on;
+        self.normalize_text();
+        self
+    }
+    pub fn password(mut self, on: bool) -> Self {
+        self.config.password = on;
+        self.cache_dirty = true;
+        self
+    }
+    pub fn password_char(mut self, ch: char) -> Self {
+        self.config.password_char = ch;
+        self.cache_dirty = true;
+        self
+    }
+    pub fn max_chars(mut self, max: usize) -> Self {
+        self.config.max_chars = Some(max);
+        self.normalize_text();
+        self
+    }
+    pub fn auto_select_all(mut self, on: bool) -> Self {
+        self.config.auto_select_all = on;
+        self
+    }
 
-    pub fn config(&self) -> &EditConfig { &self.config }
-    pub fn cursor(&self) -> usize { self.state.cursor }
-    pub fn selection(&self) -> Option<(usize, usize)> { self.sel_range() }
+    pub fn config(&self) -> &EditConfig {
+        &self.config
+    }
+    pub fn cursor(&self) -> usize {
+        self.state.cursor
+    }
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        self.sel_range()
+    }
 
     fn sel_range(&self) -> Option<(usize, usize)> {
         let anchor = self.state.sel_anchor?;
-        if anchor == self.state.cursor { None }
-        else { Some((anchor.min(self.state.cursor), anchor.max(self.state.cursor))) }
+        if anchor == self.state.cursor {
+            None
+        } else {
+            Some((anchor.min(self.state.cursor), anchor.max(self.state.cursor)))
+        }
     }
 
     fn char_count(&self) -> usize {
@@ -123,9 +164,15 @@ impl Edit {
     }
 
     fn normalize_text(&mut self) {
-        let mut text: String = self.base.text.chars()
-            .filter(|ch| !self.config.number_only || ch.is_ascii_digit()).collect();
-        if let Some(max) = self.config.max_chars { text = text.chars().take(max).collect(); }
+        let mut text: String = self
+            .base
+            .text
+            .chars()
+            .filter(|ch| !self.config.number_only || ch.is_ascii_digit())
+            .collect();
+        if let Some(max) = self.config.max_chars {
+            text = text.chars().take(max).collect();
+        }
         self.base.text = text;
         self.state.cursor = self.state.cursor.min(self.char_count());
         self.state.sel_anchor = self.state.sel_anchor.map(|a| a.min(self.char_count()));
@@ -134,18 +181,26 @@ impl Edit {
 
     fn accepted_input(&self, s: &str) -> String {
         let selected = self.sel_range().map_or(0, |(lo, hi)| hi - lo);
-        let available = self.config.max_chars
+        let available = self
+            .config
+            .max_chars
             .map(|max| max.saturating_sub(self.char_count().saturating_sub(selected)))
             .unwrap_or(usize::MAX);
-        s.chars().filter(|ch| (!self.config.number_only || ch.is_ascii_digit())
-            && (self.config.multiline || (*ch != '\n' && *ch != '\r')))
-            .take(available).collect()
+        s.chars()
+            .filter(|ch| {
+                (!self.config.number_only || ch.is_ascii_digit())
+                    && (self.config.multiline || (*ch != '\n' && *ch != '\r'))
+            })
+            .take(available)
+            .collect()
     }
 
     fn display_slice(&self, s: &str) -> String {
         if self.config.password {
             std::iter::repeat_n(self.config.password_char, s.chars().count()).collect()
-        } else { s.to_string() }
+        } else {
+            s.to_string()
+        }
     }
 
     /// 移动光标到 idx；extend=true 时按住 Shift 扩展选区（保留/建立锚点），否则清锚点。
@@ -178,12 +233,18 @@ impl Edit {
 
     /// 在光标处插入字符串；若有选区则先替换掉选区。
     fn insert_str(&mut self, s: &str) -> bool {
-        if self.config.read_only { return false; }
+        if self.config.read_only {
+            return false;
+        }
         let original_empty = s.is_empty();
         let s = self.accepted_input(s);
         let had_selection = self.sel_range().is_some();
-        if !original_empty && s.is_empty() { return false; }
-        if s.is_empty() && !had_selection { return false; }
+        if !original_empty && s.is_empty() {
+            return false;
+        }
+        if s.is_empty() && !had_selection {
+            return false;
+        }
         if let Some((lo, hi)) = self.sel_range() {
             self.delete_range(lo, hi);
         }
@@ -203,7 +264,9 @@ impl Edit {
 
     /// 退格：有选区删选区，否则删光标前一个字符。
     fn backspace(&mut self) {
-        if self.config.read_only { return; }
+        if self.config.read_only {
+            return;
+        }
         if let Some((lo, hi)) = self.sel_range() {
             self.delete_range(lo, hi);
             return;
@@ -217,7 +280,9 @@ impl Edit {
 
     /// Delete：有选区删选区，否则删光标处字符。
     fn delete_forward(&mut self) {
-        if self.config.read_only { return; }
+        if self.config.read_only {
+            return;
+        }
         if let Some((lo, hi)) = self.sel_range() {
             self.delete_range(lo, hi);
             return;
@@ -258,7 +323,11 @@ impl Edit {
     fn hit_index(&self, pos: Point) -> usize {
         let content = layout::content_rect(&self.base);
         let local_x = pos.x - content.left()
-            + if self.config.multiline { 0.0 } else { self.scroll_x.get() };
+            + if self.config.multiline {
+                0.0
+            } else {
+                self.scroll_x.get()
+            };
         if self.lines.is_empty() {
             let cw = (self.base.font.size * 0.6).max(1.0);
             return ((local_x / cw).round().max(0.0) as usize).min(self.char_count());
@@ -269,7 +338,9 @@ impl Edit {
         } else {
             0
         };
-        let col = self.col_at(li, local_x).min(self.lines[li].offsets.len().saturating_sub(1));
+        let col = self
+            .col_at(li, local_x)
+            .min(self.lines[li].offsets.len().saturating_sub(1));
         self.lines[li].start + col
     }
 
@@ -333,11 +404,21 @@ impl Edit {
         let line_h = self.line_height();
         let caret_h = self.base.font.size;
         if self.shows_placeholder() {
-            let style = self.config.placeholder_style.resolve(self.base.visual_state());
+            let style = self
+                .config
+                .placeholder_style
+                .resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
             let line_rect = Rect::new(content.left(), content.top(), content.size.width, line_h);
-            draw_aligned_text(cv, &self.config.placeholder, line_rect, &font,
-                style.fg_color.unwrap_or(PLACEHOLDER_COLOR), TextAlign::Left, false);
+            draw_aligned_text(
+                cv,
+                &self.config.placeholder,
+                line_rect,
+                &font,
+                style.fg_color.unwrap_or(PLACEHOLDER_COLOR),
+                TextAlign::Left,
+                false,
+            );
             if self.base.focused && self.base.caret_on {
                 let y = content.top() + (line_h - caret_h) / 2.0;
                 cv.fill_rect(Rect::new(content.left(), y, 1.5, caret_h), color);
@@ -358,9 +439,8 @@ impl Edit {
                 let e = hi.min(le);
                 if s < e {
                     let pre = self.display_slice(&line.chars().take(s - ls).collect::<String>());
-                    let mid = self.display_slice(
-                        &line.chars().skip(s - ls).take(e - s).collect::<String>(),
-                    );
+                    let mid = self
+                        .display_slice(&line.chars().skip(s - ls).take(e - s).collect::<String>());
                     let x0 = content.left() + cv.measure_text_advance(&pre, &self.base.font);
                     let w = cv.measure_text_advance(&mid, &self.base.font);
                     cv.fill_rect(Rect::new(x0, y, w.max(1.0), line_h), SEL_COLOR);
@@ -368,7 +448,13 @@ impl Edit {
             }
             // 文字。
             let line_rect = Rect::new(content.left(), y, content.size.width, line_h);
-            Self::draw_input_text(cv, &self.display_slice(line), line_rect, &self.base.font, color);
+            Self::draw_input_text(
+                cv,
+                &self.display_slice(line),
+                line_rect,
+                &self.base.font,
+                color,
+            );
             // 光标（仅当前行）。
             if self.base.focused && self.base.caret_on && i == cur_line {
                 let pre = self.display_slice(&line.chars().take(cur_col).collect::<String>());
@@ -384,7 +470,9 @@ impl Edit {
     }
 
     fn shows_placeholder(&self) -> bool {
-        self.base.text.is_empty() && self.state.marked.is_empty() && !self.config.placeholder.is_empty()
+        self.base.text.is_empty()
+            && self.state.marked.is_empty()
+            && !self.config.placeholder.is_empty()
     }
 
     /// 输入文本使用与字符前进宽度相同的排版方式，确保光标紧贴字符边界。
@@ -400,16 +488,28 @@ impl Edit {
         }
         let height = cv.measure_text(text, font).height;
         let y = rect.top() + (rect.size.height - height) / 2.0;
-        cv.draw_text_advance(text, Point::new(rect.left(), y.max(rect.top())), font, color);
+        cv.draw_text_advance(
+            text,
+            Point::new(rect.left(), y.max(rect.top())),
+            font,
+            color,
+        );
     }
 
     fn update_single_line_scroll(&self, caret: f32, total: f32, content: Rect) {
         let width = content.size.width.max(0.0);
-        if width <= 1.0 || total <= width { self.scroll_x.set(0.0); return; }
+        if width <= 1.0 || total <= width {
+            self.scroll_x.set(0.0);
+            return;
+        }
         let mut scroll = self.scroll_x.get();
-        if caret < scroll { scroll = caret; }
-        else if caret + 2.0 > scroll + width { scroll = caret + 2.0 - width; }
-        self.scroll_x.set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
+        if caret < scroll {
+            scroll = caret;
+        } else if caret + 2.0 > scroll + width {
+            scroll = caret + 2.0 - width;
+        }
+        self.scroll_x
+            .set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
     }
 }
 
@@ -449,7 +549,10 @@ impl Widget for Edit {
                 let pre: String = display_line.chars().take(i).collect();
                 offs.push(cv.measure_text_advance(&pre, &self.base.font));
             }
-            lines.push(LineCache { start, offsets: offs });
+            lines.push(LineCache {
+                start,
+                offsets: offs,
+            });
             start += n + 1; // +1 跳过换行符
         }
         self.lines = lines;
@@ -457,16 +560,34 @@ impl Widget for Edit {
         self.cache_dirty = false;
         let content = layout::content_rect(&self.base);
         let (line, col) = self.pos_of(self.state.cursor);
-        let x = self.lines.get(line).and_then(|l| l.offsets.get(col)).copied().unwrap_or(0.0);
+        let x = self
+            .lines
+            .get(line)
+            .and_then(|l| l.offsets.get(col))
+            .copied()
+            .unwrap_or(0.0);
         if self.config.multiline {
-            self.caret_rect.set(Some(Rect::new(content.left() + x + 1.0,
-                content.top() + line as f32 * self.line_h, 1.5, self.base.font.size)));
+            self.caret_rect.set(Some(Rect::new(
+                content.left() + x + 1.0,
+                content.top() + line as f32 * self.line_h,
+                1.5,
+                self.base.font.size,
+            )));
         } else {
-            let total = self.lines.first().and_then(|l| l.offsets.last()).copied().unwrap_or(0.0);
+            let total = self
+                .lines
+                .first()
+                .and_then(|l| l.offsets.last())
+                .copied()
+                .unwrap_or(0.0);
             self.update_single_line_scroll(x, total, content);
             let y = content.top() + (content.size.height - self.base.font.size) / 2.0;
-            self.caret_rect.set(Some(Rect::new(content.left() - self.scroll_x.get() + x + 1.0,
-                y.max(content.top()), 1.5, self.base.font.size)));
+            self.caret_rect.set(Some(Rect::new(
+                content.left() - self.scroll_x.get() + x + 1.0,
+                y.max(content.top()),
+                1.5,
+                self.base.font.size,
+            )));
         }
     }
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
@@ -480,13 +601,31 @@ impl Widget for Edit {
         let cy = content.top() + (content.size.height - caret_h) / 2.0;
         if self.shows_placeholder() {
             self.scroll_x.set(0.0);
-            self.caret_rect.set(Some(Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h)));
-            let style = self.config.placeholder_style.resolve(self.base.visual_state());
+            self.caret_rect.set(Some(Rect::new(
+                content.left(),
+                cy.max(content.top()),
+                1.5,
+                caret_h,
+            )));
+            let style = self
+                .config
+                .placeholder_style
+                .resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
-            draw_aligned_text(cv, &self.config.placeholder, content, &font,
-                style.fg_color.unwrap_or(PLACEHOLDER_COLOR), TextAlign::Left, false);
+            draw_aligned_text(
+                cv,
+                &self.config.placeholder,
+                content,
+                &font,
+                style.fg_color.unwrap_or(PLACEHOLDER_COLOR),
+                TextAlign::Left,
+                false,
+            );
             if self.base.focused && self.base.caret_on {
-                cv.fill_rect(Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h), color);
+                cv.fill_rect(
+                    Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h),
+                    color,
+                );
             }
             return;
         }
@@ -507,7 +646,15 @@ impl Widget for Edit {
         if self.state.marked.is_empty() {
             if let Some((lo, hi)) = self.sel_range() {
                 let pre = self.display_slice(&self.base.text.chars().take(lo).collect::<String>());
-                let sel = self.display_slice(&self.base.text.chars().skip(lo).take(hi - lo).collect::<String>());
+                let sel = self.display_slice(
+                    &self
+                        .base
+                        .text
+                        .chars()
+                        .skip(lo)
+                        .take(hi - lo)
+                        .collect::<String>(),
+                );
                 let x0 = origin_x + cv.measure_text_advance(&pre, &self.base.font);
                 let w = cv.measure_text_advance(&sel, &self.base.font);
                 cv.fill_rect(
@@ -517,7 +664,12 @@ impl Widget for Edit {
             }
         }
         // 显示串 = 光标前文本 + IME 组合串 + 光标后文本；组合串加下划线以示未提交。
-        let text_rect = Rect::new(origin_x, content.top(), total_w.max(content.size.width), content.size.height);
+        let text_rect = Rect::new(
+            origin_x,
+            content.top(),
+            total_w.max(content.size.width),
+            content.size.height,
+        );
         Self::draw_input_text(cv, &display, text_rect, &self.base.font, color);
 
         // 组合串下划线。
@@ -529,19 +681,32 @@ impl Widget for Edit {
             );
         }
         // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与字号一致、垂直居中。
-        let caret = Rect::new(origin_x + before_w + marked_w + 1.0,
-            cy.max(content.top()), 1.5, caret_h);
+        let caret = Rect::new(
+            origin_x + before_w + marked_w + 1.0,
+            cy.max(content.top()),
+            1.5,
+            caret_h,
+        );
         self.caret_rect.set(Some(caret));
-        if self.base.focused && self.base.caret_on { cv.fill_rect(caret, color); }
+        if self.base.focused && self.base.caret_on {
+            cv.fill_rect(caret, color);
+        }
         cv.restore();
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         match ev {
             Event::Char { ch } if !ch.is_control() => {
-                if self.insert_str(&ch.to_string()) { EventFlow::Consumed } else { EventFlow::Ignored }
+                if self.insert_str(&ch.to_string()) {
+                    EventFlow::Consumed
+                } else {
+                    EventFlow::Ignored
+                }
             }
             // 鼠标按下：光标定位到点击处，并把锚点也置于此（拖动即从这里起选）。
-            Event::MouseDown { pos, button: MouseButton::Left } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+            } => {
                 let idx = self.hit_index(*pos);
                 self.state.cursor = idx;
                 self.state.sel_anchor = Some(idx);
@@ -562,12 +727,16 @@ impl Widget for Edit {
             }
             Event::KeyDown { key, mods } => match *key {
                 keys::BACKSPACE => {
-                    if self.config.read_only { return EventFlow::Ignored; }
+                    if self.config.read_only {
+                        return EventFlow::Ignored;
+                    }
                     self.backspace();
                     EventFlow::Consumed
                 }
                 keys::DELETE => {
-                    if self.config.read_only { return EventFlow::Ignored; }
+                    if self.config.read_only {
+                        return EventFlow::Ignored;
+                    }
                     self.delete_forward();
                     EventFlow::Consumed
                 }
@@ -621,7 +790,11 @@ impl Widget for Edit {
                     EventFlow::Consumed
                 }
                 keys::ENTER if self.config.multiline => {
-                    if self.insert_str("\n") { EventFlow::Consumed } else { EventFlow::Ignored }
+                    if self.insert_str("\n") {
+                        EventFlow::Consumed
+                    } else {
+                        EventFlow::Ignored
+                    }
                 }
                 keys::UP if self.config.multiline => {
                     self.move_vertical(-1, mods.shift);
@@ -638,7 +811,9 @@ impl Widget for Edit {
     }
 
     fn selected_text(&self) -> Option<String> {
-        if self.config.password { return None; }
+        if self.config.password {
+            return None;
+        }
         let (lo, hi) = self.sel_range()?;
         Some(self.base.text.chars().skip(lo).take(hi - lo).collect())
     }
@@ -646,7 +821,9 @@ impl Widget for Edit {
         self.insert_str(s)
     }
     fn delete_selection(&mut self) -> bool {
-        if self.config.read_only || self.config.password { return false; }
+        if self.config.read_only || self.config.password {
+            return false;
+        }
         if let Some((lo, hi)) = self.sel_range() {
             self.delete_range(lo, hi);
             true
@@ -665,18 +842,57 @@ impl Widget for Edit {
             WidgetProperty::PlaceholderStyle(v) => self.config.placeholder_style = v,
             WidgetProperty::Multiline(v) => self.config.multiline = v,
             WidgetProperty::ReadOnly(v) => self.config.read_only = v,
-            WidgetProperty::NumberOnly(v) => { self.config.number_only = v; self.normalize_text(); }
-            WidgetProperty::Password(v) => { self.config.password = v; self.cache_dirty = true; }
-            WidgetProperty::PasswordChar(v) => { self.config.password_char = v; self.cache_dirty = true; }
-            WidgetProperty::MaxChars(v) => { self.config.max_chars = v; self.normalize_text(); }
+            WidgetProperty::NumberOnly(v) => {
+                self.config.number_only = v;
+                self.normalize_text();
+            }
+            WidgetProperty::Password(v) => {
+                self.config.password = v;
+                self.cache_dirty = true;
+            }
+            WidgetProperty::PasswordChar(v) => {
+                self.config.password_char = v;
+                self.cache_dirty = true;
+            }
+            WidgetProperty::MaxChars(v) => {
+                self.config.max_chars = v;
+                self.normalize_text();
+            }
             WidgetProperty::AutoSelectAll(v) => self.config.auto_select_all = v,
             _ => return false,
         }
         true
     }
 
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        match key {
+            WidgetPropertyKey::Placeholder => {
+                Some(WidgetProperty::Placeholder(self.config.placeholder.clone()))
+            }
+            WidgetPropertyKey::PlaceholderStyle => Some(WidgetProperty::PlaceholderStyle(
+                self.config.placeholder_style.clone(),
+            )),
+            WidgetPropertyKey::Multiline => Some(WidgetProperty::Multiline(self.config.multiline)),
+            WidgetPropertyKey::ReadOnly => Some(WidgetProperty::ReadOnly(self.config.read_only)),
+            WidgetPropertyKey::NumberOnly => {
+                Some(WidgetProperty::NumberOnly(self.config.number_only))
+            }
+            WidgetPropertyKey::Password => Some(WidgetProperty::Password(self.config.password)),
+            WidgetPropertyKey::PasswordChar => {
+                Some(WidgetProperty::PasswordChar(self.config.password_char))
+            }
+            WidgetPropertyKey::MaxChars => Some(WidgetProperty::MaxChars(self.config.max_chars)),
+            WidgetPropertyKey::AutoSelectAll => {
+                Some(WidgetProperty::AutoSelectAll(self.config.auto_select_all))
+            }
+            _ => None,
+        }
+    }
+
     fn focus_gained(&mut self) {
-        if self.config.auto_select_all { self.select_all(); }
+        if self.config.auto_select_all {
+            self.select_all();
+        }
     }
     fn set_text_value(&mut self, text: String) {
         self.base.text = text;
@@ -685,18 +901,31 @@ impl Widget for Edit {
         self.state.marked.clear();
         self.normalize_text();
     }
-    fn text_input_rect(&self) -> Option<Rect> { self.caret_rect.get().or(Some(self.base.rect)) }
+    fn text_input_rect(&self) -> Option<Rect> {
+        self.caret_rect.get().or(Some(self.base.rect))
+    }
     fn text_input_state(&self) -> Option<TextInputState> {
-        Some(TextInputState { text: self.base.text.clone(), cursor: self.state.cursor,
-            selection: self.sel_range(), marked: self.state.marked.clone() })
+        Some(TextInputState {
+            text: self.base.text.clone(),
+            cursor: self.state.cursor,
+            selection: self.sel_range(),
+            marked: self.state.marked.clone(),
+        })
     }
     fn set_marked_text(&mut self, text: String) -> bool {
-        if self.config.read_only { return false; }
+        if self.config.read_only {
+            return false;
+        }
         self.state.marked = text;
         true
     }
     fn clear_marked_text(&mut self) -> bool {
-        if self.state.marked.is_empty() { false } else { self.state.marked.clear(); true }
+        if self.state.marked.is_empty() {
+            false
+        } else {
+            self.state.marked.clear();
+            true
+        }
     }
 }
 
@@ -740,7 +969,11 @@ mod tests {
         e.state.cursor = 1;
         e.set_marked_text("b".to_string());
         e.base_mut().focused = true;
-        let cv = RecCanvas { last_text: RefCell::new(String::new()), last_font: RefCell::new(None), last_color: RefCell::new(None) };
+        let cv = RecCanvas {
+            last_text: RefCell::new(String::new()),
+            last_font: RefCell::new(None),
+            last_color: RefCell::new(None),
+        };
         let mut cv = cv;
         layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let style = StyleSpec::default();
@@ -750,13 +983,23 @@ mod tests {
     }
 
     fn rec_canvas() -> RecCanvas {
-        RecCanvas { last_text: RefCell::new(String::new()), last_font: RefCell::new(None), last_color: RefCell::new(None) }
+        RecCanvas {
+            last_text: RefCell::new(String::new()),
+            last_font: RefCell::new(None),
+            last_color: RefCell::new(None),
+        }
     }
 
     use crate::event::{keys, Event, Mods};
 
     fn kd(key: u32, shift: bool) -> Event {
-        Event::KeyDown { key, mods: Mods { shift, ..Default::default() } }
+        Event::KeyDown {
+            key,
+            mods: Mods {
+                shift,
+                ..Default::default()
+            },
+        }
     }
 
     #[test]
@@ -779,12 +1022,22 @@ mod tests {
     fn placeholder_draws_complete_font_for_current_state() {
         use crate::style::{BaseState, PlaceholderStyleSpec, VisualState};
         let mut styles = PlaceholderStyleSet::new().with_normal(PlaceholderStyleSpec {
-            font_family: Some("Microsoft YaHei".to_string()), font_size: Some(13.0),
-            fg_color: Some(Color::WHITE), bold: Some(true), italic: Some(false), underline: Some(true),
+            font_family: Some("Microsoft YaHei".to_string()),
+            font_size: Some(13.0),
+            fg_color: Some(Color::WHITE),
+            bold: Some(true),
+            italic: Some(false),
+            underline: Some(true),
         });
-        styles.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
-            font_size: Some(15.0), fg_color: Some(Color::BLACK), italic: Some(true), ..Default::default()
-        });
+        styles.set(
+            VisualState::new(BaseState::Hot, false),
+            PlaceholderStyleSpec {
+                font_size: Some(15.0),
+                fg_color: Some(Color::BLACK),
+                italic: Some(true),
+                ..Default::default()
+            },
+        );
         let mut edit = Edit::new().placeholder("搜索").placeholder_style(styles);
         edit.base_mut().hover = true;
         let mut cv = rec_canvas();
@@ -800,7 +1053,7 @@ mod tests {
     #[test]
     fn 选区_shift方向扩展与收起() {
         let mut e = Edit::new().text("hello"); // cursor=5
-        // Shift+Left ×2 选中 "lo"
+                                               // Shift+Left ×2 选中 "lo"
         e.on_event(&kd(keys::LEFT, true));
         e.on_event(&kd(keys::LEFT, true));
         assert_eq!(e.selection(), Some((3, 5)));

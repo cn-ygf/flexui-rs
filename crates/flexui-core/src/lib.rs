@@ -20,31 +20,36 @@ pub mod window;
 // 常用类型再导出，方便上层与后端使用。
 pub use anim::{AnimProp, Easing};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
-pub use dispatch::{hit_test, Dispatcher, EventCtx, MainProxy};
-pub use event::{Event, EventFlow, Mods, MouseButton};
+pub use dispatch::{hit_test, Dispatcher, EventCtx, Invalidation, MainProxy};
+pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
 pub use layout::{layout_node, Axis};
 pub use localization::{apply_localizations, LocalizationBinding};
 pub use paint::{paint_tree, paint_tree_in_rect};
 pub use sizing::{Align, Justify, Sizing};
-pub use style::{BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec, VisualState};
+pub use style::{
+    BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec,
+    VisualState,
+};
 pub use widget::{
-    find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable, Container,
-    HitPolicy, Node, TextControl, TextInputState, Widget, WidgetId, WidgetProperty, WidgetRole,
+    find_by_id, find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable,
+    Container, HitPolicy, Node, TextControl, TextInputState, Widget, WidgetId, WidgetProperty,
+    WidgetPropertyKey, WidgetRole,
 };
 pub use widgets::{
     build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
     CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
-    MenuItem, MenuStyle, Panel, Progress, Radio,
-    ScrollBarStyle, ScrollView, Separator, Slider, TabBox, VBox,
+    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollBarStyle, ScrollView, Separator, Slider,
+    TabBox, VBox,
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
-    WindowPresentation,
-    WindowDelegate, WindowDragRegion, WindowHandle,
+    WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。
 pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
 pub use flexui_gfx::{image_density_from_path, Canvas, Font, ImageFit, ImageSource, TextAlign};
-pub use flexui_i18n::{I18nError, LocalizedStringKey, LocalizedStringResource, LocalizationValue, Localizer};
+pub use flexui_i18n::{
+    I18nError, LocalizationValue, LocalizedStringKey, LocalizedStringResource, Localizer,
+};

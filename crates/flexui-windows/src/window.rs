@@ -8,9 +8,9 @@ use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher, Event, Mods, MouseButton,
-    NewWindow, Node, Point, Rect, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate,
-    WindowDragRegion, WindowHandle, WindowPresentation, Widget, WidgetRole,
+    apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
+    Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WidgetRole,
+    WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -104,6 +104,7 @@ struct AppState {
     drag_region: WindowDragRegion,
     /// 窗口是否处于最小化状态。
     minimized: bool,
+    maximized: bool,
     /// 最近一次有效客户区尺寸；同尺寸还原时直接复用 DWM 缓存帧。
     client_size: (u16, u16),
     /// 最小化期间内容发生变化，恢复动画结束后需要异步补画。
@@ -119,8 +120,12 @@ struct AppState {
 
 /// 应用共享语言环境的最新修订，并返回是否发生变化。
 unsafe fn refresh_localizations(hwnd: HWND, state: &mut AppState) -> bool {
-    let Some(localizer) = state.localizer.as_ref() else { return false };
-    if localizer.revision() == state.locale_revision { return false; }
+    let Some(localizer) = state.localizer.as_ref() else {
+        return false;
+    };
+    if localizer.revision() == state.locale_revision {
+        return false;
+    }
     apply_localizations(&mut state.root, localizer);
     if let Some(title) = state.localized_title.clone() {
         SetWindowTextW(hwnd, wide(&localizer.text(title)).as_ptr());
@@ -366,6 +371,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         resizable: config.resizable,
         drag_region: config.drag_region,
         minimized: false,
+        maximized: false,
         client_size: (
             (client_rect.right - client_rect.left).max(0) as u16,
             (client_rect.bottom - client_rect.top).max(0) as u16,
@@ -409,7 +415,15 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         if GetWindowRect(owner, &mut owner_rect) != 0 {
             let x = owner_rect.left + ((owner_rect.right - owner_rect.left) - outer_width) / 2;
             let y = owner_rect.top + ((owner_rect.bottom - owner_rect.top) - outer_height) / 2;
-            SetWindowPos(hwnd, HWND_TOP, x, y, outer_width, outer_height, SWP_NOACTIVATE);
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                x,
+                y,
+                outer_width,
+                outer_height,
+                SWP_NOACTIVATE,
+            );
         }
     }
     DragAcceptFiles(hwnd, 1);
@@ -421,12 +435,16 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         let st = &mut *state;
         let mut handle = WinWindowHandle { hwnd };
         let mut ctx = WindowCtx::with_proxy_and_localizer(
-            st.root.as_mut(), &mut handle, st.disp.proxy(), st.localizer.clone(),
+            st.root.as_mut(),
+            &mut handle,
+            st.disp.proxy(),
+            st.localizer.clone(),
         );
         st.delegate.on_init(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
         let nw = ctx.take_new_windows();
+        st.disp.invalidate(ctx.take_invalidation());
         for r in overlays {
             open_overlay_request(&mut st.disp, r);
         }
@@ -489,43 +507,71 @@ unsafe fn mouse_pos(hwnd: HWND, lparam: LPARAM) -> flexui_core::Point {
     flexui_core::Point::new(x / scale, y / scale)
 }
 
+unsafe fn window_scale(hwnd: HWND) -> f32 {
+    let dpi = GetDpiForWindow(hwnd);
+    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+}
+
 /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
 unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     if state.is_null() {
         return false;
     }
     let st = &mut *state;
-    let visual_only = matches!(ev, Event::MouseMove { .. });
     st.disp.handle(st.root.as_mut(), &ev);
-    let need = st.disp.take_redraw();
-    let dirty = st.disp.take_dirty();
+    let window_event = flexui_core::WindowEvent::from_event(&ev);
     let acts = st.disp.take_activations();
     let doubles = st.disp.take_double_clicks();
     let contexts = st.disp.take_context_clicks();
+    let control_events = st.disp.take_control_events();
 
-    let (reqs, anim_reqs, new_wins) =
-        if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
-            let mut handle = WinWindowHandle { hwnd };
-            let root = &mut st.root;
-            let delegate = &mut st.delegate;
-            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
-            for name in &acts {
-                delegate.on_activate(name, &mut ctx);
+    let (reqs, anim_reqs, new_wins, invalidation) = if !acts.is_empty()
+        || !doubles.is_empty()
+        || !contexts.is_empty()
+        || !control_events.is_empty()
+        || window_event.is_some()
+    {
+        let mut handle = WinWindowHandle { hwnd };
+        let root = &mut st.root;
+        let delegate = &mut st.delegate;
+        let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
+        for name in &acts {
+            delegate.on_activate(name, &mut ctx);
+        }
+        for name in &doubles {
+            delegate.on_double_click(name, &mut ctx);
+        }
+        for (name, pos) in &contexts {
+            delegate.on_context(name, pos.x, pos.y, &mut ctx);
+        }
+        for (name, event) in &control_events {
+            delegate.on_control_event(name, event, &mut ctx);
+        }
+        if let Some(event) = &window_event {
+            delegate.on_window_event(event, &mut ctx);
+            match event {
+                flexui_core::WindowEvent::Resized { width, height } => {
+                    delegate.on_size(*width, *height, &mut ctx);
+                }
+                flexui_core::WindowEvent::KeyDown { key, .. } => delegate.on_key(*key, &mut ctx),
+                _ => {}
             }
-            for name in &doubles {
-                delegate.on_double_click(name, &mut ctx);
-            }
-            for (name, pos) in &contexts {
-                delegate.on_context(name, pos.x, pos.y, &mut ctx);
-            }
-            (
-                ctx.take_overlay_requests(),
-                ctx.take_anim_requests(),
-                ctx.take_new_windows(),
-            )
-        } else {
-            (Vec::new(), Vec::new(), Vec::new())
-        };
+        }
+        (
+            ctx.take_overlay_requests(),
+            ctx.take_anim_requests(),
+            ctx.take_new_windows(),
+            ctx.take_invalidation(),
+        )
+    } else {
+        (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            flexui_core::Invalidation::None,
+        )
+    };
+    st.disp.invalidate(invalidation);
     // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
@@ -544,24 +590,45 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     for w in new_wins {
         create_window(w, hwnd);
     }
+    let layout = st.disp.take_layout();
+    let need = st.disp.take_redraw();
+    let dirty = st.disp.take_dirty();
     // 最小化期间保留 DWM 的最后一帧，不积累恢复后立即触发的绘制请求。
     if st.minimized {
+        st.layout_dirty |= layout;
         st.redraw_after_restore |=
             need || opened || !acts.is_empty() || !doubles.is_empty() || dirty.is_some();
         return false;
     }
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
-    if need || opened || !acts.is_empty() || !doubles.is_empty() {
-        st.layout_dirty = true;
+    if need || opened {
+        st.layout_dirty |= layout;
         InvalidateRect(hwnd, null(), 0);
         true
     } else if let Some(r) = dirty {
-        st.layout_dirty |= !visual_only;
+        st.layout_dirty |= layout;
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
         true
     } else {
         false
+    }
+}
+
+/// 派发没有对应 core `Event` 的原生窗口状态事件。
+unsafe fn fire_window_event(hwnd: HWND, st: &mut AppState, event: flexui_core::WindowEvent) {
+    let mut handle = WinWindowHandle { hwnd };
+    let mut ctx = WindowCtx::with_localizer(st.root.as_mut(), &mut handle, st.localizer.clone());
+    st.delegate.on_window_event(&event, &mut ctx);
+    st.disp.invalidate(ctx.take_invalidation());
+    let layout = st.disp.take_layout();
+    let redraw = st.disp.take_redraw();
+    let dirty = st.disp.take_dirty();
+    if layout || redraw {
+        st.layout_dirty |= layout;
+        InvalidateRect(hwnd, null(), 0);
+    } else if let Some(rect) = dirty {
+        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
     }
 }
 
@@ -607,10 +674,7 @@ unsafe fn imm_comp_string(hwnd: HWND, gcs: u32) -> Option<String> {
 }
 
 /// 对焦点控件的 Base 执行 f，返回其逻辑矩形（供失效重绘）。
-unsafe fn with_focus_widget(
-    state: *mut AppState,
-    f: impl FnOnce(&mut dyn Widget),
-) -> Option<Rect> {
+unsafe fn with_focus_widget(state: *mut AppState, f: impl FnOnce(&mut dyn Widget)) -> Option<Rect> {
     if state.is_null() {
         return None;
     }
@@ -625,7 +689,9 @@ unsafe fn with_focus_widget(
 /// 设置焦点控件的 IME 组合串并失效其区域。
 unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
     let owned = text.to_string();
-    if let Some(r) = with_focus_widget(state, move |w| { w.set_marked_text(owned); }) {
+    if let Some(r) = with_focus_widget(state, move |w| {
+        w.set_marked_text(owned);
+    }) {
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -633,7 +699,9 @@ unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
 
 /// 清除焦点控件的 IME 组合串并失效其区域。
 unsafe fn clear_marked_on_focus(hwnd: HWND, state: *mut AppState) {
-    if let Some(r) = with_focus_widget(state, |w| { w.clear_marked_text(); }) {
+    if let Some(r) = with_focus_widget(state, |w| {
+        w.clear_marked_text();
+    }) {
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -676,7 +744,6 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
 /// 失效焦点控件被标脏的区域（剪贴板操作后重绘）。
 unsafe fn invalidate_dirty(hwnd: HWND, st: &mut AppState) {
     if let Some(r) = st.disp.take_dirty() {
-        st.layout_dirty = true;
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -728,8 +795,16 @@ unsafe fn fire_drop(hwnd: HWND, state: *mut AppState, paths: Vec<String>) {
     let delegate = &mut st.delegate;
     let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
     delegate.on_drop_files(&paths, &mut ctx);
-    st.layout_dirty = true;
-    InvalidateRect(hwnd, null(), 0);
+    st.disp.invalidate(ctx.take_invalidation());
+    let layout = st.disp.take_layout();
+    let redraw = st.disp.take_redraw();
+    let dirty = st.disp.take_dirty();
+    if layout || redraw {
+        st.layout_dirty |= layout;
+        InvalidateRect(hwnd, null(), 0);
+    } else if let Some(rect) = dirty {
+        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
+    }
 }
 
 /// Ctrl+A：全选。
@@ -869,7 +944,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 0x24 => keys::HOME,
                 0x23 => keys::END,
                 0x2E => keys::DELETE,
-                _ => return DefWindowProcW(hwnd, msg, wparam, lparam), // 其余交系统（保留 WM_CHAR）
+                0x08 => keys::BACKSPACE,
+                0x09 => keys::TAB,
+                0x0D => keys::ENTER,
+                0x1B => keys::ESCAPE,
+                _ => vk,
             };
             let mods = Mods {
                 shift,
@@ -877,7 +956,37 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 ..Default::default()
             };
             dispatch(hwnd, state, Event::KeyDown { key, mods });
-            0
+            if matches!(key, keys::BACKSPACE | keys::TAB | keys::ENTER | keys::ESCAPE
+                | keys::DELETE | keys::LEFT | keys::RIGHT | keys::UP | keys::DOWN
+                | keys::HOME | keys::END) {
+                0
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+        }
+        WM_KEYUP => {
+            let vk = wparam as u32;
+            let key = match vk {
+                0x25 => keys::LEFT,
+                0x27 => keys::RIGHT,
+                0x26 => keys::UP,
+                0x28 => keys::DOWN,
+                0x24 => keys::HOME,
+                0x23 => keys::END,
+                0x2E => keys::DELETE,
+                0x08 => keys::BACKSPACE,
+                0x09 => keys::TAB,
+                0x0D => keys::ENTER,
+                0x1B => keys::ESCAPE,
+                _ => vk,
+            };
+            let mods = Mods {
+                shift: GetKeyState(VK_SHIFT as i32) < 0,
+                ctrl: GetKeyState(VK_CONTROL as i32) < 0,
+                ..Default::default()
+            };
+            dispatch(hwnd, state, Event::KeyUp { key, mods });
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_RBUTTONUP => {
             dispatch(
@@ -997,6 +1106,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if wparam == SIZE_MINIMIZED as usize {
                 if !state.is_null() {
                     (*state).minimized = true;
+                    fire_window_event(hwnd, &mut *state, flexui_core::WindowEvent::Minimized);
                 }
                 // 最小化会携带 0 x 0 客户区，不能用它破坏当前布局。
                 // 丢弃系统在最小化过程中生成的无效区，恢复时直接复用稳定帧。
@@ -1010,18 +1120,34 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 
             let w = (lparam & 0xFFFF) as u16;
             let h = ((lparam >> 16) & 0xFFFF) as u16;
-            let (restored_from_minimized, size_changed, redraw_after_restore) = if state.is_null() {
-                (false, true, false)
-            } else {
-                let st = &mut *state;
-                let restored = st.minimized;
-                st.minimized = false;
-                (
-                    restored,
-                    std::mem::replace(&mut st.client_size, (w, h)) != (w, h),
-                    std::mem::take(&mut st.redraw_after_restore),
-                )
-            };
+            let (restored_from_minimized, size_changed, redraw_after_restore, state_event) =
+                if state.is_null() {
+                    (false, true, false, None)
+                } else {
+                    let st = &mut *state;
+                    let restored = st.minimized;
+                    let was_maximized = st.maximized;
+                    st.minimized = false;
+                    st.maximized = wparam == SIZE_MAXIMIZED as usize;
+                    let state_event = if st.maximized && !was_maximized {
+                        Some(flexui_core::WindowEvent::Maximized)
+                    } else if (restored || was_maximized) && !st.maximized {
+                        Some(flexui_core::WindowEvent::Restored)
+                    } else {
+                        None
+                    };
+                    (
+                        restored,
+                        std::mem::replace(&mut st.client_size, (w, h)) != (w, h),
+                        std::mem::take(&mut st.redraw_after_restore),
+                        state_event,
+                    )
+                };
+            if !state.is_null() {
+                if let Some(event) = state_event {
+                    fire_window_event(hwnd, &mut *state, event);
+                }
+            }
             if !size_changed && !redraw_after_restore {
                 // 同尺寸还原无需产生新帧，DWM 可直接复用最小化前的重定向表面。
                 return 0;
@@ -1034,8 +1160,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     hwnd,
                     state,
                     Event::WindowResized {
-                        width: w as f32,
-                        height: h as f32,
+                        width: w as f32 / window_scale(hwnd),
+                        height: h as f32 / window_scale(hwnd),
                     },
                 );
             }
@@ -1046,31 +1172,50 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_MOVE => {
+            if !state.is_null() {
+                let scale = window_scale(hwnd);
+                let x = (lparam & 0xFFFF) as u16 as i16 as f32 / scale;
+                let y = ((lparam >> 16) & 0xFFFF) as u16 as i16 as f32 / scale;
+                fire_window_event(hwnd, &mut *state, flexui_core::WindowEvent::Moved { x, y });
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         // 定时器：id=1 光标闪烁 + Tooltip 延时；id=2 帧定时器驱动动画。
         WM_TIMER => {
             if !state.is_null() {
                 let st = &mut *state;
                 if wparam == 2 {
                     let locale_changed = refresh_localizations(hwnd, st);
-                    let changed = if st.minimized {
-                        false
-                    } else {
-                        st.disp.tick_anims(st.root.as_mut(), 0.016)
-                    };
+                    if !st.minimized {
+                        st.disp.tick_anims(st.root.as_mut(), 0.016);
+                    }
                     let msgs = st.disp.drain_messages();
+                    let control_events = st.disp.take_control_events();
                     let mut anim_reqs = Vec::new();
                     let mut ov_reqs = Vec::new();
-                    if !msgs.is_empty() {
+                    let mut new_wins = Vec::new();
+                    let mut invalidation = flexui_core::Invalidation::None;
+                    if !msgs.is_empty() || !control_events.is_empty() {
                         let mut handle = WinWindowHandle { hwnd };
                         let mut ctx = WindowCtx::with_proxy_and_localizer(
-                            st.root.as_mut(), &mut handle, st.disp.proxy(), st.localizer.clone(),
+                            st.root.as_mut(),
+                            &mut handle,
+                            st.disp.proxy(),
+                            st.localizer.clone(),
                         );
                         for m in &msgs {
                             st.delegate.on_message(m, &mut ctx);
                         }
+                        for (name, event) in &control_events {
+                            st.delegate.on_control_event(name, event, &mut ctx);
+                        }
                         anim_reqs = ctx.take_anim_requests();
                         ov_reqs = ctx.take_overlay_requests();
+                        new_wins = ctx.take_new_windows();
+                        invalidation = ctx.take_invalidation();
                     }
+                    st.disp.invalidate(invalidation);
                     for r in ov_reqs {
                         open_overlay_request(&mut st.disp, r);
                     }
@@ -1084,19 +1229,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             a.easing,
                         );
                     }
-                    if changed || !msgs.is_empty() || locale_changed {
-                        if st.minimized {
-                            st.redraw_after_restore = true;
-                        } else {
-                            st.layout_dirty = true;
-                            InvalidateRect(hwnd, null(), 0);
-                        }
+                    for w in new_wins {
+                        create_window(w, hwnd);
+                    }
+                    let layout = st.disp.take_layout();
+                    let redraw = st.disp.take_redraw();
+                    let dirty = st.disp.take_dirty();
+                    let full_redraw = locale_changed || redraw || layout;
+                    if st.minimized {
+                        st.layout_dirty |= layout;
+                        st.redraw_after_restore |= full_redraw || dirty.is_some();
+                    } else if full_redraw {
+                        st.layout_dirty |= layout || locale_changed;
+                        InvalidateRect(hwnd, null(), 0);
+                    } else if let Some(rect) = dirty {
+                        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
                     }
                 } else if !st.minimized {
                     let blink = st.disp.blink(st.root.as_mut());
                     st.disp.tooltip_tick(st.root.as_mut());
-                    if st.disp.take_redraw() {
-                        st.layout_dirty = true;
+                    let layout = st.disp.take_layout();
+                    if st.disp.take_redraw() || layout {
+                        st.layout_dirty |= layout;
                         InvalidateRect(hwnd, null(), 0);
                     } else if let Some(r) = blink {
                         let rc = to_physical_rect(hwnd, r);
@@ -1128,15 +1282,29 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 关闭请求 → 窗口委托 on_close；返回 false 阻止关闭。
         WM_CLOSE => {
-            let allow = if state.is_null() {
-                true
-            } else {
+            let allow = if !state.is_null() {
                 let st = &mut *state;
                 let mut handle = WinWindowHandle { hwnd };
                 let root = &mut st.root;
                 let delegate = &mut st.delegate;
-                let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
-                delegate.on_close(&mut ctx)
+                let mut ctx =
+                    WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
+                let allow = delegate.on_close(&mut ctx);
+                st.disp.invalidate(ctx.take_invalidation());
+                if !allow {
+                    let layout = st.disp.take_layout();
+                    let redraw = st.disp.take_redraw();
+                    let dirty = st.disp.take_dirty();
+                    if layout || redraw {
+                        st.layout_dirty |= layout;
+                        InvalidateRect(hwnd, null(), 0);
+                    } else if let Some(rect) = dirty {
+                        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
+                    }
+                }
+                allow
+            } else {
+                true
             };
             if allow {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -1217,7 +1385,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_DESTROY => {
             if !state.is_null() {
                 let owner = (*state).modal_owner;
-                THREAD_WINDOWS.with(|windows| windows.borrow_mut().retain(|window| *window != hwnd));
+                THREAD_WINDOWS
+                    .with(|windows| windows.borrow_mut().retain(|window| *window != hwnd));
                 drop(Box::from_raw(state));
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 if !owner.is_null() && IsWindow(owner) != 0 {
@@ -1245,7 +1414,10 @@ fn point_over_edit(root: &dyn Widget, point: Point) -> bool {
         if node.base().id == id {
             return Some(node.base().role == WidgetRole::Edit && node.base().enabled);
         }
-        node.base().children.iter().find_map(|child| is_enabled_edit(child.as_ref(), id))
+        node.base()
+            .children
+            .iter()
+            .find_map(|child| is_enabled_edit(child.as_ref(), id))
     }
     is_enabled_edit(root, hit) == Some(true)
 }

@@ -6,7 +6,9 @@ use flexui_gfx::Canvas;
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Clickable, TextControl, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{
+    Base, Clickable, TextControl, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole,
+};
 
 use super::paint_indicator_and_text;
 
@@ -20,7 +22,10 @@ impl CheckBox {
     pub fn new(text: impl Into<String>) -> Self {
         let mut base = Base::new(WidgetRole::CheckBox);
         base.text = text.into();
-        Self { base, switch_style: false }
+        Self {
+            base,
+            switch_style: false,
+        }
     }
     pub fn checked(mut self, v: bool) -> Self {
         self.base.selected = v;
@@ -52,7 +57,16 @@ impl Widget for CheckBox {
         }
     }
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
-        if let WidgetProperty::SwitchStyle(v) = property { self.switch_style = v; true } else { false }
+        if let WidgetProperty::SwitchStyle(v) = property {
+            self.switch_style = v;
+            true
+        } else {
+            false
+        }
+    }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        (key == WidgetPropertyKey::SwitchStyle)
+            .then_some(WidgetProperty::SwitchStyle(self.switch_style))
     }
 }
 

@@ -4,8 +4,11 @@
 //! 的控制 API；`WindowCtx` ≈ 传给钩子、可 FindControl + 控制窗口的上下文。
 //! 用户面向的 `WindowImpl`/`Window`/`Skin` 在 facade（flexui）里，本模块是其底座。
 
-use crate::dispatch::EventCtx;
+use crate::dispatch::{EventCtx, Invalidation};
+use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::widget::Widget;
+use crate::widget::{Node, WidgetProperty, WidgetPropertyKey};
+use crate::{ControlEvent, WindowEvent};
 use flexui_geometry::Rect;
 use flexui_i18n::{LocalizedStringResource, Localizer};
 
@@ -170,6 +173,7 @@ pub struct WindowCtx<'a> {
     new_windows: Vec<NewWindow>,
     proxy: Option<crate::dispatch::MainProxy>,
     localizer: Option<Localizer>,
+    invalidation: Invalidation,
 }
 
 impl<'a> WindowCtx<'a> {
@@ -182,6 +186,7 @@ impl<'a> WindowCtx<'a> {
             new_windows: Vec::new(),
             proxy: None,
             localizer: None,
+            invalidation: Invalidation::None,
         }
     }
 
@@ -199,14 +204,18 @@ impl<'a> WindowCtx<'a> {
     /// 在回调里打开一个新窗口（接入共享事件循环）。用 `flexui::build_window(imp)` 构造规格。
     pub fn open_window(&mut self, spec: NewWindow) {
         let mut spec = spec;
-        if spec.localizer.is_none() { spec.localizer = self.localizer.clone(); }
+        if spec.localizer.is_none() {
+            spec.localizer = self.localizer.clone();
+        }
         self.new_windows.push(spec);
     }
 
     /// 打开以当前窗口为 owner 的模态对话框。
     pub fn open_modal(&mut self, mut spec: NewWindow) {
         spec.presentation = WindowPresentation::ModalDialog;
-        if spec.localizer.is_none() { spec.localizer = self.localizer.clone(); }
+        if spec.localizer.is_none() {
+            spec.localizer = self.localizer.clone();
+        }
         self.new_windows.push(spec);
     }
 
@@ -239,43 +248,55 @@ impl<'a> WindowCtx<'a> {
 
     /// 运行时切换 BCP 47 语言；所有共享该环境的窗口会同步刷新。
     pub fn set_locale(&mut self, locale: &str) -> Result<(), flexui_i18n::I18nError> {
-        self.localizer.as_ref().ok_or_else(|| flexui_i18n::I18nError::Format("窗口未配置本地化环境".into()))?.set_locale(locale)?;
+        self.localizer
+            .as_ref()
+            .ok_or_else(|| flexui_i18n::I18nError::Format("窗口未配置本地化环境".into()))?
+            .set_locale(locale)?;
         self.win.environment_changed();
         Ok(())
     }
 
     /// 恢复跟随操作系统语言。
     pub fn set_system_locale(&mut self) -> Result<(), flexui_i18n::I18nError> {
-        let localizer = self.localizer.as_ref()
+        let localizer = self
+            .localizer
+            .as_ref()
             .ok_or_else(|| flexui_i18n::I18nError::Format("窗口未配置本地化环境".into()))?;
         localizer.set_system_locale();
         self.win.environment_changed();
         Ok(())
     }
 
-    pub fn locale(&self) -> Option<String> { self.localizer.as_ref().map(Localizer::locale) }
+    pub fn locale(&self) -> Option<String> {
+        self.localizer.as_ref().map(Localizer::locale)
+    }
 
     /// 使用当前窗口的环境解析本地化资源，适合动态状态文案。
     pub fn localized_text(&self, resource: impl Into<LocalizedStringResource>) -> String {
         let resource = resource.into();
-        self.localizer.as_ref()
+        self.localizer
+            .as_ref()
             .map(|localizer| localizer.text(resource.clone()))
-            .unwrap_or_else(|| resource.default_value.unwrap_or_else(|| resource.key.as_str().to_owned()))
+            .unwrap_or_else(|| {
+                resource
+                    .default_value
+                    .unwrap_or_else(|| resource.key.as_str().to_owned())
+            })
     }
 
     /// 设置控件文本并保留本地化绑定，后续切换语言时会继续刷新。
-    pub fn set_localized_text(
-        &mut self,
-        name: &str,
-        resource: impl Into<LocalizedStringResource>,
-    ) {
+    pub fn set_localized_text(&mut self, name: &str, resource: impl Into<LocalizedStringResource>) {
         let resource = resource.into();
         let text = self.localized_text(resource.clone());
         self.with(name, move |widget| {
-            widget.base_mut().localizations.retain(|binding| {
-                !matches!(binding, crate::LocalizationBinding::Text(_))
-            });
-            widget.base_mut().localizations.push(crate::LocalizationBinding::Text(resource));
+            widget
+                .base_mut()
+                .localizations
+                .retain(|binding| !matches!(binding, crate::LocalizationBinding::Text(_)));
+            widget
+                .base_mut()
+                .localizations
+                .push(crate::LocalizationBinding::Text(resource));
             widget.set_text_value(text);
         });
     }
@@ -357,21 +378,110 @@ impl<'a> WindowCtx<'a> {
         std::mem::take(&mut self.anim_requests)
     }
 
+    /// 后端取走本轮属性修改产生的刷新请求。
+    pub fn take_invalidation(&mut self) -> Invalidation {
+        std::mem::take(&mut self.invalidation)
+    }
+
+    fn event_ctx<R>(&mut self, f: impl FnOnce(&mut EventCtx) -> R) -> R {
+        let mut ctx = EventCtx::new(self.root);
+        let result = f(&mut ctx);
+        self.invalidation = self.invalidation.merge(ctx.take_invalidation());
+        result
+    }
+
     // —— 控件访问（复用 EventCtx 能力）——
     pub fn set_text(&mut self, name: &str, text: impl Into<String>) {
-        EventCtx::new(self.root).set_text(name, text);
+        self.event_ctx(|ctx| ctx.set_text(name, text));
+    }
+    pub fn text(&mut self, name: &str) -> Option<String> {
+        self.event_ctx(|ctx| ctx.text(name))
     }
     pub fn is_selected(&mut self, name: &str) -> Option<bool> {
-        EventCtx::new(self.root).is_selected(name)
+        self.event_ctx(|ctx| ctx.is_selected(name))
+    }
+    pub fn set_selected(&mut self, name: &str, selected: bool) -> bool {
+        self.event_ctx(|ctx| ctx.set_selected(name, selected))
+    }
+    pub fn selected_index(&mut self, name: &str) -> Option<usize> {
+        self.event_ctx(|ctx| ctx.selected_index(name))
+    }
+    pub fn set_selected_index(&mut self, name: &str, index: usize) -> bool {
+        self.event_ctx(|ctx| ctx.set_selected_index(name, index))
+    }
+    pub fn value(&mut self, name: &str) -> Option<f32> {
+        self.event_ctx(|ctx| ctx.value(name))
+    }
+    pub fn set_value(&mut self, name: &str, value: f32) -> bool {
+        self.event_ctx(|ctx| ctx.set_value(name, value))
+    }
+    pub fn scroll_position(&mut self, name: &str) -> Option<f32> {
+        self.event_ctx(|ctx| ctx.scroll_position(name))
+    }
+    pub fn is_enabled(&mut self, name: &str) -> Option<bool> {
+        self.event_ctx(|ctx| ctx.is_enabled(name))
     }
     pub fn set_enabled(&mut self, name: &str, enabled: bool) {
-        EventCtx::new(self.root).set_enabled(name, enabled);
+        self.event_ctx(|ctx| ctx.set_enabled(name, enabled));
+    }
+    pub fn is_visible(&mut self, name: &str) -> Option<bool> {
+        self.event_ctx(|ctx| ctx.is_visible(name))
     }
     pub fn set_visible(&mut self, name: &str, visible: bool) {
-        EventCtx::new(self.root).set_visible(name, visible);
+        self.event_ctx(|ctx| ctx.set_visible(name, visible));
+    }
+    pub fn set_property(&mut self, name: &str, property: WidgetProperty) -> bool {
+        self.event_ctx(|ctx| ctx.set_property(name, property))
+    }
+    pub fn property(&mut self, name: &str, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        self.event_ctx(|ctx| ctx.property(name, key))
+    }
+    pub fn add_child(&mut self, name: &str, child: Node) -> bool {
+        self.event_ctx(|ctx| ctx.add_child(name, child))
+    }
+    pub fn remove_child(&mut self, name: &str, index: usize) -> Option<Node> {
+        self.event_ctx(|ctx| ctx.remove_child(name, index))
+    }
+    pub fn replace_child(&mut self, name: &str, index: usize, child: Node) -> Option<Node> {
+        self.event_ctx(|ctx| ctx.replace_child(name, index, child))
+    }
+    pub fn clear_children(&mut self, name: &str) -> Option<Vec<Node>> {
+        self.event_ctx(|ctx| ctx.clear_children(name))
     }
     pub fn with<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
-        EventCtx::new(self.root).with(name, f)
+        self.event_ctx(|ctx| ctx.with(name, f))
+    }
+    pub fn get<R>(&mut self, name: &str, f: impl FnOnce(&dyn Widget) -> R) -> Option<R> {
+        self.event_ctx(|ctx| ctx.get(name, f))
+    }
+    pub fn with_paint<R>(&mut self, name: &str, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
+        self.event_ctx(|ctx| ctx.with_paint(name, f))
+    }
+    pub fn request_paint(&mut self, name: &str) -> bool {
+        self.event_ctx(|ctx| ctx.request_paint(name))
+    }
+    pub fn request_redraw(&mut self) {
+        self.event_ctx(|ctx| ctx.request_redraw());
+    }
+    pub fn request_layout(&mut self) {
+        self.event_ctx(|ctx| ctx.request_layout());
+    }
+    pub fn play_frame_animation(
+        &mut self,
+        name: &str,
+        layer: FrameLayer,
+        animation: FrameAnimation,
+    ) -> bool {
+        self.event_ctx(|ctx| ctx.play_frame_animation(name, layer, animation))
+    }
+    pub fn pause_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
+        self.event_ctx(|ctx| ctx.pause_frame_animation(name, layer))
+    }
+    pub fn resume_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
+        self.event_ctx(|ctx| ctx.resume_frame_animation(name, layer))
+    }
+    pub fn stop_frame_animation(&mut self, name: &str, layer: FrameLayer) -> bool {
+        self.event_ctx(|ctx| ctx.stop_frame_animation(name, layer))
     }
 
     // —— 窗口控制 ——
@@ -399,6 +509,10 @@ pub trait WindowDelegate {
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
     /// 某个具名控件被点击（≈ Notify 的 click）。
     fn on_activate(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
+    /// 具名控件的 hover、focus、文本、选择和值等语义变化。
+    fn on_control_event(&mut self, _name: &str, _event: &ControlEvent, _ctx: &mut WindowCtx) {}
+    /// 窗口焦点、尺寸、DPI、键盘及窗口状态等统一事件。
+    fn on_window_event(&mut self, _event: &WindowEvent, _ctx: &mut WindowCtx) {}
     /// 某个具名控件被双击。
     fn on_double_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
     /// 某个具名控件被右键（供上下文菜单），坐标为逻辑像素。

@@ -7,14 +7,14 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use flexui_geometry::{Insets, Rect, Size};
-use flexui_gfx::{Canvas, Font};
+use flexui_gfx::{Canvas, Font, ImageSource};
 
 use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow};
 use crate::frame_animation::{FrameAnimation, FramePlayer};
+use crate::localization::LocalizationBinding;
 use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
-use crate::localization::LocalizationBinding;
 
 /// 控件唯一 id。
 pub type WidgetId = u64;
@@ -60,8 +60,72 @@ pub enum WidgetRole {
     ListView,
 }
 
-/// XML/构建器写入控件专属配置的类型安全入口。
+/// 控件专属属性名，用于运行时读取 XML 对应属性。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetPropertyKey {
+    Text,
+    Tooltip,
+    Font,
+    Style,
+    Width,
+    Height,
+    Padding,
+    Margin,
+    Spacing,
+    Flex,
+    Position,
+    Justify,
+    Align,
+    Enabled,
+    Visible,
+    Focusable,
+    FocusWithin,
+    HitPolicy,
+    Placeholder,
+    PlaceholderStyle,
+    Multiline,
+    ReadOnly,
+    NumberOnly,
+    Password,
+    PasswordChar,
+    MaxChars,
+    AutoSelectAll,
+    SwitchStyle,
+    IndicatorVisible,
+    Group,
+    TabIndex,
+    Selected,
+    SelectedIndex,
+    Value,
+    Items,
+    ImageSource,
+    RowHeight,
+    Vertical,
+    Thickness,
+    BindGroup,
+}
+
+/// XML/构建器及运行时写入控件专属配置的类型安全入口。
+#[derive(Clone)]
 pub enum WidgetProperty {
+    Text(String),
+    Tooltip(Option<String>),
+    Font(Font),
+    Style(StyleSet),
+    Width(Sizing),
+    Height(Sizing),
+    Padding(Insets),
+    Margin(Insets),
+    Spacing(f32),
+    Flex(f32),
+    Position(Option<(f32, f32)>),
+    Justify(Justify),
+    Align(Align),
+    Enabled(bool),
+    Visible(bool),
+    Focusable(bool),
+    FocusWithin(bool),
+    HitPolicy(HitPolicy),
     Placeholder(String),
     PlaceholderStyle(PlaceholderStyleSet),
     Multiline(bool),
@@ -75,9 +139,15 @@ pub enum WidgetProperty {
     IndicatorVisible(bool),
     Group(Option<u32>),
     TabIndex(Option<usize>),
+    Selected(bool),
     SelectedIndex(usize),
     Value(f32),
     Items(Vec<String>),
+    ImageSource(ImageSource),
+    RowHeight(f32),
+    Vertical(bool),
+    Thickness(f32),
+    BindGroup(Option<u32>),
 }
 
 /// 平台文本输入协议需要的只读快照。
@@ -154,6 +224,7 @@ pub struct Base {
 
     // —— 回调（点击时触发，参数为事件上下文，可按 name 访问整棵控件树）——
     pub on_click: Option<crate::dispatch::ClickHandler>,
+    pub on_control_event: Option<crate::dispatch::ControlEventHandler>,
 }
 
 impl Base {
@@ -202,6 +273,7 @@ impl Base {
             pos: None,
             children: Vec::new(),
             on_click: None,
+            on_control_event: None,
         }
     }
 
@@ -227,7 +299,6 @@ impl Base {
     pub fn resolved_style(&self) -> StyleSpec {
         self.style.resolve(self.visual_state())
     }
-
 }
 
 /// 所有控件实现的接口。默认实现覆盖「单子/叠放」布局与空内容，
@@ -250,7 +321,9 @@ pub trait Widget {
     fn paint_content(&self, _cv: &mut dyn Canvas, _style: &StyleSpec) {}
 
     /// 子控件绘制与命中的可见区域；滚动容器覆写为去除 padding 后的视口。
-    fn children_viewport(&self) -> Rect { self.base().rect }
+    fn children_viewport(&self) -> Rect {
+        self.base().rect
+    }
 
     /// 子控件绘制完成后的前景层；滚动条等需要覆盖在内容之上的元素使用。
     fn paint_foreground(&self, _cv: &mut dyn Canvas, _style: &StyleSpec) {}
@@ -261,7 +334,14 @@ pub trait Widget {
     }
 
     /// 应用控件专属配置；不支持该属性时返回 false。
-    fn apply_property(&mut self, _property: WidgetProperty) -> bool { false }
+    fn apply_property(&mut self, _property: WidgetProperty) -> bool {
+        false
+    }
+
+    /// 读取控件专属配置；返回值使用与写入相同的类型。
+    fn property(&self, _key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        None
+    }
 
     /// 获得焦点后的控件专属行为。
     fn focus_gained(&mut self) {}
@@ -283,28 +363,59 @@ pub trait Widget {
     fn select_all(&mut self) {}
 
     /// 统一设置文本，Edit 可覆写以同步内部编辑状态。
-    fn set_text_value(&mut self, text: String) { self.base_mut().text = text; }
+    fn set_text_value(&mut self, text: String) {
+        self.base_mut().text = text;
+    }
 
     /// 排版后的文本插入点，供平台输入法定位候选窗口。
-    fn text_input_rect(&self) -> Option<Rect> { None }
+    fn text_input_rect(&self) -> Option<Rect> {
+        None
+    }
 
     /// 平台文本输入协议快照与组合串写入。
-    fn text_input_state(&self) -> Option<TextInputState> { None }
-    fn set_marked_text(&mut self, _text: String) -> bool { false }
-    fn clear_marked_text(&mut self) -> bool { false }
+    fn text_input_state(&self) -> Option<TextInputState> {
+        None
+    }
+    fn set_marked_text(&mut self, _text: String) -> bool {
+        false
+    }
+    fn clear_marked_text(&mut self) -> bool {
+        false
+    }
 
     /// 控件专属选择/分组能力。
-    fn selection_group(&self) -> Option<u32> { None }
-    fn tab_index(&self) -> Option<usize> { None }
-    fn selected_index(&self) -> Option<usize> { None }
-    fn set_selected_index(&mut self, _index: usize) -> bool { false }
+    fn selection_group(&self) -> Option<u32> {
+        None
+    }
+    fn tab_index(&self) -> Option<usize> {
+        None
+    }
+    fn tab_bind_group(&self) -> Option<u32> {
+        None
+    }
+    fn selected_index(&self) -> Option<usize> {
+        None
+    }
+    fn set_selected_index(&mut self, _index: usize) -> bool {
+        false
+    }
 
     /// 滚动与动画能力。
-    fn is_scrollable(&self) -> bool { false }
-    fn scroll_by(&mut self, _dy: f32) -> bool { false }
-    fn scroll_position(&self) -> Option<f32> { None }
-    fn animation_value(&self, _prop: AnimProp) -> Option<f32> { None }
-    fn set_animation_value(&mut self, _prop: AnimProp, _value: f32) -> bool { false }
+    fn is_scrollable(&self) -> bool {
+        false
+    }
+    fn scroll_by(&mut self, _dy: f32) -> bool {
+        false
+    }
+    fn scroll_position(&self) -> Option<f32> {
+        None
+    }
+    fn animation_value(&self, _prop: AnimProp) -> Option<f32> {
+        None
+    }
+    fn set_animation_value(&mut self, _prop: AnimProp, _value: f32) -> bool {
+        false
+    }
 
     // —— 下拉/菜单钩子（供分发器打开选项菜单，ComboBox 覆写）——
     /// 该控件点击时要弹出的菜单项文本；返回 None 表示不弹菜单。
@@ -371,6 +482,19 @@ pub fn find_by_name(node: &dyn Widget, name: &str) -> Option<WidgetId> {
     for child in node.base().children.iter() {
         if let Some(id) = find_by_name(child.as_ref(), name) {
             return Some(id);
+        }
+    }
+    None
+}
+
+/// 按 id 查找控件并返回只读引用。
+pub fn find_by_id(node: &dyn Widget, id: WidgetId) -> Option<&dyn Widget> {
+    if node.base().id == id {
+        return Some(node);
+    }
+    for child in node.base().children.iter() {
+        if let Some(found) = find_by_id(child.as_ref(), id) {
+            return Some(found);
         }
     }
     None

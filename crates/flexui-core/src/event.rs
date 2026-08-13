@@ -3,6 +3,7 @@
 //! 各平台后端把原生事件（NSEvent / WndProc 消息）翻译成这里的 `Event`，
 //! 再交给 `Dispatcher` 做命中测试与分发。坐标一律为「逻辑像素、左上原点」。
 
+use crate::frame_animation::FrameLayer;
 use flexui_geometry::Point;
 
 /// 鼠标按键。
@@ -74,4 +75,56 @@ pub enum EventFlow {
     Consumed,
     /// 未消费，继续向下/兄弟传播。
     Ignored,
+}
+
+/// 用户交互产生的控件语义事件。代码主动 setter 不重复发送 change 事件。
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlEvent {
+    HoverChanged(bool),
+    PressedChanged(bool),
+    FocusChanged(bool),
+    TextChanged(String),
+    SelectedChanged(bool),
+    SelectionChanged(Option<usize>),
+    ValueChanged(f32),
+    ScrollChanged(f32),
+    FrameAnimationFinished(FrameLayer),
+}
+
+/// 普通使用者可监听的窗口语义事件。
+#[derive(Debug, Clone, PartialEq)]
+pub enum WindowEvent {
+    Resized { width: f32, height: f32 },
+    Moved { x: f32, y: f32 },
+    FocusChanged(bool),
+    ScaleChanged(f32),
+    Minimized,
+    Maximized,
+    Restored,
+    KeyDown { key: u32, mods: Mods },
+    KeyUp { key: u32, mods: Mods },
+    CharInput(char),
+}
+
+impl WindowEvent {
+    pub fn from_event(event: &Event) -> Option<Self> {
+        match event {
+            Event::WindowResized { width, height } => Some(Self::Resized {
+                width: *width,
+                height: *height,
+            }),
+            Event::WindowFocusChanged { focused } => Some(Self::FocusChanged(*focused)),
+            Event::ScaleChanged { scale } => Some(Self::ScaleChanged(*scale)),
+            Event::KeyDown { key, mods } => Some(Self::KeyDown {
+                key: *key,
+                mods: *mods,
+            }),
+            Event::KeyUp { key, mods } => Some(Self::KeyUp {
+                key: *key,
+                mods: *mods,
+            }),
+            Event::Char { ch } => Some(Self::CharInput(*ch)),
+            _ => None,
+        }
+    }
 }

@@ -5,12 +5,13 @@ use flexui_gfx::Canvas;
 
 use crate::common_builders;
 use crate::layout;
-use crate::widget::{Base, Container, Node, Widget, WidgetProperty, WidgetRole};
+use crate::widget::{Base, Container, Node, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 多页容器：仅显示 `selected_index` 指向的那一页，配合 Radio 组成 tabbar。
 pub struct TabBox {
     base: Base,
     selected_index: usize,
+    bind_group: Option<u32>,
 }
 
 impl TabBox {
@@ -18,6 +19,7 @@ impl TabBox {
         Self {
             base: Base::new(WidgetRole::TabBox),
             selected_index: 0,
+            bind_group: None,
         }
     }
     /// 追加一页。
@@ -32,6 +34,11 @@ impl TabBox {
     /// 初始选中页。
     pub fn selected(mut self, i: usize) -> Self {
         self.selected_index = i;
+        self
+    }
+    /// 绑定 Radio 组，点击该组 Radio 时按 tab_index 切换页面。
+    pub fn bind_group(mut self, group: u32) -> Self {
+        self.bind_group = Some(group);
         self
     }
 }
@@ -79,12 +86,35 @@ impl Widget for TabBox {
         }
     }
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
-        if let WidgetProperty::SelectedIndex(i) = property { self.selected_index = i; true } else { false }
+        match property {
+            WidgetProperty::SelectedIndex(i) => self.set_selected_index(i),
+            WidgetProperty::BindGroup(group) => {
+                self.bind_group = group;
+                true
+            }
+            _ => false,
+        }
     }
-    fn selected_index(&self) -> Option<usize> { Some(self.selected_index) }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        match key {
+            WidgetPropertyKey::SelectedIndex => {
+                Some(WidgetProperty::SelectedIndex(self.selected_index))
+            }
+            WidgetPropertyKey::BindGroup => Some(WidgetProperty::BindGroup(self.bind_group)),
+            _ => None,
+        }
+    }
+    fn selected_index(&self) -> Option<usize> {
+        Some(self.selected_index)
+    }
+    fn tab_bind_group(&self) -> Option<u32> {
+        self.bind_group
+    }
     fn set_selected_index(&mut self, index: usize) -> bool {
-        self.selected_index = index.min(self.base.children.len().saturating_sub(1));
-        true
+        let index = index.min(self.base.children.len().saturating_sub(1));
+        let changed = self.selected_index != index;
+        self.selected_index = index;
+        changed
     }
 }
 

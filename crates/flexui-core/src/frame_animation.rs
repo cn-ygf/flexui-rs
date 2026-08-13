@@ -108,6 +108,7 @@ pub(crate) struct FramePlayer {
     frame: usize,
     finished: bool,
     paused: bool,
+    just_finished: bool,
 }
 
 impl FramePlayer {
@@ -132,6 +133,7 @@ impl FramePlayer {
         self.elapsed = 0.0;
         self.frame = 0;
         self.finished = false;
+        self.just_finished = false;
     }
 
     pub(crate) fn pause(&mut self) -> bool {
@@ -159,11 +161,13 @@ impl FramePlayer {
         self.frame = 0;
         self.finished = false;
         self.paused = false;
+        self.just_finished = false;
         changed
     }
 
     /// 推进时间并返回可见帧是否变化。按总时间选帧，卡顿后会自动跳帧。
     pub(crate) fn tick(&mut self, dt: f32) -> bool {
+        self.just_finished = false;
         let Some(animation) = self.animation.as_ref() else {
             return false;
         };
@@ -187,6 +191,7 @@ impl FramePlayer {
             FramePlayback::Once => {
                 let absolute = (self.elapsed * valid_fps(animation.fps)).floor() as usize;
                 if absolute >= animation.frames.len() {
+                    self.just_finished = !self.finished;
                     self.finished = true;
                     self.frame = animation.frames.len() - 1;
                 } else {
@@ -195,6 +200,10 @@ impl FramePlayer {
             }
         }
         old != self.visible_frame()
+    }
+
+    pub(crate) fn take_finished(&mut self) -> bool {
+        std::mem::take(&mut self.just_finished)
     }
 
     pub(crate) fn image(&self) -> Option<&ImageSource> {

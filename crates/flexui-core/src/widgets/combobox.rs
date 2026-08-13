@@ -10,8 +10,7 @@ use crate::common_builders;
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
-use crate::widget::{Base, Widget, WidgetRole};
-use crate::widget::WidgetProperty;
+use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 下拉选择框：显示当前项 + 右侧 ▼，点击弹出选项菜单。
 pub struct ComboBox {
@@ -92,7 +91,15 @@ impl Widget for ComboBox {
             (content.size.width - arrow_w - text_left).max(0.0),
             content.size.height,
         );
-        draw_aligned_text(cv, &self.base.text, text_rect, &self.base.font, color, TextAlign::Left, true);
+        draw_aligned_text(
+            cv,
+            &self.base.text,
+            text_rect,
+            &self.base.font,
+            color,
+            TextAlign::Left,
+            true,
+        );
         // 右侧下拉箭头 ▼（用三角形填充）。
         let cx = content.right() - arrow_w / 2.0;
         let cy = content.top() + content.size.height / 2.0;
@@ -114,16 +121,37 @@ impl Widget for ComboBox {
     fn set_selected_item(&mut self, i: usize) {
         self.apply_selection(i);
     }
-    fn selected_index(&self) -> Option<usize> { Some(self.selected_index) }
-    fn set_selected_index(&mut self, index: usize) -> bool { self.apply_selection(index) }
+    fn selected_index(&self) -> Option<usize> {
+        Some(self.selected_index)
+    }
+    fn set_selected_index(&mut self, index: usize) -> bool {
+        self.apply_selection(index)
+    }
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
-        if let WidgetProperty::Items(items) = property {
-            self.options = items;
-            self.selected_index = self.selected_index.min(self.options.len().saturating_sub(1));
-            self.base.text = self.options.get(self.selected_index).cloned().unwrap_or_default();
-            true
-        } else {
-            false
+        match property {
+            WidgetProperty::Items(items) => {
+                self.options = items;
+                self.selected_index = self
+                    .selected_index
+                    .min(self.options.len().saturating_sub(1));
+                self.base.text = self
+                    .options
+                    .get(self.selected_index)
+                    .cloned()
+                    .unwrap_or_default();
+                true
+            }
+            WidgetProperty::SelectedIndex(index) => self.set_selected_index(index),
+            _ => false,
+        }
+    }
+    fn property(&self, key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        match key {
+            WidgetPropertyKey::Items => Some(WidgetProperty::Items(self.options.clone())),
+            WidgetPropertyKey::SelectedIndex => {
+                Some(WidgetProperty::SelectedIndex(self.selected_index))
+            }
+            _ => None,
         }
     }
 }
@@ -137,21 +165,33 @@ mod tests {
     use flexui_gfx::Font;
     use std::cell::RefCell;
 
-    struct TextOriginCanvas { origin: RefCell<Option<Point>> }
+    struct TextOriginCanvas {
+        origin: RefCell<Option<Point>>,
+    }
     impl Canvas for TextOriginCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
         fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
-        fn draw_text(&mut self, _t: &str, origin: Point, _f: &Font, _c: Color) { *self.origin.borrow_mut() = Some(origin); }
-        fn measure_text(&self, text: &str, font: &Font) -> Size { Size::new(text.chars().count() as f32 * font.size * 0.6, font.size * 1.2) }
+        fn draw_text(&mut self, _t: &str, origin: Point, _f: &Font, _c: Color) {
+            *self.origin.borrow_mut() = Some(origin);
+        }
+        fn measure_text(&self, text: &str, font: &Font) -> Size {
+            Size::new(
+                text.chars().count() as f32 * font.size * 0.6,
+                font.size * 1.2,
+            )
+        }
     }
 
     #[test]
     fn combobox_选项与选择() {
         let mut c = ComboBox::new().options(["A", "B", "C"]);
         assert_eq!(c.base().text, "A", "默认回填首项");
-        assert_eq!(c.menu_items(), Some(vec!["A".to_string(), "B".to_string(), "C".to_string()]));
+        assert_eq!(
+            c.menu_items(),
+            Some(vec!["A".to_string(), "B".to_string(), "C".to_string()])
+        );
         c.set_selected_item(2);
         assert_eq!(c.base().text, "C");
         assert_eq!(c.index(), 2);
@@ -169,7 +209,9 @@ mod tests {
     #[test]
     fn combobox_text_keeps_left_inset() {
         let mut combo = ComboBox::new().options(["简体中文"]);
-        let mut cv = TextOriginCanvas { origin: RefCell::new(None) };
+        let mut cv = TextOriginCanvas {
+            origin: RefCell::new(None),
+        };
         combo.base_mut().rect = Rect::new(20.0, 0.0, 150.0, 36.0);
         combo.paint_content(&mut cv, &StyleSpec::default());
         assert_eq!(cv.origin.borrow().unwrap().x, 30.0);

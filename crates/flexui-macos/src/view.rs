@@ -22,9 +22,9 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    apply_localizations, find_mut_by_id, layout_node, paint_tree, Dispatcher, Event, Mods, MouseButton, NewWindow,
-    Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate, WindowDragRegion,
-    WindowHandle,
+    apply_localizations, find_mut_by_id, layout_node, paint_tree, Dispatcher, Event, Mods,
+    MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate,
+    WindowDragRegion, WindowHandle,
 };
 
 use crate::canvas::{CgCanvas, ImageCache, SharedImageCache};
@@ -53,6 +53,37 @@ fn to_nsrect(r: Rect) -> NSRect {
         NSPoint::new(r.origin.x as f64, r.origin.y as f64),
         NSSize::new(r.size.width as f64, r.size.height as f64),
     )
+}
+
+fn event_mods(event: &NSEvent) -> Mods {
+    let flags = event.modifierFlags();
+    Mods {
+        shift: flags.contains(NSEventModifierFlags::Shift),
+        ctrl: flags.contains(NSEventModifierFlags::Control),
+        alt: flags.contains(NSEventModifierFlags::Option),
+        meta: flags.contains(NSEventModifierFlags::Command),
+    }
+}
+
+fn mac_event_key(event: &NSEvent) -> u32 {
+    match event.keyCode() {
+        123 => keys::LEFT,
+        124 => keys::RIGHT,
+        125 => keys::DOWN,
+        126 => keys::UP,
+        115 => keys::HOME,
+        119 => keys::END,
+        117 => keys::DELETE,
+        51 => keys::BACKSPACE,
+        48 => keys::TAB,
+        36 | 76 => keys::ENTER,
+        53 => keys::ESCAPE,
+        key_code => event
+            .charactersIgnoringModifiers()
+            .and_then(|value| value.to_string().chars().next())
+            .map(|ch| ch as u32)
+            .unwrap_or(key_code as u32),
+    }
 }
 
 /// core 使用 Unicode scalar 索引，AppKit 的 NSRange 使用 UTF-16 code unit。
@@ -233,12 +264,22 @@ define_class!(
                     }
                 }
             }
+            if let Some(value) = event.charactersIgnoringModifiers() {
+                if let Some(ch) = value.to_string().chars().next().filter(|ch| !ch.is_control()) {
+                    self.dispatch(Event::KeyDown { key: ch as u32, mods: event_mods(event) });
+                }
+            }
             // 交给文本输入系统解释：IME 组合/提交经 NSTextInputClient 回调（insertText/
             // setMarkedText/doCommandBySelector），普通键与功能键同样在其中翻译。
             let arr = NSArray::from_slice(&[event]);
             self.interpretKeyEvents(&arr);
-            // 另把首字符键码抛给窗口委托 on_key（与旧行为一致）。
-            self.fire_on_key(event);
+        }
+
+        #[unsafe(method(keyUp:))]
+        fn key_up(&self, event: &NSEvent) {
+            let mods = event_mods(event);
+            let key = mac_event_key(event);
+            self.dispatch(Event::KeyUp { key, mods });
         }
 
         // 光标闪烁定时器回调。
@@ -312,6 +353,51 @@ define_class!(
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &objc2_foundation::NSNotification) {
             self.dispatch(Event::WindowFocusChanged { focused: false });
+        }
+
+        #[unsafe(method(windowDidBecomeKey:))]
+        fn window_did_become_key(&self, _notification: &objc2_foundation::NSNotification) {
+            self.dispatch(Event::WindowFocusChanged { focused: true });
+        }
+
+        #[unsafe(method(windowDidResize:))]
+        fn window_did_resize(&self, _notification: &objc2_foundation::NSNotification) {
+            let bounds = self.bounds();
+            self.dispatch(Event::WindowResized {
+                width: bounds.size.width as f32,
+                height: bounds.size.height as f32,
+            });
+        }
+
+        #[unsafe(method(windowDidMove:))]
+        fn window_did_move(&self, _notification: &objc2_foundation::NSNotification) {
+            if let Some(window) = self.window() {
+                let origin = window.frame().origin;
+                self.fire_window_event(flexui_core::WindowEvent::Moved {
+                    x: origin.x as f32,
+                    y: origin.y as f32,
+                });
+            }
+        }
+
+        #[unsafe(method(windowDidMiniaturize:))]
+        fn window_did_miniaturize(&self, _notification: &objc2_foundation::NSNotification) {
+            self.fire_window_event(flexui_core::WindowEvent::Minimized);
+        }
+
+        #[unsafe(method(windowDidDeminiaturize:))]
+        fn window_did_deminiaturize(&self, _notification: &objc2_foundation::NSNotification) {
+            self.fire_window_event(flexui_core::WindowEvent::Restored);
+        }
+
+        #[unsafe(method(windowDidEnterFullScreen:))]
+        fn window_did_enter_full_screen(&self, _notification: &objc2_foundation::NSNotification) {
+            self.fire_window_event(flexui_core::WindowEvent::Maximized);
+        }
+
+        #[unsafe(method(windowDidExitFullScreen:))]
+        fn window_did_exit_full_screen(&self, _notification: &objc2_foundation::NSNotification) {
+            self.fire_window_event(flexui_core::WindowEvent::Restored);
         }
     }
 
@@ -534,6 +620,33 @@ fn command_to_key(name: &[u8]) -> Option<(u32, bool)> {
 }
 
 impl FlexView {
+    fn fire_window_event(&self, event: flexui_core::WindowEvent) {
+        let window = self.window();
+        let mut st = self.ivars().state.borrow_mut();
+        let localizer = st.localizer.clone();
+        let AppState {
+            root,
+            disp,
+            delegate,
+            ..
+        } = &mut *st;
+        if let Some(window) = window.as_ref() {
+            let mut handle = MacWindowHandle::new(window.clone());
+            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
+            delegate.on_window_event(&event, &mut ctx);
+            disp.invalidate(ctx.take_invalidation());
+        }
+        let redraw = disp.take_redraw();
+        let layout = disp.take_layout();
+        let dirty = disp.take_dirty();
+        drop(st);
+        if redraw || layout {
+            self.setNeedsDisplay(true);
+        } else if let Some(rect) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(rect));
+        }
+    }
+
     /// 将窗口级环境归组，避免构造器随环境字段增加而持续膨胀。
     pub fn new(
         mtm: MainThreadMarker,
@@ -567,12 +680,25 @@ impl FlexView {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
-        let AppState { root, delegate, .. } = &mut *st;
+        let AppState { root, disp, delegate, .. } = &mut *st;
         if let Some(win) = window {
             let mut handle = MacWindowHandle::new(win);
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             let allow = delegate.on_close(&mut ctx);
-            (allow, handle.take_close_request())
+            disp.invalidate(ctx.take_invalidation());
+            let close_requested = handle.take_close_request();
+            if !allow {
+                let redraw = disp.take_redraw();
+                let layout = disp.take_layout();
+                let dirty = disp.take_dirty();
+                drop(st);
+                if redraw || layout {
+                    self.setNeedsDisplay(true);
+                } else if let Some(rect) = dirty {
+                    self.setNeedsDisplayInRect(to_nsrect(rect));
+                }
+            }
+            (allow, close_requested)
         } else {
             (true, false)
         }
@@ -590,12 +716,16 @@ impl FlexView {
             ..
         } = &mut *st;
         let mut ctx = WindowCtx::with_proxy_and_localizer(
-            root.as_mut(), &mut handle, disp.proxy(), localizer,
+            root.as_mut(),
+            &mut handle,
+            disp.proxy(),
+            localizer,
         );
         delegate.on_init(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
         let new_wins = ctx.take_new_windows();
+        disp.invalidate(ctx.take_invalidation());
         let close_requested = handle.take_close_request();
         for r in overlays {
             open_overlay_request(disp, r);
@@ -681,19 +811,27 @@ impl FlexView {
         let mut close_requested = false;
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
-        let AppState { root, delegate, .. } = &mut *st;
+        let AppState { root, disp, delegate, .. } = &mut *st;
         if let Some(win) = window.as_ref() {
             let mut handle = MacWindowHandle::new(win.clone());
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
             delegate.on_drop_files(&paths, &mut ctx);
+            disp.invalidate(ctx.take_invalidation());
             close_requested = handle.take_close_request();
         }
+        let redraw = disp.take_redraw();
+        let layout = disp.take_layout();
+        let dirty = disp.take_dirty();
         drop(st);
         if close_requested {
             self.request_close(window.as_ref().unwrap());
             return;
         }
-        self.setNeedsDisplay(true);
+        if redraw || layout {
+            self.setNeedsDisplay(true);
+        } else if let Some(rect) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(rect));
+        }
     }
 
     /// 帧定时回调：推进动画、派发后台线程消息，并按需重绘。
@@ -701,9 +839,10 @@ impl FlexView {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let localizer_for_ctx = st.localizer.clone();
-        let locale_changed = st.localizer.as_ref().is_some_and(|localizer| {
-            localizer.revision() != st.locale_revision
-        });
+        let locale_changed = st
+            .localizer
+            .as_ref()
+            .is_some_and(|localizer| localizer.revision() != st.locale_revision);
         if locale_changed {
             let localizer = st.localizer.as_ref().unwrap().clone();
             apply_localizations(&mut st.root, &localizer);
@@ -718,25 +857,37 @@ impl FlexView {
             delegate,
             ..
         } = &mut *st;
-        let changed = disp.tick_anims(root.as_mut(), 0.016);
+        disp.tick_anims(root.as_mut(), 0.016);
         let msgs = disp.drain_messages();
+        let control_events = disp.take_control_events();
         let mut anim_reqs = Vec::new();
         let mut ov_reqs = Vec::new();
+        let mut new_wins = Vec::new();
+        let mut invalidation = flexui_core::Invalidation::None;
         let mut close_requested = false;
-        if !msgs.is_empty() {
+        if !msgs.is_empty() || !control_events.is_empty() {
             if let Some(win) = window.as_ref() {
                 let mut handle = MacWindowHandle::new(win.clone());
                 let mut ctx = WindowCtx::with_proxy_and_localizer(
-                    root.as_mut(), &mut handle, disp.proxy(), localizer_for_ctx.clone(),
+                    root.as_mut(),
+                    &mut handle,
+                    disp.proxy(),
+                    localizer_for_ctx.clone(),
                 );
                 for m in &msgs {
                     delegate.on_message(m, &mut ctx);
                 }
+                for (name, event) in &control_events {
+                    delegate.on_control_event(name, event, &mut ctx);
+                }
                 anim_reqs = ctx.take_anim_requests();
                 ov_reqs = ctx.take_overlay_requests();
+                new_wins = ctx.take_new_windows();
+                invalidation = ctx.take_invalidation();
                 close_requested = handle.take_close_request();
             }
         }
+        disp.invalidate(invalidation);
         if !close_requested {
             for r in ov_reqs {
                 open_overlay_request(disp, r);
@@ -745,14 +896,19 @@ impl FlexView {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
             }
         }
-        let redraw = changed || !msgs.is_empty() || locale_changed;
+        let layout = disp.take_layout();
+        let redraw = disp.take_redraw();
+        let dirty = disp.take_dirty();
         drop(st);
         if close_requested {
             self.request_close(window.as_ref().unwrap());
             return;
         }
-        if redraw {
+        self.create_windows(new_wins);
+        if redraw || layout || locale_changed {
             self.setNeedsDisplay(true);
+        } else if let Some(rect) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(rect));
         }
     }
 
@@ -787,20 +943,27 @@ impl FlexView {
             ..
         } = &mut *st;
         disp.handle(root.as_mut(), &ev);
-        let need = disp.take_redraw();
-        let dirty = disp.take_dirty();
+        let window_event = flexui_core::WindowEvent::from_event(&ev);
         let acts = disp.take_activations();
         let doubles = disp.take_double_clicks();
         let contexts = disp.take_context_clicks();
+        let control_events = disp.take_control_events();
 
         let mut reqs = Vec::new();
         let mut anim_reqs = Vec::new();
         let mut new_wins = Vec::new();
         let mut close_requested = false;
-        if !acts.is_empty() || !doubles.is_empty() || !contexts.is_empty() {
+        let mut invalidation = flexui_core::Invalidation::None;
+        if !acts.is_empty()
+            || !doubles.is_empty()
+            || !contexts.is_empty()
+            || !control_events.is_empty()
+            || window_event.is_some()
+        {
             if let Some(win) = window.as_ref() {
                 let mut handle = MacWindowHandle::new(win.clone());
-                let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer.clone());
+                let mut ctx =
+                    WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer.clone());
                 for name in &acts {
                     delegate.on_activate(name, &mut ctx);
                 }
@@ -810,14 +973,31 @@ impl FlexView {
                 for (name, pos) in &contexts {
                     delegate.on_context(name, pos.x, pos.y, &mut ctx);
                 }
+                for (name, event) in &control_events {
+                    delegate.on_control_event(name, event, &mut ctx);
+                }
+                if let Some(event) = &window_event {
+                    delegate.on_window_event(event, &mut ctx);
+                    match event {
+                        flexui_core::WindowEvent::Resized { width, height } => {
+                            delegate.on_size(*width, *height, &mut ctx);
+                        }
+                        flexui_core::WindowEvent::KeyDown { key, .. } => {
+                            delegate.on_key(*key, &mut ctx)
+                        }
+                        _ => {}
+                    }
+                }
                 reqs = ctx.take_overlay_requests();
                 anim_reqs = ctx.take_anim_requests();
                 new_wins = ctx.take_new_windows();
+                invalidation = ctx.take_invalidation();
                 close_requested = handle.take_close_request();
             }
         }
         // 委托里请求的上下文菜单 / 动画 → 交分发器。
         let opened = !reqs.is_empty();
+        disp.invalidate(invalidation);
         if !close_requested {
             for r in reqs {
                 open_overlay_request(disp, r);
@@ -826,6 +1006,9 @@ impl FlexView {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
             }
         }
+        let _layout = disp.take_layout();
+        let need = disp.take_redraw();
+        let dirty = disp.take_dirty();
         drop(st);
         if close_requested {
             self.request_close(window.as_ref().unwrap());
@@ -833,7 +1016,7 @@ impl FlexView {
         }
         self.create_windows(new_wins);
         // 整窗重绘优先，否则只失效脏矩形（AppKit 会把绘制裁剪到该区域）。
-        if need || opened || !acts.is_empty() || !doubles.is_empty() {
+        if need || opened {
             self.setNeedsDisplay(true);
         } else if let Some(r) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(r));
@@ -855,29 +1038,6 @@ impl FlexView {
         }
     }
 
-    /// 把首字符键码抛给窗口委托 on_key（与 IME 路径并行，供上层监听按键）。
-    fn fire_on_key(&self, event: &NSEvent) {
-        let Some(s) = event.characters() else { return };
-        let Some(ch) = s.to_string().chars().next() else {
-            return;
-        };
-        let window = self.window();
-        let mut close_requested = false;
-        let mut st = self.ivars().state.borrow_mut();
-        let localizer = st.localizer.clone();
-        let AppState { root, delegate, .. } = &mut *st;
-        if let Some(win) = window.as_ref() {
-            let mut handle = MacWindowHandle::new(win.clone());
-            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
-            delegate.on_key(ch as u32, &mut ctx);
-            close_requested = handle.take_close_request();
-        }
-        drop(st);
-        if close_requested {
-            self.request_close(window.as_ref().unwrap());
-        }
-    }
-
     /// 对当前焦点控件的 Base 执行闭包（IME 读写组合串/光标用）。
     fn with_focused_widget<R>(&self, f: impl FnOnce(&mut dyn Widget) -> R) -> Option<R> {
         let mut st = self.ivars().state.borrow_mut();
@@ -889,7 +1049,9 @@ impl FlexView {
 
     /// IME 提交：清组合串并逐字符发 Char（回车转 ENTER）。
     fn ime_insert(&self, text: &str) {
-        self.with_focused_widget(|w| { w.clear_marked_text(); });
+        self.with_focused_widget(|w| {
+            w.clear_marked_text();
+        });
         for ch in text.chars() {
             if ch == '\n' || ch == '\r' {
                 self.dispatch(Event::KeyDown {
