@@ -1,0 +1,29 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="20">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="States and tokens" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Hover, focus, pressed, selected and disabled styles share one theme" fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <VBox width="fill" spacing="12">
+      <Label text-verbatim="Interactive states" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="42" spacing="10">
+        <Button text-verbatim="Hover me" width="120" height="36"/>
+        <Button text-verbatim="Press me" variant="primary" width="120" height="36"/>
+        <Button text-verbatim="Unavailable" enabled="false" width="120" height="36"/>
+      </HBox>
+      <Edit placeholder-verbatim="Click to focus" width="360" height="38" padding="12 8"/>
+      <CheckBox text-verbatim="Selected checkbox" checked="true" height="26"/>
+      <Radio text-verbatim="Selected radio" group="31" selected="true" height="26"/>
+    </VBox>
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Semantic colors" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="36" spacing="18" align="center">
+        <Label text-verbatim="Brand" fgcolor="@brand" bold="true" width="90"/>
+        <Label text-verbatim="Success" fgcolor="@success" bold="true" width="90"/>
+        <Label text-verbatim="Warning" fgcolor="@warning" bold="true" width="90"/>
+        <Label text-verbatim="Danger" fgcolor="@danger" bold="true" width="90"/>
+      </HBox>
+    </VBox>
+  </VBox>
+</ScrollView>

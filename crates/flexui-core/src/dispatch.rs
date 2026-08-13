@@ -241,6 +241,18 @@ impl<'a> EventCtx<'a> {
             Property::Style(value) => {
                 return self.set_base_property(name, false, move |base| base.style = value)
             }
+            Property::Variant(value) => {
+                return self.set_base_property(name, false, move |base| {
+                    base.variant = value;
+                    crate::theme::refresh_theme_base(base);
+                })
+            }
+            Property::Classes(value) => {
+                return self.set_base_property(name, false, move |base| {
+                    base.classes = value;
+                    crate::theme::refresh_theme_base(base);
+                })
+            }
             Property::Width(value) => {
                 return self.set_base_property(name, true, move |base| base.width = value)
             }
@@ -333,6 +345,8 @@ impl<'a> EventCtx<'a> {
                     Key::Tooltip => Some(Property::Tooltip(base.tooltip.clone())),
                     Key::Font => Some(Property::Font(base.font.clone())),
                     Key::Style => Some(Property::Style(base.style.clone())),
+                    Key::Variant => Some(Property::Variant(base.variant.clone())),
+                    Key::Classes => Some(Property::Classes(base.classes.clone())),
                     Key::Width => Some(Property::Width(base.width)),
                     Key::Height => Some(Property::Height(base.height)),
                     Key::Padding => Some(Property::Padding(base.padding)),
@@ -359,12 +373,17 @@ impl<'a> EventCtx<'a> {
     }
 
     /// 向容器末尾添加一个子控件。
-    pub fn add_child(&mut self, name: &str, child: Node) -> bool {
-        self.mutate(name, move |w| w.base_mut().children.push(child))
-            .is_some_and(|_| {
-                self.invalidate(Invalidation::Layout);
-                true
-            })
+    pub fn add_child(&mut self, name: &str, mut child: Node) -> bool {
+        self.mutate(name, move |w| {
+            if let Some(theme) = w.base().applied_theme.clone() {
+                crate::theme::apply_theme_subtree(child.as_mut(), theme.as_ref());
+            }
+            w.base_mut().children.push(child);
+        })
+        .is_some_and(|_| {
+            self.invalidate(Invalidation::Layout);
+            true
+        })
     }
 
     /// 删除并返回容器指定位置的子控件。
@@ -381,9 +400,12 @@ impl<'a> EventCtx<'a> {
     }
 
     /// 替换并返回容器指定位置的原子控件。
-    pub fn replace_child(&mut self, name: &str, index: usize, child: Node) -> Option<Node> {
+    pub fn replace_child(&mut self, name: &str, index: usize, mut child: Node) -> Option<Node> {
         let old = self
             .mutate(name, move |w| {
+                if let Some(theme) = w.base().applied_theme.clone() {
+                    crate::theme::apply_theme_subtree(child.as_mut(), theme.as_ref());
+                }
                 (index < w.base().children.len())
                     .then(|| std::mem::replace(&mut w.base_mut().children[index], child))
             })
@@ -1413,6 +1435,7 @@ impl Dispatcher {
         let mut enabled = false;
         let mut activated_name: Option<String> = None;
         let mut menu: Option<Vec<String>> = None;
+        let mut menu_theme = None;
         let mut anchor = Rect::default();
         visit_mut(root, id, &mut |w| {
             let group = w.selection_group();
@@ -1430,6 +1453,7 @@ impl Dispatcher {
             info = Some((b.role, group, tab_index));
             activated_name = b.name.clone();
             anchor = b.rect;
+            menu_theme = b.applied_theme.clone();
             menu = w.menu_items();
         });
         if !enabled {
@@ -1448,12 +1472,15 @@ impl Dispatcher {
         // 打开下拉的控件（ComboBox）：本次点击只负责弹出菜单，不上报激活
         //（激活留给选中项，避免 on_activate 在打开与选中各触发一次）。
         if let Some(items) = menu {
-            let entries = items
+            let entries: Vec<crate::widgets::MenuEntry> = items
                 .iter()
                 .map(|label| crate::widgets::MenuEntry::item(label.clone(), ""))
                 .collect();
-            let style = crate::widgets::MenuStyle::default();
-            let dropdown = crate::widgets::build_menu_labels(&items, Some(id));
+            let style = menu_theme
+                .as_ref()
+                .map(|theme| crate::widgets::MenuStyle::from_theme(theme.as_ref()))
+                .unwrap_or_default();
+            let dropdown = crate::widgets::build_menu_entries(&entries, &style, None);
             self.overlays.push(Overlay {
                 root: dropdown,
                 anchor,
@@ -1770,7 +1797,7 @@ fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
 fn rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
     if node.base().id == id {
         let base = node.base();
-        return Some(base.style.shadows().fold(base.rect, |visual, shadow| {
+        return Some(base.style_shadows().fold(base.rect, |visual, shadow| {
             union_rect(
                 visual,
                 Rect::new(
@@ -1832,7 +1859,7 @@ fn tick_frame_animations(
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
     let state =
         crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
-    let style = b.style.resolve(state);
+    let style = b.style.resolve_over(&b.theme_style, state);
     let changed = b
         .bg_frame_player
         .tick_state(style.bg_animation.as_ref(), dt)
@@ -2965,10 +2992,13 @@ mod tests {
         let mut root = Edit::new().name("edit").size(120.0, 30.0);
         layout_node(&mut root, Rect::new(0.0, 0.0, 120.0, 30.0), &FakeCanvas);
         let mut disp = Dispatcher::new();
-        disp.handle(&mut root, &Event::MouseDown {
-            pos: Point::new(10.0, 10.0),
-            button: MouseButton::Left,
-        });
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(10.0, 10.0),
+                button: MouseButton::Left,
+            },
+        );
         disp.take_control_events();
 
         disp.handle(&mut root, &Event::Char { ch: 'A' });

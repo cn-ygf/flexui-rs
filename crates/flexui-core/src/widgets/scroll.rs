@@ -3,10 +3,11 @@
 use flexui_geometry::{Color, Corners, Rect, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource};
 
-use crate::common_builders;
 use crate::anim::AnimProp;
+use crate::common_builders;
 use crate::layout::{self, measure_node};
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Container, Node, Widget, WidgetRole};
 
 /// 纵向滚动容器。子控件纵向堆叠；超出视口的部分被裁剪，可用滚轮滚动。
@@ -21,6 +22,8 @@ pub struct ScrollView {
 #[derive(Debug, Clone)]
 pub struct ScrollBarStyle {
     pub width: f32,
+    /// 内容与滚动条之间保留的间距。
+    pub gap: f32,
     pub min_thumb_height: f32,
     pub thumb_color: Color,
     pub thumb_image: Option<ImageSource>,
@@ -31,6 +34,7 @@ impl Default for ScrollBarStyle {
     fn default() -> Self {
         Self {
             width: 5.0,
+            gap: 4.0,
             min_thumb_height: 24.0,
             thumb_color: Color::from_u8(200, 210, 230, 160),
             thumb_image: None,
@@ -42,7 +46,7 @@ impl Default for ScrollBarStyle {
 impl ScrollView {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::Plain),
+            base: Base::new_kind(WidgetRole::Plain, WidgetKind::ScrollView),
             scroll_y: 0.0,
             content_h: 0.0,
             scrollbar: ScrollBarStyle::default(),
@@ -69,6 +73,25 @@ impl ScrollView {
         layout::content_rect(&self.base)
     }
 
+    /// 子控件使用的视口始终避开滚动条，避免内容宽度随滚动状态跳动。
+    fn content_viewport(&self) -> Rect {
+        let viewport = self.viewport();
+        let reserved = (self.scrollbar.width + self.scrollbar.gap).max(0.0);
+        Rect::new(
+            viewport.left(),
+            viewport.top(),
+            (viewport.size.width - reserved).max(0.0),
+            viewport.size.height,
+        )
+    }
+
+    fn clip_viewport(&self) -> Rect {
+        let content = self.content_viewport();
+        let left = (content.left() - 1.0).max(self.base.rect.left());
+        let right = (content.right() + 1.0).min(self.viewport().right());
+        Rect::new(left, content.top(), right - left, content.size.height)
+    }
+
     fn max_scroll(&self) -> f32 {
         (self.content_h - self.viewport().size.height).max(0.0)
     }
@@ -93,7 +116,8 @@ impl Widget for ScrollView {
         layout::size_from_content(&self.base, avail.width, avail.height)
     }
 
-    fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
+    fn arrange(&mut self, _content: Rect, cv: &dyn Canvas) {
+        let content = self.content_viewport();
         let inner = Size::new(content.size.width, content.size.height);
         // 先量各子控件高度，求内容总高。
         let n = self.base.children.len();
@@ -135,10 +159,10 @@ impl Widget for ScrollView {
     }
 
     fn children_viewport(&self) -> Rect {
-        self.viewport()
+        self.clip_viewport()
     }
 
-    fn paint_foreground(&self, cv: &mut dyn Canvas, _style: &StyleSpec) {
+    fn paint_foreground(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         // 内容高于视口时在子内容之上绘制滚动条。
         let r = self.viewport();
         let view_h = r.size.height;
@@ -150,17 +174,25 @@ impl Widget for ScrollView {
         let bx = r.right() - bar_w;
         // 滑块
         let ratio = view_h / content_h;
-        let thumb_h = (view_h * ratio).max(self.scrollbar.min_thumb_height).min(view_h);
+        let thumb_h = (view_h * ratio)
+            .max(self.scrollbar.min_thumb_height)
+            .min(view_h);
         let scroll_ratio = self.scroll_y / (content_h - view_h);
         let thumb_y = r.top() + (view_h - thumb_h) * scroll_ratio;
         let thumb = Rect::new(bx, thumb_y, bar_w, thumb_h);
         if let Some(image) = &self.scrollbar.thumb_image {
             cv.draw_image(image, thumb, None, self.scrollbar.thumb_fit.clone());
         } else {
-            cv.fill_round_rect(thumb, Corners::all(bar_w / 2.0), self.scrollbar.thumb_color);
+            cv.fill_round_rect(
+                thumb,
+                Corners::all(bar_w / 2.0),
+                style.scrollbar_color.unwrap_or(self.scrollbar.thumb_color),
+            );
         }
     }
-    fn is_scrollable(&self) -> bool { true }
+    fn is_scrollable(&self) -> bool {
+        true
+    }
     fn scroll_by(&mut self, dy: f32) -> bool {
         let max = self.max_scroll();
         let next = (self.scroll_y - dy).clamp(0.0, max);
@@ -174,12 +206,16 @@ impl Widget for ScrollView {
         }
         changed
     }
-    fn scroll_position(&self) -> Option<f32> { Some(self.scroll_y) }
+    fn scroll_position(&self) -> Option<f32> {
+        Some(self.scroll_y)
+    }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         (prop == AnimProp::ScrollY).then_some(self.scroll_y)
     }
     fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
-        if prop != AnimProp::ScrollY { return false; }
+        if prop != AnimProp::ScrollY {
+            return false;
+        }
         let max = self.max_scroll();
         let next = value.clamp(0.0, max);
         let applied = self.scroll_y - next;
@@ -231,7 +267,12 @@ mod tests {
             .push(Panel::new().height(120.0))
             .push(Panel::new().height(120.0));
         layout_node(&mut view, Rect::new(0.0, 0.0, 294.0, 228.0), &FakeCanvas);
-        assert_eq!(view.children_viewport(), Rect::new(24.0, 16.0, 250.0, 188.0));
+        assert_eq!(
+            view.children_viewport(),
+            Rect::new(23.0, 16.0, 243.0, 188.0)
+        );
+        assert_eq!(view.base.children[0].base().rect.left(), 24.0);
+        assert_eq!(view.base.children[0].base().rect.size.width, 241.0);
         assert_eq!(view.max_scroll(), 52.0);
         let before = view.base.children[0].base().rect.top();
         assert!(view.scroll_by(-32.0));

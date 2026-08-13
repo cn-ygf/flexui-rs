@@ -207,6 +207,9 @@ impl<'a> WindowCtx<'a> {
         if spec.localizer.is_none() {
             spec.localizer = self.localizer.clone();
         }
+        if let Some(theme) = self.theme() {
+            crate::apply_theme(spec.root.as_mut(), &theme);
+        }
         self.new_windows.push(spec);
     }
 
@@ -215,6 +218,9 @@ impl<'a> WindowCtx<'a> {
         spec.presentation = WindowPresentation::ModalDialog;
         if spec.localizer.is_none() {
             spec.localizer = self.localizer.clone();
+        }
+        if let Some(theme) = self.theme() {
+            crate::apply_theme(spec.root.as_mut(), &theme);
         }
         self.new_windows.push(spec);
     }
@@ -271,6 +277,20 @@ impl<'a> WindowCtx<'a> {
         self.localizer.as_ref().map(Localizer::locale)
     }
 
+    /// 仅切换当前窗口主题，并自动重新布局和重绘。
+    pub fn set_theme(&mut self, theme: crate::Theme) {
+        crate::apply_theme(self.root, &theme);
+        self.invalidation = self.invalidation.merge(Invalidation::Layout);
+    }
+
+    pub fn theme(&self) -> Option<crate::Theme> {
+        self.root
+            .base()
+            .applied_theme
+            .as_ref()
+            .map(|theme| theme.as_ref().clone())
+    }
+
     /// 使用当前窗口的环境解析本地化资源，适合动态状态文案。
     pub fn localized_text(&self, resource: impl Into<LocalizedStringResource>) -> String {
         let resource = resource.into();
@@ -311,7 +331,9 @@ impl<'a> WindowCtx<'a> {
         self.overlay_requests.push(OverlayRequest {
             anchor,
             items,
-            style: None,
+            style: self
+                .theme()
+                .map(|theme| crate::widgets::MenuStyle::from_theme(&theme)),
             selected_name: None,
             entries: None,
         });

@@ -22,6 +22,7 @@ mod radio;
 mod scroll;
 mod separator;
 mod slider;
+mod switch;
 mod tabbox;
 mod vbox;
 
@@ -43,6 +44,7 @@ pub use radio::Radio;
 pub use scroll::{ScrollBarStyle, ScrollView};
 pub use separator::Separator;
 pub use slider::Slider;
+pub use switch::Switch;
 pub use tabbox::TabBox;
 pub use vbox::VBox;
 
@@ -66,6 +68,25 @@ macro_rules! common_builders {
             /// 设置样式集。
             pub fn style(mut self, s: $crate::style::StyleSet) -> Self {
                 self.base.style = s;
+                self
+            }
+            /// 设置主题变体，例如 primary、danger、nav。
+            pub fn variant(mut self, value: impl Into<String>) -> Self {
+                self.base.variant = value.into();
+                self
+            }
+            /// 追加一个主题类名。
+            pub fn class(mut self, value: impl Into<String>) -> Self {
+                self.base.classes.push(value.into());
+                self
+            }
+            /// 替换全部主题类名。
+            pub fn classes<I, S>(mut self, values: I) -> Self
+            where
+                I: IntoIterator<Item = S>,
+                S: Into<String>,
+            {
+                self.base.classes = values.into_iter().map(Into::into).collect();
                 self
             }
             /// 设置点击后播放的背景帧动画。
@@ -264,7 +285,10 @@ pub(crate) fn paint_indicator_and_text(
     cv.stroke_round_rect(ind, radius, border, 1.5);
     // 选中：填充内部
     if base.selected {
-        let fill = style.fg_color.unwrap_or(Color::from_u8(52, 120, 246, 255));
+        let fill = style
+            .accent_color
+            .or(style.fg_color)
+            .unwrap_or(Color::from_u8(52, 120, 246, 255));
         let inner = ind.inset_all(4.0);
         let inner_radius = if circular {
             Corners::all((box_size - 8.0) / 2.0)

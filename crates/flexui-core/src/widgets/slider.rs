@@ -11,6 +11,7 @@ use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::sizing::Sizing;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 滑块：轨道 + 已填充段 + 圆形拖柄。value 归一化 0~1。
@@ -21,7 +22,7 @@ pub struct Slider {
 
 impl Slider {
     pub fn new() -> Self {
-        let mut base = Base::new(WidgetRole::Slider);
+        let mut base = Base::new_kind(WidgetRole::Slider, WidgetKind::Slider);
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(24.0);
         Self { base, value: 0.0 }
@@ -64,9 +65,14 @@ impl Widget for Slider {
         if content.size.width <= 0.0 || content.size.height <= 0.0 {
             return;
         }
-        let track_col = style.bg_color.unwrap_or(Color::from_u8(60, 64, 74, 255));
-        let fill_col = style.fg_color.unwrap_or(Color::from_u8(52, 120, 246, 255));
-        let knob_col = Color::from_u8(240, 244, 250, 255);
+        let track_col = style.track_color.unwrap_or(Color::from_u8(60, 64, 74, 255));
+        let fill_col = style
+            .accent_color
+            .or(style.fg_color)
+            .unwrap_or(Color::from_u8(52, 120, 246, 255));
+        let knob_col = style
+            .thumb_color
+            .unwrap_or(Color::from_u8(240, 244, 250, 255));
 
         let track_h = 4.0f32.min(content.size.height);
         let ty = content.top() + (content.size.height - track_h) / 2.0;

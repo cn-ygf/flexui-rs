@@ -274,6 +274,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "flexui-gallery"
+version = "0.0.1"
+dependencies = [
+ "flexui",
+ "zip",
+]
+
+[[package]]
 name = "flexui-geometry"
 version = "0.0.1"
 

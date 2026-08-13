@@ -1,0 +1,29 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="22">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Basic controls" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Text, buttons, separators, progress and sliders" fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Buttons" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="42" spacing="10" align="center">
+        <Button name="default_button" text-verbatim="Default" width="108" height="36"/>
+        <Button name="primary_button" text-verbatim="Primary" variant="primary" width="108" height="36"/>
+        <Button text-verbatim="Danger" variant="danger" width="108" height="36"/>
+        <Button text-verbatim="Disabled" enabled="false" width="108" height="36"/>
+      </HBox>
+    </VBox>
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Typography" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Primary heading" font-size="18" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Regular body text for everyday interface content." fgcolor="@text-regular"/>
+      <Label text-verbatim="Secondary information has quieter contrast." fgcolor="@text-secondary"/>
+    </VBox>
+    <VBox width="fill" spacing="12">
+      <Label text-verbatim="Progress and slider" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Progress value="0.68" width="420" height="8"/>
+      <Slider value="0.42" width="420" height="22"/>
+    </VBox>
+  </VBox>
+</ScrollView>

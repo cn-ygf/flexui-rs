@@ -13,6 +13,7 @@ pub mod localization;
 pub mod paint;
 pub mod sizing;
 pub mod style;
+pub mod theme;
 pub mod widget;
 pub mod widgets;
 pub mod window;
@@ -31,6 +32,10 @@ pub use style::{
     BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec,
     VisualState,
 };
+pub use theme::{
+    apply_theme, refresh_theme, Theme, ThemeColorBinding, ThemeColorProperty, ThemeMode,
+    ThemePalette, WidgetKind,
+};
 pub use widget::{
     find_by_id, find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable,
     Container, HitPolicy, Node, TextControl, TextInputState, Widget, WidgetId, WidgetProperty,
@@ -40,7 +45,7 @@ pub use widgets::{
     build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
     CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
     MenuItem, MenuStyle, Panel, Progress, Radio, ScrollBarStyle, ScrollView, Separator, Slider,
-    TabBox, VBox,
+    Switch, TabBox, VBox,
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,

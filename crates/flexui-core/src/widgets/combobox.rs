@@ -10,6 +10,7 @@ use crate::common_builders;
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 下拉选择框：显示当前项 + 右侧 ▼，点击弹出选项菜单。
@@ -22,7 +23,7 @@ pub struct ComboBox {
 impl ComboBox {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::ComboBox),
+            base: Base::new_kind(WidgetRole::ComboBox, WidgetKind::ComboBox),
             options: Vec::new(),
             selected_index: 0,
         }

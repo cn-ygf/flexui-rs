@@ -1,0 +1,10 @@
+[package]
+name = "flexui-gallery"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+flexui = { path = "../flexui" }
+
+[build-dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }

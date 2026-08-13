@@ -2,6 +2,7 @@
 //! 既可当单子容器（放 1 个子），也可当 Box 多子容器（多个叠放）。
 
 use crate::common_builders;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Container, Node, Widget, WidgetRole};
 
 /// 通用容器：子控件叠放、各自填充内容区。
@@ -12,7 +13,7 @@ pub struct Panel {
 impl Panel {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::Plain),
+            base: Base::new_kind(WidgetRole::Plain, WidgetKind::Panel),
         }
     }
     /// 追加一个子控件。

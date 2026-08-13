@@ -41,20 +41,20 @@
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="58" align="center">
           <Label text="settings.startup" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <CheckBox name="set_startup" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
-                    selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          <Switch name="set_startup" width="52" height="26" normal-trackcolor="#565E99"
+                  selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="58" align="center">
           <Label text="settings.desktop_shortcut" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <CheckBox name="set_desktop" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
-                    selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          <Switch name="set_desktop" width="52" height="26" normal-trackcolor="#565E99"
+                  selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="58" align="center">
           <Label text="settings.auto_accelerate" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <CheckBox name="set_auto" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
-                    selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          <Switch name="set_auto" width="52" height="26" normal-trackcolor="#565E99"
+                  selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="70" align="center">
@@ -62,8 +62,8 @@
             <Label text="settings.keep_network" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
             <Label text="settings.keep_network.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
           </VBox>
-          <CheckBox name="set_sleep" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
-                    selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          <Switch name="set_sleep" width="52" height="26" normal-trackcolor="#565E99"
+                  selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="70" align="center">
@@ -71,8 +71,8 @@
             <Label text="settings.sound" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
             <Label text="settings.sound.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
           </VBox>
-          <CheckBox name="set_audio" switch="true" text="" width="52" height="26" normal-bgcolor="#565E99"
-                    selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF" corner-radius="13"/>
+          <Switch name="set_audio" width="52" height="26" normal-trackcolor="#565E99"
+                  selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
         <HBox height="70" align="center">
@@ -80,9 +80,8 @@
             <Label text="settings.badge" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
             <Label text="settings.badge.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
           </VBox>
-          <CheckBox name="set_notice" switch="true" checked="true" text="" width="52" height="26"
-                    normal-bgcolor="#565E99" selected-bgcolor="#00CFC4" normal-fgcolor="#FFFFFF"
-                    corner-radius="13"/>
+          <Switch name="set_notice" checked="true" width="52" height="26"
+                  normal-trackcolor="#565E99" selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Label name="settings_status" text="settings.session_only" flex="1" height="24"
                normal-fgcolor="#93A0CA" font-size="12"/>

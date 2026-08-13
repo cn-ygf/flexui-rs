@@ -1,0 +1,25 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="20">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Data display" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Scrollable and selectable collections" fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <HBox width="fill" height="320" spacing="24">
+      <VBox width="360" height="fill" spacing="10">
+        <Label text-verbatim="List view" font-size="16" bold="true" fgcolor="@text-primary"/>
+        <ListView class="selectable" items="Alpha release,Beta channel,Stable channel,Nightly build,Archived build"
+                  selected="2" row-height="44" width="360" height="250" padding="4"/>
+      </VBox>
+      <VBox width="fill" height="fill" spacing="10">
+        <Label text-verbatim="Status" font-size="16" bold="true" fgcolor="@text-primary"/>
+        <Label text-verbatim="Build 1284" font-size="18" bold="true" fgcolor="@text-primary"/>
+        <Label text-verbatim="Ready for distribution" fgcolor="@success"/>
+        <Progress value="0.86" width="240" height="8"/>
+        <Separator/>
+        <Label text-verbatim="The list and its scrollbar inherit the active theme without bitmap assets."
+               width="fill" height="48" fgcolor="@text-secondary"/>
+      </VBox>
+    </HBox>
+  </VBox>
+</ScrollView>

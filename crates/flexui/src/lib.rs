@@ -25,6 +25,20 @@ fn application_localizer_slot() -> &'static RwLock<Option<Localizer>> {
     SLOT.get_or_init(|| RwLock::new(None))
 }
 
+fn application_theme_slot() -> &'static RwLock<Theme> {
+    static SLOT: OnceLock<RwLock<Theme>> = OnceLock::new();
+    SLOT.get_or_init(|| RwLock::new(Theme::light()))
+}
+
+/// 设置应用级主题；后续创建的窗口自动继承。
+pub fn set_application_theme(theme: Theme) {
+    *application_theme_slot().write().unwrap() = theme;
+}
+
+pub fn application_theme() -> Theme {
+    application_theme_slot().read().unwrap().clone()
+}
+
 /// 设置 SwiftUI Environment 风格的应用级本地化环境；后续创建的窗口自动继承。
 pub fn set_application_localizer(localizer: Localizer) {
     *application_localizer_slot().write().unwrap() = Some(localizer);
@@ -269,6 +283,7 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
     if let Some(localizer) = localizer.as_ref() {
         apply_localizations(&mut root, localizer);
     }
+    apply_theme(root.as_mut(), &application_theme());
     let mut disp = Dispatcher::new();
     for (group, tabbox) in bindings {
         disp.bind_tab(group, tabbox);

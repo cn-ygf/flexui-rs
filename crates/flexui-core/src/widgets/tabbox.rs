@@ -5,6 +5,7 @@ use flexui_gfx::Canvas;
 
 use crate::common_builders;
 use crate::layout;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Container, Node, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 多页容器：仅显示 `selected_index` 指向的那一页，配合 Radio 组成 tabbar。
@@ -17,7 +18,7 @@ pub struct TabBox {
 impl TabBox {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::TabBox),
+            base: Base::new_kind(WidgetRole::TabBox, WidgetKind::TabBox),
             selected_index: 0,
             bind_group: None,
         }
