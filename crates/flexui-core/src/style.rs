@@ -282,7 +282,21 @@ impl StyleSet {
 
     /// 先解析 base，再让当前样式集逐字段覆盖。
     pub fn resolve_over(&self, base: &StyleSet, state: VisualState) -> StyleSpec {
-        self.resolve(state).fill_from(&base.resolve(state))
+        let explicit = self.resolve(state);
+        let mut fallback = base.resolve(state);
+        // 显式背景贴图代表控件完整外观。未同时声明底色/边框时，不应让默认主题
+        // 从透明像素后面露出来；使用者仍可显式组合“底色 + 透明贴图”。
+        if explicit.bg_image.is_some() || explicit.bg_animation.is_some() {
+            if explicit.bg_color.is_none() && explicit.gradient.is_none() {
+                fallback.bg_color = None;
+                fallback.gradient = None;
+            }
+            if explicit.border_color.is_none() && explicit.border_width.is_none() {
+                fallback.border_color = None;
+                fallback.border_width = None;
+            }
+        }
+        explicit.fill_from(&fallback)
     }
 
     /// 把当前样式集叠加在 base 之上，并保留全部视觉状态。
@@ -438,6 +452,49 @@ mod tests {
         let r = set.resolve(VisualState::new(BaseState::Hot, false));
         assert_eq!(r.bg_color, Some(Color::BLACK)); // 用自己的
         assert_eq!(r.border_width, Some(1.0)); // 从 Normal 继承
+    }
+
+    #[test]
+    fn 显式背景贴图不会继承主题底色和边框() {
+        let theme = StyleSet::new().with_normal(StyleSpec {
+            bg_color: Some(Color::WHITE),
+            border_color: Some(Color::BLACK),
+            border_width: Some(1.0),
+            corner_radius: Some(Corners::all(4.0)),
+            ..Default::default()
+        });
+        let explicit = StyleSet::new().with_normal(StyleSpec {
+            bg_image: Some(ImageSource::path("button.png")),
+            ..Default::default()
+        });
+
+        let resolved = explicit.resolve_over(&theme, VisualState::default());
+        assert_eq!(resolved.bg_color, None);
+        assert_eq!(resolved.border_color, None);
+        assert_eq!(resolved.border_width, None);
+        assert_eq!(resolved.corner_radius, Some(Corners::all(4.0)));
+        assert!(resolved.bg_image.is_some());
+    }
+
+    #[test]
+    fn 显式底色可与透明背景贴图组合() {
+        let theme = StyleSet::new().with_normal(StyleSpec {
+            bg_color: Some(Color::BLACK),
+            border_color: Some(Color::BLACK),
+            border_width: Some(1.0),
+            ..Default::default()
+        });
+        let explicit = StyleSet::new().with_normal(StyleSpec {
+            bg_color: Some(Color::WHITE),
+            bg_image: Some(ImageSource::path("overlay.png")),
+            border_width: Some(2.0),
+            ..Default::default()
+        });
+
+        let resolved = explicit.resolve_over(&theme, VisualState::default());
+        assert_eq!(resolved.bg_color, Some(Color::WHITE));
+        assert_eq!(resolved.border_color, Some(Color::BLACK));
+        assert_eq!(resolved.border_width, Some(2.0));
     }
 
     #[test]

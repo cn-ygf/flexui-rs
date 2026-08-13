@@ -34,7 +34,9 @@ pub(crate) fn original_svg(bytes: &'static [u8]) -> ImageSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui::{layout_node, Context, Corners, Font, Point, Rect, Size, Widget};
+    use flexui::{
+        apply_theme, layout_node, Context, Corners, Font, Point, Rect, Size, Theme, Widget,
+    };
 
     struct TestCanvas;
 
@@ -93,6 +95,7 @@ mod tests {
             .contains("app.window_title"));
 
         let mut window = flexui::load_window_res(&resources, "app.xml", &Context::new()).unwrap();
+        apply_theme(window.root.as_mut(), &Theme::light());
         layout_node(
             window.root.as_mut(),
             Rect::new(0.0, 0.0, 1000.0, 688.0),
@@ -119,6 +122,16 @@ mod tests {
                     .base()
                     .visible
             );
+        }
+        for button in ["open_settings", "open_login"] {
+            let style = find_widget(window.root.as_ref(), button)
+                .unwrap()
+                .base()
+                .resolved_style();
+            assert!(style.bg_image.is_some(), "{button} background image");
+            assert_eq!(style.bg_color, None, "{button} background color");
+            assert_eq!(style.border_color, None, "{button} border color");
+            assert_eq!(style.border_width, None, "{button} border width");
         }
     }
 }
