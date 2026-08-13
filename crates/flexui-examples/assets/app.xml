@@ -6,7 +6,7 @@
     <VBox height="94" spacing="0" mouse="transparent">
       <HBox height="27" padding="2 8" spacing="6" mouse="transparent">
         <Panel flex="1" mouse="transparent"/>
-        <Button name="open_settings" tooltip="app.tooltip.settings" width="24" height="24"
+        <Button name="open_settings" tooltip="app.tooltip.menu" width="24" height="24"
                 normal-bgimage="button/menu_normal.svg" hot-bgimage="button/menu_hover.svg"
                 pushed-bgimage="button/menu_pushed.svg" normal-bgfit="center"/>
         <Button name="minimize" tooltip="app.tooltip.minimize" width="24" height="24"

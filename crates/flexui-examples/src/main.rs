@@ -203,9 +203,10 @@ impl WindowImpl for UuExample {
                 }
             }
             "open_settings" => {
-                let anchor = ctx
+                let button_rect = ctx
                     .with("open_settings", |widget| widget.base().rect)
                     .unwrap_or(Rect::new(908.0, 2.0, 24.0, 24.0));
+                let anchor = Rect::new(button_rect.left(), button_rect.top(), button_rect.size.width, button_rect.size.height);
                 ctx.open_styled_menu_entries(anchor, settings_menu_entries(ctx), settings_menu_style());
             }
             "menu_settings" => {
