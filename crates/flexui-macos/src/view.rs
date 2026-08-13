@@ -609,8 +609,31 @@ impl FlexView {
         close_requested
     }
 
-    pub fn set_timers(&self, timers: Vec<Retained<NSTimer>>) {
-        self.ivars().state.borrow_mut().timers = timers;
+    pub(crate) fn resume_timers(&self) {
+        let mut state = self.ivars().state.borrow_mut();
+        if !state.timers.is_empty() {
+            return;
+        }
+
+        let blink = unsafe {
+            NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
+                0.53,
+                self,
+                objc2::sel!(blinkTimer:),
+                None,
+                true,
+            )
+        };
+        let frame = unsafe {
+            NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
+                0.016,
+                self,
+                objc2::sel!(frameTimer:),
+                None,
+                true,
+            )
+        };
+        state.timers = vec![blink, frame];
     }
 
     pub fn close_after_callback(&self, window: &NSWindow) {

@@ -15,12 +15,15 @@ pub use view::{FlexView, MacWindowHandle};
 
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, MainThreadOnly};
+use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSImage, NSWindow,
-    NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
+    NSImage, NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
 };
-use objc2_foundation::{MainThreadMarker, NSArray, NSData, NSPoint, NSRect, NSSize, NSString, NSTimer};
+use objc2_foundation::{
+    MainThreadMarker, NSArray, NSData, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
+    NSString,
+};
 
 use flexui_core::{
     Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate, WindowPresentation,
@@ -60,12 +63,74 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     for spec in windows {
         kept.push(make_window(mtm, spec, None));
     }
+    let app_delegate = AppDelegate::new(
+        mtm,
+        kept.iter().map(|window| Weak::new(&**window)).collect(),
+    );
+    app.setDelegate(Some(ProtocolObject::from_ref(&*app_delegate)));
 
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);
     println!("[flexui] 窗口已创建，进入事件循环。关闭窗口后用 Cmd-Q 退出。");
     app.run();
+    app.setDelegate(None);
+    drop(app_delegate);
     drop(kept);
+}
+
+struct AppDelegateIvars {
+    main_windows: Vec<Weak<NSWindow>>,
+}
+
+define_class!(
+    #[unsafe(super = NSObject)]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = AppDelegateIvars]
+    struct AppDelegate;
+
+    unsafe impl NSObjectProtocol for AppDelegate {}
+
+    unsafe impl NSApplicationDelegate for AppDelegate {
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn application_should_handle_reopen(
+            &self,
+            _application: &NSApplication,
+            _has_visible_windows: bool,
+        ) -> bool {
+            let main_window_visible = self
+                .ivars()
+                .main_windows
+                .iter()
+                .filter_map(Weak::load)
+                .any(|window| window.isVisible());
+            if !main_window_visible {
+                for weak_window in &self.ivars().main_windows {
+                    let Some(window) = weak_window.load() else {
+                        continue;
+                    };
+                    if window.isMiniaturized() {
+                        window.deminiaturize(None);
+                    }
+                    if let Some(view) = window
+                        .contentView()
+                        .and_then(|view| view.downcast::<FlexView>().ok())
+                    {
+                        view.resume_timers();
+                    }
+                    window.makeKeyAndOrderFront(None);
+                    break;
+                }
+            }
+            true
+        }
+    }
+);
+
+impl AppDelegate {
+    fn new(mtm: MainThreadMarker, main_windows: Vec<Weak<NSWindow>>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(AppDelegateIvars { main_windows });
+        unsafe { msg_send![super(this), init] }
+    }
 }
 
 /// 创建一个原生窗口并接入事件循环（定时器由 run loop 保活）。返回窗口句柄。
@@ -176,30 +241,7 @@ pub(crate) fn make_window(
     // 窗口/控件就绪后触发 on_init（≈ InitWindow）。
     let close_requested = view.fire_init(&window);
 
-    // 光标闪烁定时器（0.53s 切换一次）。
-    #[allow(non_snake_case)]
-    let _blink = unsafe {
-        NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
-            0.53,
-            &view,
-            objc2::sel!(blinkTimer:),
-            None,
-            true,
-        )
-    };
-
-    // 帧定时器（~60fps 驱动动画；无动画时回调开销极小，仅在有变化时重绘）。
-    #[allow(non_snake_case)]
-    let _frame = unsafe {
-        NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
-            0.016,
-            &view,
-            objc2::sel!(frameTimer:),
-            None,
-            true,
-        )
-    };
-    view.set_timers(vec![_blink, _frame]);
+    view.resume_timers();
 
     if let Some(owner) = modal_owner {
         let owner_frame = owner.frame();
