@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # macOS：原生构建 + 测试 + clippy（flexui-windows 在此编译为空 crate）。
+  macos:
+    name: macOS (native)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 clippy
+        run: rustup component add clippy
+      - name: 单元测试
+        run: cargo test --workspace
+      - name: Clippy（零告警）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Windows：原生构建 + 测试 + clippy。
+  # 排除 flexui-macos（依赖 objc2，仅 Apple 平台可编译）。
+  windows:
+    name: Windows (native)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 clippy
+        run: rustup component add clippy
+      - name: 构建 + 测试
+        run: cargo test --workspace --exclude flexui-macos
+      - name: Clippy（零告警）
+        run: cargo clippy --workspace --exclude flexui-macos --all-targets -- -D warnings
+

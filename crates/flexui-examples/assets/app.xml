@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Window title="app.window_title" width="1000" height="688" resizable="false"
+        titlebar="hidden" system-corners="true" system-shadow="true" drag-region="0 0 1000 94">
+<Panel normal-bgcolor="#181D42" mouse="transparent" font-family="Microsoft YaHei">
+  <VBox spacing="0" normal-bgcolor="#181D42" mouse="transparent">
+    <VBox height="94" spacing="0" mouse="transparent">
+      <HBox height="27" padding="2 8" spacing="6" mouse="transparent">
+        <Panel flex="1" mouse="transparent"/>
+        <Button name="open_settings" tooltip="app.tooltip.menu" width="24" height="24"
+                normal-bgimage="button/menu_normal.svg" hot-bgimage="button/menu_hover.svg"
+                pushed-bgimage="button/menu_pushed.svg" normal-bgfit="center"/>
+        <Button v-if="!platform.macos" name="minimize" tooltip="app.tooltip.minimize" width="24" height="24"
+                normal-bgimage="button/mini_normal.svg" hot-bgimage="button/mini_hover.svg"
+                pushed-bgimage="button/mini_pushed.svg" normal-bgfit="center"/>
+        <Button v-if="!platform.macos" name="close_window" tooltip="app.tooltip.close" width="24" height="24"
+                normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
+                pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
+      </HBox>
+      <HBox height="67" padding="2 38" spacing="18" align="center" mouse="transparent">
+        <Image src="label/uu_logo@2.00x.png" width="40" height="46"/>
+        <Button tooltip="app.tooltip.back" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
+                hot-bgimage="button/back_hover@2.00x.png" normal-bgfit="center"/>
+        <Radio name="nav_home" text="app.nav.home" group="1" tab-index="0" checked="true" indicator="false"
+               width="72" height="42" normal-bgcolor="#181D42"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="18" normal-textalign="center"/>
+        <Radio name="nav_examples" text="app.nav.examples" group="1" tab-index="1" indicator="false"
+               width="72" height="42" normal-bgcolor="#181D42"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="17" normal-textalign="center"/>
+        <Radio name="nav_cloud_play" text="app.nav.cloud_play" group="1" tab-index="2" indicator="false"
+               width="84" height="42" normal-bgcolor="#181D42"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="17" normal-textalign="center"/>
+        <Radio name="nav_cloud_saves" text="app.nav.cloud_saves" group="1" tab-index="3" indicator="false"
+               width="84" height="42" normal-bgcolor="#181D42"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="17" normal-textalign="center"/>
+        <Panel flex="1" mouse="transparent"/>
+        <Edit name="search" placeholder="app.search.placeholder" width="168" height="36" padding="3 18 3 36"
+              normal-bgimage="edit/edit_search_normal@2.00x.png"
+              hot-bgimage="edit/edit_search_hover@2.00x.png"
+              focus-bgimage="edit/edit_search_focused@2.00x.png"
+              normal-bgfit="stretch" hot-bgfit="stretch" focus-bgfit="stretch"
+              normal-fgcolor="#FFFFFF" placeholder-fgcolor="#FFFFFF" font-size="16"/>
+        <Button name="open_login" tooltip="app.tooltip.login" width="38" height="38"
+                normal-bgimage="label/user_center.svg" hot-bgimage="label/user_center.svg"
+                normal-bgfit="stretch"/>
+      </HBox>
+    </VBox>
+
+    <TabBox name="main_pages" bindgroup="1" selected="0" flex="1">
+      <Include src="pages/home.xml"/>
+      <Include src="pages/examples.xml"/>
+      <Include src="pages/cloud-play.xml"/>
+      <Include src="pages/cloud-saves.xml"/>
+    </TabBox>
+  </VBox>
+</Panel>
+</Window>

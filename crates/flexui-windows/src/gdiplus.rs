@@ -6,10 +6,14 @@ use windows_sys::Win32::Graphics::GdiPlus as gp;
 
 /// PixelFormat32bppARGB（windows-sys 未导出该常量，用其固定数值）。
 pub const PIXEL_FORMAT_32BPP_ARGB: i32 = 0x0026_200A;
+/// PixelFormat32bppPARGB（预乘 alpha，供 SVG 光栅化结果上传）。
+pub const PIXEL_FORMAT_32BPP_PARGB: i32 = 0x000E_200B;
 
 // 常用 GDI+ 枚举值（windows-sys 里是 i32 常量，这里集中别名）。
 pub const UNIT_PIXEL: gp::Unit = 2;
 pub const SMOOTHING_ANTIALIAS: gp::SmoothingMode = 4;
+pub const INTERPOLATION_HIGH_QUALITY_BICUBIC: gp::InterpolationMode = 7;
+pub const PIXEL_OFFSET_HIGH_QUALITY: gp::PixelOffsetMode = 2;
 pub const TEXT_HINT_CLEARTYPE: gp::TextRenderingHint = 5;
 pub const FILLMODE_ALTERNATE: gp::FillMode = 0;
 pub const COMBINE_INTERSECT: gp::CombineMode = 1;

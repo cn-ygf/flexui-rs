@@ -4,24 +4,155 @@
 //! 这些原语都属 AppKit（系统框架），在 `NSView::drawRect:` 期间当前已有锁定的
 //! 图形上下文，直接绘制即落到该视图上，符合「NSView 自绘」的要求。
 
-use flexui_geometry::{Color, Corners, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageSource};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::AllocAnyThread;
 use objc2_app_kit::{
-    NSBezierPath, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
-    NSGraphicsContext, NSImage, NSStringDrawing,
+    NSBezierPath, NSBitmapImageRep, NSColor, NSCompositingOperation, NSDeviceRGBColorSpace, NSFont,
+    NSFontAttributeName, NSFontManager, NSFontTraitMask, NSForegroundColorAttributeName,
+    NSGradient, NSGraphicsContext, NSImage, NSImageInterpolation, NSImageResizingMode,
+    NSStringDrawing, NSUnderlineStyleAttributeName,
 };
-use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{
+    MainThreadMarker, NSData, NSDictionary, NSEdgeInsets, NSNumber, NSPoint, NSRect, NSSize,
+    NSString,
+};
 
-/// macOS 画布：无内部状态，绘制落到 drawRect 当前上下文。
-pub struct CgCanvas;
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum ImageCacheKey {
+    Path(String, u32),
+    Bytes(usize, u32),
+    Svg(usize, u32, u32, u32, u32),
+}
+
+struct CachedImage {
+    image: Retained<NSImage>,
+    // 保持 Arc 分配地址稳定，避免动态替换资源后缓存键被复用。
+    _bytes: Option<Arc<Vec<u8>>>,
+}
+
+/// 缓存解码后的位图及按物理像素尺寸光栅化的 SVG。
+#[derive(Default)]
+pub(crate) struct ImageCache {
+    images: HashMap<ImageCacheKey, CachedImage>,
+}
+
+pub(crate) type SharedImageCache = Rc<RefCell<ImageCache>>;
+
+/// macOS 画布：绘制落到 drawRect 当前上下文，图片缓存由所属窗口共享。
+pub struct CgCanvas {
+    backing_scale: f32,
+    image_cache: SharedImageCache,
+}
 
 impl CgCanvas {
+    /// 构造 1× 独立画布，保持既有离屏绘制与测试调用兼容。
     pub fn new() -> Self {
-        CgCanvas
+        Self {
+            backing_scale: 1.0,
+            image_cache: Rc::new(RefCell::new(ImageCache::default())),
+        }
+    }
+
+    pub(crate) fn with_image_cache(backing_scale: f32, image_cache: SharedImageCache) -> Self {
+        Self {
+            backing_scale: valid_scale(backing_scale),
+            image_cache,
+        }
+    }
+
+    fn load_image(
+        &self,
+        source: &ImageSource,
+        rect: Rect,
+        fit: &ImageFit,
+    ) -> Option<Retained<NSImage>> {
+        match source {
+            ImageSource::Path(path) => self.load_path(path, 1.0),
+            ImageSource::ScaledPath(path, density) => self.load_path(path, *density),
+            ImageSource::Bytes(bytes) => self.load_bytes(bytes, 1.0),
+            ImageSource::ScaledBytes(bytes, density) => self.load_bytes(bytes, *density),
+            ImageSource::Svg(bytes) => self.load_svg(bytes, rect, fit),
+        }
+    }
+
+    fn load_path(&self, path: &str, density: f32) -> Option<Retained<NSImage>> {
+        let density = valid_scale(density);
+        let key = ImageCacheKey::Path(path.to_owned(), density.to_bits());
+        if let Some(image) = self.cached(&key) {
+            return Some(image);
+        }
+        let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path))?;
+        if density != 1.0 {
+            set_raster_logical_size(&image, density);
+        }
+        self.insert(key, image.clone(), None);
+        Some(image)
+    }
+
+    fn load_bytes(&self, bytes: &Arc<Vec<u8>>, density: f32) -> Option<Retained<NSImage>> {
+        let density = valid_scale(density);
+        let key = ImageCacheKey::Bytes(Arc::as_ptr(bytes) as usize, density.to_bits());
+        if let Some(image) = self.cached(&key) {
+            return Some(image);
+        }
+        let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(bytes))?;
+        if density != 1.0 {
+            set_raster_logical_size(&image, density);
+        }
+        self.insert(key, image.clone(), Some(bytes.clone()));
+        Some(image)
+    }
+
+    fn load_svg(
+        &self,
+        bytes: &Arc<Vec<u8>>,
+        rect: Rect,
+        fit: &ImageFit,
+    ) -> Option<Retained<NSImage>> {
+        let logical = svg_logical_size(bytes, rect, fit);
+        let pw = ((logical.width * self.backing_scale).round() as u32).max(1);
+        let ph = ((logical.height * self.backing_scale).round() as u32).max(1);
+        let key = ImageCacheKey::Svg(
+            Arc::as_ptr(bytes) as usize,
+            pw,
+            ph,
+            logical.width.to_bits(),
+            logical.height.to_bits(),
+        );
+        if let Some(image) = self.cached(&key) {
+            return Some(image);
+        }
+        let rgba = flexui_svg::rasterize(bytes, pw, ph)?;
+        let image = unsafe { nsimage_from_rgba(&rgba, pw as usize, ph as usize, logical) }?;
+        self.insert(key, image.clone(), Some(bytes.clone()));
+        Some(image)
+    }
+
+    fn cached(&self, key: &ImageCacheKey) -> Option<Retained<NSImage>> {
+        self.image_cache
+            .borrow()
+            .images
+            .get(key)
+            .map(|entry| entry.image.clone())
+    }
+
+    fn insert(&self, key: ImageCacheKey, image: Retained<NSImage>, bytes: Option<Arc<Vec<u8>>>) {
+        self.image_cache.borrow_mut().images.insert(
+            key,
+            CachedImage {
+                image,
+                _bytes: bytes,
+            },
+        );
     }
 }
 
@@ -29,6 +160,24 @@ impl Default for CgCanvas {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn valid_scale(scale: f32) -> f32 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
+fn svg_logical_size(svg: &[u8], rect: Rect, fit: &ImageFit) -> Size {
+    let fallback = Size::new(rect.size.width.max(1.0), rect.size.height.max(1.0));
+    if matches!(fit, ImageFit::Stretch) {
+        return fallback;
+    }
+    flexui_svg::intrinsic_size(svg)
+        .map(|(width, height)| Size::new(width, height))
+        .unwrap_or(fallback)
 }
 
 /// 把平台无关的 Rect 转成 AppKit 的 NSRect（坐标已是左上原点，视图设为 flipped）。
@@ -39,37 +188,220 @@ fn to_nsrect(r: Rect) -> NSRect {
     )
 }
 
+/// 从 RGBA(premultiplied) 字节建 NSImage（供 SVG 光栅化结果用）。
+unsafe fn nsimage_from_rgba(
+    rgba: &[u8],
+    w: usize,
+    h: usize,
+    logical_size: Size,
+) -> Option<Retained<NSImage>> {
+    // planes 传 null → NSBitmapImageRep 自行分配缓冲，再把 RGBA 拷进去（避免生命周期问题）。
+    let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+        NSBitmapImageRep::alloc(),
+        std::ptr::null_mut(),
+        w as isize,
+        h as isize,
+        8,
+        4,
+        true,
+        false,
+        NSDeviceRGBColorSpace,
+        (w * 4) as isize,
+        32,
+    )?;
+    let dst = rep.bitmapData();
+    if dst.is_null() {
+        return None;
+    }
+    std::ptr::copy_nonoverlapping(rgba.as_ptr(), dst, w * h * 4);
+    let logical = NSSize::new(logical_size.width as f64, logical_size.height as f64);
+    rep.setSize(logical);
+    let img = NSImage::initWithSize(NSImage::alloc(), logical);
+    img.addRepresentation(&rep);
+    Some(img)
+}
+
+/// AppKit 从 NSData 解码时不知道 `@2.00x` 的路径语义，需要显式设置 point 尺寸。
+fn set_raster_logical_size(image: &NSImage, density: f32) {
+    let reps = image.representations();
+    let mut pixel_width = 0isize;
+    let mut pixel_height = 0isize;
+    for rep in &*reps {
+        pixel_width = pixel_width.max(rep.pixelsWide());
+        pixel_height = pixel_height.max(rep.pixelsHigh());
+    }
+    if pixel_width <= 0 || pixel_height <= 0 {
+        return;
+    }
+    let logical = NSSize::new(
+        pixel_width as f64 / density as f64,
+        pixel_height as f64 / density as f64,
+    );
+    for rep in &*reps {
+        rep.setSize(logical);
+    }
+    image.setSize(logical);
+}
+
+/// 生成 tint 换色后的 NSImage：原图 + SourceAtop 目标色填充（保留 alpha 形状）。
+#[allow(deprecated)] // lockFocus 已弃用但对位图 tint 足够可靠
+fn tinted_image(img: &NSImage, color: Color) -> Retained<NSImage> {
+    let size = img.size();
+    let bounds = NSRect::new(NSPoint::new(0.0, 0.0), size);
+    let out = NSImage::initWithSize(NSImage::alloc(), size);
+    out.lockFocus();
+    img.drawInRect_fromRect_operation_fraction(
+        bounds,
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+        NSCompositingOperation::SourceOver,
+        1.0,
+    );
+    if let Some(ctx) = NSGraphicsContext::currentContext() {
+        ctx.setCompositingOperation(NSCompositingOperation::SourceAtop);
+    }
+    to_nscolor(color).set();
+    NSBezierPath::fillRect(bounds);
+    out.unlockFocus();
+    out
+}
+
+/// 按 fit 绘制 NSImage 到目标矩形（坐标为 flipped 视图的左上原点）。
+fn draw_nsimage(img: &NSImage, rect: Rect, fit: &ImageFit) {
+    let size = img.size();
+    let (iw, ih) = (size.width as f32, size.height as f32);
+    match fit {
+        ImageFit::Stretch => img.drawInRect(to_nsrect(rect)),
+        ImageFit::Center => {
+            let x = rect.left() + (rect.size.width - iw) / 2.0;
+            let y = rect.top() + (rect.size.height - ih) / 2.0;
+            img.drawInRect(to_nsrect(Rect::new(x, y, iw, ih)));
+        }
+        ImageFit::Tile => {
+            let mut y = rect.top();
+            while y < rect.bottom() {
+                let mut x = rect.left();
+                while x < rect.right() {
+                    img.drawInRect(to_nsrect(Rect::new(x, y, iw, ih)));
+                    x += iw;
+                }
+                y += ih;
+            }
+        }
+        ImageFit::NinePatch(ins) => {
+            draw_ninepatch(img, rect, *ins);
+        }
+    }
+}
+
+/// 使用 AppKit 原生 cap insets 一次绘制九宫格，避免九个切片分别插值时互相采样。
+fn draw_ninepatch(img: &NSImage, rect: Rect, ins: Insets) {
+    let old_insets = img.capInsets();
+    let old_mode = img.resizingMode();
+    img.setCapInsets(NSEdgeInsets {
+        top: ins.top as f64,
+        left: ins.left as f64,
+        bottom: ins.bottom as f64,
+        right: ins.right as f64,
+    });
+    img.setResizingMode(NSImageResizingMode::Stretch);
+    img.drawInRect(to_nsrect(rect));
+    img.setCapInsets(old_insets);
+    img.setResizingMode(old_mode);
+}
+
+/// 构造四角独立圆角的矩形路径（用 arcTo 逐角连接）。
+fn round_rect_path(rect: Rect, radius: Corners) -> Retained<NSBezierPath> {
+    let l = rect.left() as f64;
+    let t = rect.top() as f64;
+    let r = rect.right() as f64;
+    let b = rect.bottom() as f64;
+    let hw = (rect.size.width / 2.0) as f64;
+    let hh = (rect.size.height / 2.0) as f64;
+    let clamp = |v: f32| (v as f64).max(0.0).min(hw).min(hh);
+    let tl = clamp(radius.tl);
+    let tr = clamp(radius.tr);
+    let br = clamp(radius.br);
+    let bl = clamp(radius.bl);
+
+    let path = NSBezierPath::bezierPath();
+    path.moveToPoint(NSPoint::new(l + tl, t));
+    // 顶边 → 右上角 → 右边 → 右下角 → 底边 → 左下角 → 左边 → 左上角
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(
+        NSPoint::new(r, t),
+        NSPoint::new(r, b),
+        tr,
+    );
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(
+        NSPoint::new(r, b),
+        NSPoint::new(l, b),
+        br,
+    );
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(
+        NSPoint::new(l, b),
+        NSPoint::new(l, t),
+        bl,
+    );
+    path.appendBezierPathWithArcFromPoint_toPoint_radius(
+        NSPoint::new(l, t),
+        NSPoint::new(r, t),
+        tl,
+    );
+    path.closePath();
+    path
+}
+
 /// 把 Color 转成 NSColor（sRGB）。
 fn to_nscolor(c: Color) -> Retained<NSColor> {
     NSColor::colorWithSRGBRed_green_blue_alpha(c.r as f64, c.g as f64, c.b as f64, c.a as f64)
 }
 
-/// 构造字体对象：有字族名走 fontWithName，否则用系统字体。
+/// 构造字体对象：有字族名走 fontWithName，否则系统字体；再按需叠加粗体/斜体特征。
 fn to_nsfont(font: &Font) -> Retained<NSFont> {
-    if let Some(name) = &font.family {
+    let base = if let Some(name) = &font.family {
         let ns_name = NSString::from_str(name);
         // fontWithName 可能返回 None（字体不存在），回退到系统字体。
         NSFont::fontWithName_size(&ns_name, font.size as f64)
             .unwrap_or_else(|| NSFont::systemFontOfSize(font.size as f64))
     } else {
         NSFont::systemFontOfSize(font.size as f64)
+    };
+    if !font.bold && !font.italic {
+        return base;
     }
+    // 经 NSFontManager 叠加粗体/斜体特征（不可用时保持原字体）。
+    let Some(mtm) = MainThreadMarker::new() else {
+        return base;
+    };
+    let mgr = NSFontManager::sharedFontManager(mtm);
+    let mut f = base;
+    if font.bold {
+        f = mgr.convertFont_toHaveTrait(&f, NSFontTraitMask::BoldFontMask);
+    }
+    if font.italic {
+        f = mgr.convertFont_toHaveTrait(&f, NSFontTraitMask::ItalicFontMask);
+    }
+    f
 }
 
-/// 构造文字属性字典：字体 + 前景色。
-fn text_attributes(
-    font: &Font,
-    color: Color,
-) -> Retained<NSDictionary<NSString, AnyObject>> {
+/// 构造文字属性字典：字体 + 前景色（+ 下划线）。
+fn text_attributes(font: &Font, color: Color) -> Retained<NSDictionary<NSString, AnyObject>> {
     let ns_font = to_nsfont(font);
     let ns_color = to_nscolor(color);
-    // 通过 Deref 链把具体对象强制成 &AnyObject 作为字典的值。
+    // 属性名是 AppKit 的 extern 静态量，读取需 unsafe。
+    let (k_font, k_color) = unsafe { (NSFontAttributeName, NSForegroundColorAttributeName) };
     let font_obj: &AnyObject = &ns_font;
     let color_obj: &AnyObject = &ns_color;
-    // 属性名是 AppKit 的 extern 静态量，读取需 unsafe。
-    let (k_font, k_color) =
-        unsafe { (NSFontAttributeName, NSForegroundColorAttributeName) };
-    NSDictionary::from_slices(&[k_font, k_color], &[font_obj, color_obj])
+    let mut keys: Vec<&NSString> = vec![k_font, k_color];
+    let mut vals: Vec<&AnyObject> = vec![font_obj, color_obj];
+    // 下划线：NSUnderlineStyleSingle = 1。
+    let underline = NSNumber::numberWithInt(1);
+    if font.underline {
+        let k_underline = unsafe { NSUnderlineStyleAttributeName };
+        let u_obj: &AnyObject = &underline;
+        keys.push(k_underline);
+        vals.push(u_obj);
+    }
+    NSDictionary::from_slices(&keys, &vals)
 }
 
 impl Canvas for CgCanvas {
@@ -86,16 +418,37 @@ impl Canvas for CgCanvas {
     }
 
     fn fill_round_rect(&mut self, rect: Rect, radius: Corners, color: Color) {
-        // NSBezierPath 仅支持统一圆角，一期取左上角半径近似（四角独立留待后续自建路径）。
-        let r = radius.tl as f64;
-        let path = NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(to_nsrect(rect), r, r);
+        let path = round_rect_path(rect, radius);
         to_nscolor(color).set();
         path.fill();
     }
 
+    fn fill_gradient_rect(
+        &mut self,
+        rect: Rect,
+        radius: Corners,
+        from: Color,
+        to: Color,
+        vertical: bool,
+    ) {
+        let path = round_rect_path(rect, radius);
+        let grad = NSGradient::initWithStartingColor_endingColor(
+            NSGradient::alloc(),
+            &to_nscolor(from),
+            &to_nscolor(to),
+        );
+        if let Some(grad) = grad {
+            // 视图为 flipped（y 向下）：竖直=90°（from 在上→to 在下），水平=0°（左→右）。
+            let angle = if vertical { 90.0 } else { 0.0 };
+            grad.drawInBezierPath_angle(&path, angle);
+        } else {
+            to_nscolor(from).set();
+            path.fill();
+        }
+    }
+
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
-        let r = radius.tl as f64;
-        let path = NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(to_nsrect(rect), r, r);
+        let path = round_rect_path(rect, radius);
         path.setLineWidth(line_width as f64);
         to_nscolor(color).set();
         path.stroke();
@@ -120,13 +473,22 @@ impl Canvas for CgCanvas {
         Size::new(sz.width as f32, sz.height as f32)
     }
 
-    fn draw_image(&mut self, source: &ImageSource, rect: Rect) {
-        let ImageSource::Path(p) = source;
-        let ns_path = NSString::from_str(p);
-        // 加载失败（文件不存在）时静默跳过，避免影响其它绘制。
-        if let Some(img) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
-            img.drawInRect(to_nsrect(rect));
+    fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
+        // 加载失败时静默跳过，避免影响其它绘制。
+        let Some(img) = self.load_image(source, rect, &fit) else {
+            return;
+        };
+        // tint 换色（保留 alpha 形状）。
+        let img = match tint {
+            Some(c) => tinted_image(&img, c),
+            None => img,
+        };
+        NSGraphicsContext::saveGraphicsState_class();
+        if let Some(ctx) = NSGraphicsContext::currentContext() {
+            ctx.setImageInterpolation(NSImageInterpolation::High);
         }
+        draw_nsimage(&img, rect, &fit);
+        NSGraphicsContext::restoreGraphicsState_class();
     }
 
     fn save(&mut self) {
@@ -140,6 +502,10 @@ impl Canvas for CgCanvas {
     fn clip_rect(&mut self, rect: Rect) {
         // 追加矩形裁剪区（配合 save/restore 使用）。
         NSBezierPath::bezierPathWithRect(to_nsrect(rect)).addClip();
+    }
+
+    fn clip_round_rect(&mut self, rect: Rect, radius: Corners) {
+        round_rect_path(rect, radius).addClip();
     }
 }
 

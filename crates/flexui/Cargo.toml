@@ -1,11 +1,13 @@
 [package]
 name = "flexui"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 [dependencies]
 flexui-core = { workspace = true }
 flexui-xml = { workspace = true }
+flexui-resource = { workspace = true }
+flexui-i18n = { workspace = true }
 
 # 按平台选择后端（编译期二选一）。
 [target.'cfg(target_os = "macos")'.dependencies]

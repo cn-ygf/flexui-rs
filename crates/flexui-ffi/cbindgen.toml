@@ -1,0 +1,21 @@
+# cbindgen 配置：生成 include/flexui.h 的 C 头文件。
+# 用法：cargo install cbindgen && cbindgen --config cbindgen.toml --crate flexui-ffi --output include/flexui.h
+language = "C"
+pragma_once = false
+include_guard = "FLEXUI_H"
+tab_width = 2
+style = "type"
+cpp_compat = true
+
+[export]
+# 只导出以 flex_ / Flex 前缀的公共符号。
+prefix = ""
+
+[parse]
+parse_deps = false
+
+[fn]
+sort_by = "None"
+
+[enum]
+prefix_with_name = true

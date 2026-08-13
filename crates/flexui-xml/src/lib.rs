@@ -4,5 +4,8 @@
 mod build;
 mod parser;
 
-pub use build::{load_str, Context, LoadError, LoadResult};
+pub use build::{
+    build_fragment_res, build_fragment_str, load_res, load_str, load_window_res, load_window_str,
+    Context, LoadError, LoadResult, WindowDoc,
+};
 pub use parser::{parse, Element, ParseError};

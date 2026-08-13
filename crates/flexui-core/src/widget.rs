@@ -7,10 +7,14 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use flexui_geometry::{Insets, Rect, Size};
-use flexui_gfx::{Canvas, Font};
+use flexui_gfx::{Canvas, Font, ImageSource};
 
+use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow};
-use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
+use crate::frame_animation::{FrameAnimation, FramePlayer};
+use crate::localization::LocalizationBinding;
+use crate::sizing::{Align, Justify, Sizing};
+use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
 
 /// 控件唯一 id。
 pub type WidgetId = u64;
@@ -46,6 +50,112 @@ pub enum WidgetRole {
     TabBox,
     /// 文本输入。
     Edit,
+    /// 滑块（拖动改变 value）。
+    Slider,
+    /// 下拉选择框（点击弹出选项菜单）。
+    ComboBox,
+    /// 菜单项（浮层菜单中的一行）。
+    MenuItem,
+    /// 列表视图（可滚动，点击选中行）。
+    ListView,
+}
+
+/// 控件专属属性名，用于运行时读取 XML 对应属性。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetPropertyKey {
+    Text,
+    Tooltip,
+    Font,
+    Style,
+    Width,
+    Height,
+    Padding,
+    Margin,
+    Spacing,
+    Flex,
+    Position,
+    Justify,
+    Align,
+    Enabled,
+    Visible,
+    Focusable,
+    FocusWithin,
+    HitPolicy,
+    Placeholder,
+    PlaceholderStyle,
+    Multiline,
+    ReadOnly,
+    NumberOnly,
+    Password,
+    PasswordChar,
+    MaxChars,
+    AutoSelectAll,
+    SwitchStyle,
+    IndicatorVisible,
+    Group,
+    TabIndex,
+    Selected,
+    SelectedIndex,
+    Value,
+    Items,
+    ImageSource,
+    RowHeight,
+    Vertical,
+    Thickness,
+    BindGroup,
+}
+
+/// XML/构建器及运行时写入控件专属配置的类型安全入口。
+#[derive(Clone)]
+pub enum WidgetProperty {
+    Text(String),
+    Tooltip(Option<String>),
+    Font(Font),
+    Style(StyleSet),
+    Width(Sizing),
+    Height(Sizing),
+    Padding(Insets),
+    Margin(Insets),
+    Spacing(f32),
+    Flex(f32),
+    Position(Option<(f32, f32)>),
+    Justify(Justify),
+    Align(Align),
+    Enabled(bool),
+    Visible(bool),
+    Focusable(bool),
+    FocusWithin(bool),
+    HitPolicy(HitPolicy),
+    Placeholder(String),
+    PlaceholderStyle(PlaceholderStyleSet),
+    Multiline(bool),
+    ReadOnly(bool),
+    NumberOnly(bool),
+    Password(bool),
+    PasswordChar(char),
+    MaxChars(Option<usize>),
+    AutoSelectAll(bool),
+    SwitchStyle(bool),
+    IndicatorVisible(bool),
+    Group(Option<u32>),
+    TabIndex(Option<usize>),
+    Selected(bool),
+    SelectedIndex(usize),
+    Value(f32),
+    Items(Vec<String>),
+    ImageSource(ImageSource),
+    RowHeight(f32),
+    Vertical(bool),
+    Thickness(f32),
+    BindGroup(Option<u32>),
+}
+
+/// 平台文本输入协议需要的只读快照。
+pub struct TextInputState {
+    pub text: String,
+    pub cursor: usize,
+    pub selection: Option<(usize, usize)>,
+    pub marked: String,
 }
 
 /// 节点类型：装箱的 trait 对象。
@@ -59,8 +169,19 @@ pub struct Base {
     pub role: WidgetRole,
     /// 文本内容（Label/Button/Edit/CheckBox/Radio 复用）。
     pub text: String,
+    /// 悬停提示文本（Tooltip）；None 表示无提示。
+    pub tooltip: Option<String>,
+    /// 声明式本地化绑定；运行时切换语言时据此重新解析。
+    pub localizations: Vec<LocalizationBinding>,
     pub font: Font,
     pub style: StyleSet,
+    /// 点击触发的背景/前景动画定义（覆盖当前状态图片，结束后恢复）。
+    pub click_bg_animation: Option<FrameAnimation>,
+    pub click_fg_animation: Option<FrameAnimation>,
+    pub(crate) bg_frame_player: FramePlayer,
+    pub(crate) fg_frame_player: FramePlayer,
+    pub(crate) click_bg_frame_player: FramePlayer,
+    pub(crate) click_fg_frame_player: FramePlayer,
 
     // —— 运行时交互状态（由分发器维护）——
     pub enabled: bool,
@@ -68,30 +189,42 @@ pub struct Base {
     pub pressed: bool,
     pub focused: bool,
     pub focusable: bool,
+    /// 任一后代获得焦点时，本节点及其子树使用 focus 状态样式。
+    pub focus_within: bool,
+    /// 光标闪烁相位（true=显示），由分发器的 blink 定时切换；Edit 绘制光标用。
+    pub caret_on: bool,
     pub visible: bool,
     pub hit: HitPolicy,
 
     // —— 选择 / 分组（Radio/CheckBox/TabBox 用）——
     pub selected: bool,
-    pub group: Option<u32>,
-    pub tab_index: Option<usize>,
-    pub selected_index: usize,
 
     // —— 布局 ——
     /// 布局后的绝对矩形（窗口逻辑坐标）。
     pub rect: Rect,
     pub padding: Insets,
-    pub width: Option<f32>,
-    pub height: Option<f32>,
+    /// 外边距（参与容器排布）。
+    pub margin: Insets,
+    /// 宽/高尺寸模式（Fixed/Content/Fill）。
+    pub width: Sizing,
+    pub height: Sizing,
+    /// Fill 时的分配权重（0 视为 1）。
     pub flex_grow: f32,
     /// Box/VBox/HBox 子控件间距。
     pub spacing: f32,
+    /// 容器主轴对齐（VBox/HBox）。
+    pub justify: Justify,
+    /// 容器交叉轴对齐（VBox/HBox）。
+    pub align: Align,
+    /// 绝对定位（相对父内容区左上角）。设了则 Box 按此摆放，忽略叠放填充。
+    pub pos: Option<(f32, f32)>,
 
     // —— 子控件 ——
     pub children: Vec<Node>,
 
-    // —— 回调 ——
-    pub on_click: Option<Box<dyn FnMut()>>,
+    // —— 回调（点击时触发，参数为事件上下文，可按 name 访问整棵控件树）——
+    pub on_click: Option<crate::dispatch::ClickHandler>,
+    pub on_control_event: Option<crate::dispatch::ControlEventHandler>,
 }
 
 impl Base {
@@ -101,27 +234,46 @@ impl Base {
             name: None,
             role,
             text: String::new(),
+            tooltip: None,
+            localizations: Vec::new(),
             font: Font::default(),
             style: StyleSet::new(),
+            click_bg_animation: None,
+            click_fg_animation: None,
+            bg_frame_player: FramePlayer::default(),
+            fg_frame_player: FramePlayer::default(),
+            click_bg_frame_player: FramePlayer::default(),
+            click_fg_frame_player: FramePlayer::default(),
             enabled: true,
             hover: false,
             pressed: false,
             focused: false,
-            focusable: matches!(role, WidgetRole::Button | WidgetRole::Radio | WidgetRole::CheckBox | WidgetRole::Edit),
+            focus_within: false,
+            caret_on: true,
+            focusable: matches!(
+                role,
+                WidgetRole::Button
+                    | WidgetRole::Radio
+                    | WidgetRole::CheckBox
+                    | WidgetRole::Edit
+                    | WidgetRole::ComboBox
+            ),
             visible: true,
             hit: HitPolicy::Solid,
             selected: false,
-            group: None,
-            tab_index: None,
-            selected_index: 0,
             rect: Rect::default(),
             padding: Insets::default(),
-            width: None,
-            height: None,
+            margin: Insets::default(),
+            width: Sizing::Content,
+            height: Sizing::Content,
             flex_grow: 0.0,
             spacing: 0.0,
+            justify: Justify::Start,
+            align: Align::Stretch,
+            pos: None,
             children: Vec::new(),
             on_click: None,
+            on_control_event: None,
         }
     }
 
@@ -138,9 +290,9 @@ impl Base {
         }
     }
 
-    /// 当前完整视觉状态。
+    /// 当前完整视觉状态（含 selected 维度，供勾选/单选贴图）。
     pub fn visual_state(&self) -> VisualState {
-        VisualState::new(self.effective_base(), self.focused)
+        VisualState::with_selected(self.effective_base(), self.focused, self.selected)
     }
 
     /// 解析当前生效样式。
@@ -168,9 +320,148 @@ pub trait Widget {
     /// 绘制自身内容（文字/图标等）。背景/边框/子控件由统一管线负责。
     fn paint_content(&self, _cv: &mut dyn Canvas, _style: &StyleSpec) {}
 
+    /// 子控件绘制与命中的可见区域；滚动容器覆写为去除 padding 后的视口。
+    fn children_viewport(&self) -> Rect {
+        self.base().rect
+    }
+
+    /// 子控件绘制完成后的前景层；滚动条等需要覆盖在内容之上的元素使用。
+    fn paint_foreground(&self, _cv: &mut dyn Canvas, _style: &StyleSpec) {}
+
     /// 自定义事件处理（默认不拦截）。
     fn on_event(&mut self, _ev: &Event) -> EventFlow {
         EventFlow::Ignored
+    }
+
+    /// 应用控件专属配置；不支持该属性时返回 false。
+    fn apply_property(&mut self, _property: WidgetProperty) -> bool {
+        false
+    }
+
+    /// 读取控件专属配置；返回值使用与写入相同的类型。
+    fn property(&self, _key: WidgetPropertyKey) -> Option<WidgetProperty> {
+        None
+    }
+
+    /// 获得焦点后的控件专属行为。
+    fn focus_gained(&mut self) {}
+
+    // —— 文本编辑钩子（供分发器统一驱动复制/剪切/粘贴/全选，Edit 覆写）——
+    /// 当前选中的文本（无选区返回 None）。供复制/剪切读取。
+    fn selected_text(&self) -> Option<String> {
+        None
+    }
+    /// 用 s 替换当前选区（无选区则在光标处插入）。返回内容是否改变。供粘贴用。
+    fn replace_selection(&mut self, _s: &str) -> bool {
+        false
+    }
+    /// 删除当前选区。返回是否存在选区被删除。供剪切用。
+    fn delete_selection(&mut self) -> bool {
+        false
+    }
+    /// 全选文本。
+    fn select_all(&mut self) {}
+
+    /// 统一设置文本，Edit 可覆写以同步内部编辑状态。
+    fn set_text_value(&mut self, text: String) {
+        self.base_mut().text = text;
+    }
+
+    /// 排版后的文本插入点，供平台输入法定位候选窗口。
+    fn text_input_rect(&self) -> Option<Rect> {
+        None
+    }
+
+    /// 平台文本输入协议快照与组合串写入。
+    fn text_input_state(&self) -> Option<TextInputState> {
+        None
+    }
+    fn set_marked_text(&mut self, _text: String) -> bool {
+        false
+    }
+    fn clear_marked_text(&mut self) -> bool {
+        false
+    }
+
+    /// 控件专属选择/分组能力。
+    fn selection_group(&self) -> Option<u32> {
+        None
+    }
+    fn tab_index(&self) -> Option<usize> {
+        None
+    }
+    fn tab_bind_group(&self) -> Option<u32> {
+        None
+    }
+    fn selected_index(&self) -> Option<usize> {
+        None
+    }
+    fn set_selected_index(&mut self, _index: usize) -> bool {
+        false
+    }
+
+    /// 滚动与动画能力。
+    fn is_scrollable(&self) -> bool {
+        false
+    }
+    fn scroll_by(&mut self, _dy: f32) -> bool {
+        false
+    }
+    fn scroll_position(&self) -> Option<f32> {
+        None
+    }
+    fn animation_value(&self, _prop: AnimProp) -> Option<f32> {
+        None
+    }
+    fn set_animation_value(&mut self, _prop: AnimProp, _value: f32) -> bool {
+        false
+    }
+
+    // —— 下拉/菜单钩子（供分发器打开选项菜单，ComboBox 覆写）——
+    /// 该控件点击时要弹出的菜单项文本；返回 None 表示不弹菜单。
+    fn menu_items(&self) -> Option<Vec<String>> {
+        None
+    }
+    /// 选中第 i 项（ComboBox：设 selected_index 并回填文本）。
+    fn set_selected_item(&mut self, _i: usize) {}
+}
+
+// —— 能力 trait：以 trait 约束表达「类型层级/继承视图」（组合优于继承的 Rust 表达）——
+//
+// 对照 duilib 的模板继承链 Label→Button→CheckBox→Radio，这里用能力 trait 表示：
+//   Widget（基类，人人都实现）
+//     ├─ TextControl  有文本：Label / Button / Edit / CheckBox / Radio
+//     ├─ Clickable    可点击：Button / CheckBox / Radio
+//     └─ Container     容器：Panel(Box) / VBox / HBox / TabBox
+
+/// 有文本内容的控件。
+pub trait TextControl: Widget {
+    fn text(&self) -> &str {
+        &self.base().text
+    }
+    fn set_text(&mut self, text: impl Into<String>)
+    where
+        Self: Sized,
+    {
+        self.set_text_value(text.into());
+    }
+}
+
+/// 可点击控件。
+pub trait Clickable: Widget {}
+
+/// 可容纳子控件的容器。
+pub trait Container: Widget {
+    /// 追加一个已装箱子控件。
+    fn add(&mut self, child: Node)
+    where
+        Self: Sized,
+    {
+        self.base_mut().children.push(child);
+    }
+    /// 子控件数量。
+    fn child_count(&self) -> usize {
+        self.base().children.len()
     }
 }
 
@@ -191,6 +482,45 @@ pub fn find_by_name(node: &dyn Widget, name: &str) -> Option<WidgetId> {
     for child in node.base().children.iter() {
         if let Some(id) = find_by_name(child.as_ref(), name) {
             return Some(id);
+        }
+    }
+    None
+}
+
+/// 按 id 查找控件并返回只读引用。
+pub fn find_by_id(node: &dyn Widget, id: WidgetId) -> Option<&dyn Widget> {
+    if node.base().id == id {
+        return Some(node);
+    }
+    for child in node.base().children.iter() {
+        if let Some(found) = find_by_id(child.as_ref(), id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// 按 id 查找控件并返回可变引用（首个匹配）。供后端 IME 等按焦点 id 定位控件用。
+pub fn find_mut_by_id(node: &mut dyn Widget, id: WidgetId) -> Option<&mut dyn Widget> {
+    if node.base().id == id {
+        return Some(node);
+    }
+    for child in node.base_mut().children.iter_mut() {
+        if let Some(found) = find_mut_by_id(child.as_mut(), id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// 按 name 查找控件并返回可变引用（首个匹配）。供动态构建后直接修改控件用（W8）。
+pub fn find_mut_by_name<'a>(node: &'a mut dyn Widget, name: &str) -> Option<&'a mut dyn Widget> {
+    if node.base().name.as_deref() == Some(name) {
+        return Some(node);
+    }
+    for child in node.base_mut().children.iter_mut() {
+        if let Some(found) = find_mut_by_name(child.as_mut(), name) {
+            return Some(found);
         }
     }
     None

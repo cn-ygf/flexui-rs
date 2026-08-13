@@ -3,6 +3,7 @@
 //! 各平台后端把原生事件（NSEvent / WndProc 消息）翻译成这里的 `Event`，
 //! 再交给 `Dispatcher` 做命中测试与分发。坐标一律为「逻辑像素、左上原点」。
 
+use crate::frame_animation::FrameLayer;
 use flexui_geometry::Point;
 
 /// 鼠标按键。
@@ -11,6 +12,18 @@ pub enum MouseButton {
     Left,
     Right,
     Middle,
+}
+
+/// 键盘修饰键状态。`meta` 指平台命令键（macOS Cmd / Windows Win）。
+///
+/// 文本控件主要读 `shift`（配合方向键扩展选区）；复制/剪切/粘贴/全选等由后端
+/// 直接识别命令键并走剪贴板漏斗，不经此结构下发。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mods {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub meta: bool,
 }
 
 /// 统一事件枚举（一期覆盖鼠标 + 键盘 + 窗口基础事件）。
@@ -22,18 +35,37 @@ pub enum Event {
     MouseDown { pos: Point, button: MouseButton },
     /// 鼠标抬起。
     MouseUp { pos: Point, button: MouseButton },
+    /// 双击（左键，平台原生识别）。
+    DoubleClick { pos: Point },
     /// 滚轮滚动（dx/dy 为逻辑像素增量）。
     MouseWheel { pos: Point, dx: f32, dy: f32 },
-    /// 键按下（key 为平台无关键码，一期用 u32 透传）。
-    KeyDown { key: u32 },
+    /// 键按下（key 为平台无关键码，一期用 u32 透传；mods 为修饰键状态）。
+    KeyDown { key: u32, mods: Mods },
     /// 键抬起。
-    KeyUp { key: u32 },
+    KeyUp { key: u32, mods: Mods },
     /// 字符输入（已由输入法/键盘布局翻译，用于文本框）。
     Char { ch: char },
     /// 窗口尺寸改变（逻辑像素）。
     WindowResized { width: f32, height: f32 },
     /// 缩放因子改变（HiDPI）。
     ScaleChanged { scale: f32 },
+    /// 窗口获得或失去键盘激活状态。
+    WindowFocusChanged { focused: bool },
+}
+
+/// 平台无关的按键码常量（后端把各自的原始键码映射到这些值再发出）。
+pub mod keys {
+    pub const BACKSPACE: u32 = 8;
+    pub const TAB: u32 = 9;
+    pub const ENTER: u32 = 13;
+    pub const ESCAPE: u32 = 27;
+    pub const DELETE: u32 = 127;
+    pub const LEFT: u32 = 0x1000;
+    pub const RIGHT: u32 = 0x1001;
+    pub const HOME: u32 = 0x1002;
+    pub const END: u32 = 0x1003;
+    pub const UP: u32 = 0x1004;
+    pub const DOWN: u32 = 0x1005;
 }
 
 /// 事件处理后的传播控制。
@@ -43,4 +75,56 @@ pub enum EventFlow {
     Consumed,
     /// 未消费，继续向下/兄弟传播。
     Ignored,
+}
+
+/// 用户交互产生的控件语义事件。代码主动 setter 不重复发送 change 事件。
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlEvent {
+    HoverChanged(bool),
+    PressedChanged(bool),
+    FocusChanged(bool),
+    TextChanged(String),
+    SelectedChanged(bool),
+    SelectionChanged(Option<usize>),
+    ValueChanged(f32),
+    ScrollChanged(f32),
+    FrameAnimationFinished(FrameLayer),
+}
+
+/// 普通使用者可监听的窗口语义事件。
+#[derive(Debug, Clone, PartialEq)]
+pub enum WindowEvent {
+    Resized { width: f32, height: f32 },
+    Moved { x: f32, y: f32 },
+    FocusChanged(bool),
+    ScaleChanged(f32),
+    Minimized,
+    Maximized,
+    Restored,
+    KeyDown { key: u32, mods: Mods },
+    KeyUp { key: u32, mods: Mods },
+    CharInput(char),
+}
+
+impl WindowEvent {
+    pub fn from_event(event: &Event) -> Option<Self> {
+        match event {
+            Event::WindowResized { width, height } => Some(Self::Resized {
+                width: *width,
+                height: *height,
+            }),
+            Event::WindowFocusChanged { focused } => Some(Self::FocusChanged(*focused)),
+            Event::ScaleChanged { scale } => Some(Self::ScaleChanged(*scale)),
+            Event::KeyDown { key, mods } => Some(Self::KeyDown {
+                key: *key,
+                mods: *mods,
+            }),
+            Event::KeyUp { key, mods } => Some(Self::KeyUp {
+                key: *key,
+                mods: *mods,
+            }),
+            Event::Char { ch } => Some(Self::CharInput(*ch)),
+            _ => None,
+        }
+    }
 }

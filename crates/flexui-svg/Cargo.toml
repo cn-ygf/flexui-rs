@@ -1,0 +1,8 @@
+[package]
+name = "flexui-svg"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+# 纯 Rust SVG 光栅化（usvg 解析 + tiny-skia 栅格）；作用域仅 SVG→RGBA 位图。
+resvg = { version = "0.45", default-features = false }

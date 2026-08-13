@@ -2,10 +2,14 @@
 //!
 //! - 基础状态 4 种：Normal / Hot / Pushed / Disabled，优先级 Disabled>Pushed>Hot>Normal。
 //! - focus 维度正交叠加：4×2 = 8 个样式槽。
-//! - 每个样式槽 `StyleSpec` 所有字段可缺省，解析时按「状态回退 + 字段级回退到 Normal」补全。
+//! - 每个样式槽 `StyleSpec` 所有字段可缺省，解析时按状态层叠并逐字段继承。
+
+use std::collections::HashMap;
 
 use flexui_geometry::{Color, Corners};
-use flexui_gfx::{ImageSource, TextAlign};
+use flexui_gfx::{Font, ImageFit, ImageSource, TextAlign};
+
+use crate::frame_animation::FrameAnimation;
 
 /// 基础状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -17,17 +21,47 @@ pub enum BaseState {
     Disabled,
 }
 
-/// 完整视觉状态：基础状态 + 是否 focus。
+/// 完整视觉状态：基础状态 + 是否 focus + 是否 selected（勾选/单选选中）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct VisualState {
     pub base: BaseState,
     pub focused: bool,
+    pub selected: bool,
 }
 
 impl VisualState {
+    /// 构造（selected 默认 false）。
     pub fn new(base: BaseState, focused: bool) -> Self {
-        Self { base, focused }
+        Self {
+            base,
+            focused,
+            selected: false,
+        }
     }
+    /// 带 selected 维度构造（用于 CheckBox/Radio 贴图）。
+    pub fn with_selected(base: BaseState, focused: bool, selected: bool) -> Self {
+        Self {
+            base,
+            focused,
+            selected,
+        }
+    }
+}
+
+/// 线性渐变（两色）：竖直（上→下）或水平（左→右）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gradient {
+    pub from: Color,
+    pub to: Color,
+    pub vertical: bool,
+}
+
+/// 投影（硬阴影：按 dx/dy 偏移的同形填充，无模糊）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    pub dx: f32,
+    pub dy: f32,
+    pub color: Color,
 }
 
 /// 单个状态槽的样式，所有字段可缺省（None 表示继承）。
@@ -36,11 +70,101 @@ pub struct StyleSpec {
     pub bg_color: Option<Color>,
     pub fg_color: Option<Color>,
     pub bg_image: Option<ImageSource>,
+    /// 背景帧动画；活动时替换 `bg_image`。
+    pub bg_animation: Option<FrameAnimation>,
+    /// 背景图换色（None=原色）。
+    pub bg_tint: Option<Color>,
+    /// 背景图渲染方式。
+    pub bg_fit: Option<ImageFit>,
     pub fg_image: Option<ImageSource>,
+    /// 前景帧动画；活动时替换 `fg_image`。
+    pub fg_animation: Option<FrameAnimation>,
+    pub fg_tint: Option<Color>,
+    pub fg_fit: Option<ImageFit>,
     pub border_color: Option<Color>,
     pub border_width: Option<f32>,
     pub corner_radius: Option<Corners>,
     pub text_align: Option<TextAlign>,
+    /// 控件自身透明度 0~1（作用于本控件的背景/内容/边框，不含子控件）。
+    pub opacity: Option<f32>,
+    /// 背景线性渐变（存在时优先于 bg_color）。
+    pub gradient: Option<Gradient>,
+    /// 投影。
+    pub shadow: Option<Shadow>,
+}
+
+/// Edit 占位文本的单个状态样式。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlaceholderStyleSpec {
+    pub font_family: Option<String>,
+    pub font_size: Option<f32>,
+    pub fg_color: Option<Color>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+}
+
+impl PlaceholderStyleSpec {
+    fn fill_from(&self, base: &PlaceholderStyleSpec) -> Self {
+        Self {
+            font_family: self.font_family.clone().or_else(|| base.font_family.clone()),
+            font_size: self.font_size.or(base.font_size),
+            fg_color: self.fg_color.or(base.fg_color),
+            bold: self.bold.or(base.bold),
+            italic: self.italic.or(base.italic),
+            underline: self.underline.or(base.underline),
+        }
+    }
+
+    /// 把稀疏字体样式覆盖到控件字体上。
+    pub fn resolve_font(&self, base: &Font) -> Font {
+        Font {
+            family: self.font_family.clone().or_else(|| base.family.clone()),
+            size: self.font_size.unwrap_or(base.size),
+            bold: self.bold.unwrap_or(base.bold),
+            italic: self.italic.unwrap_or(base.italic),
+            underline: self.underline.unwrap_or(base.underline),
+        }
+    }
+}
+
+/// Edit 占位文本的分状态样式集。
+#[derive(Debug, Clone, Default)]
+pub struct PlaceholderStyleSet {
+    normal: PlaceholderStyleSpec,
+    slots: HashMap<VisualState, PlaceholderStyleSpec>,
+}
+
+impl PlaceholderStyleSet {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn set(&mut self, state: VisualState, spec: PlaceholderStyleSpec) {
+        if state == VisualState::default() {
+            self.normal = spec;
+        } else {
+            self.slots.insert(state, spec);
+        }
+    }
+
+    pub fn with_normal(mut self, spec: PlaceholderStyleSpec) -> Self {
+        self.normal = spec;
+        self
+    }
+
+    fn slot(&self, state: VisualState) -> Option<&PlaceholderStyleSpec> {
+        if state == VisualState::default() { Some(&self.normal) } else { self.slots.get(&state) }
+    }
+
+    /// 按视觉状态逐层叠加：normal → base → focus → base+focus → selected 组合。
+    pub fn resolve(&self, state: VisualState) -> PlaceholderStyleSpec {
+        let mut effective = self.normal.clone();
+        for candidate in style_layers(state) {
+            if let Some(spec) = self.slot(candidate) {
+                effective = spec.fill_from(&effective);
+            }
+        }
+        effective
+    }
 }
 
 impl StyleSpec {
@@ -50,26 +174,30 @@ impl StyleSpec {
             bg_color: self.bg_color.or(base.bg_color),
             fg_color: self.fg_color.or(base.fg_color),
             bg_image: self.bg_image.clone().or_else(|| base.bg_image.clone()),
+            bg_animation: self.bg_animation.clone().or_else(|| base.bg_animation.clone()),
+            bg_tint: self.bg_tint.or(base.bg_tint),
+            bg_fit: self.bg_fit.clone().or_else(|| base.bg_fit.clone()),
             fg_image: self.fg_image.clone().or_else(|| base.fg_image.clone()),
+            fg_animation: self.fg_animation.clone().or_else(|| base.fg_animation.clone()),
+            fg_tint: self.fg_tint.or(base.fg_tint),
+            fg_fit: self.fg_fit.clone().or_else(|| base.fg_fit.clone()),
             border_color: self.border_color.or(base.border_color),
             border_width: self.border_width.or(base.border_width),
             corner_radius: self.corner_radius.or(base.corner_radius),
             text_align: self.text_align.or(base.text_align),
+            opacity: self.opacity.or(base.opacity),
+            gradient: self.gradient.or(base.gradient),
+            shadow: self.shadow.or(base.shadow),
         }
     }
 }
 
-/// 8 个状态槽的集合（稀疏，未设置的用 Normal 兜底）。
+/// 分状态样式集合：稀疏 map，键为 (base, focus, selected)；未命中按回退链取，
+/// 最终字段级回退到 Normal 槽。
 #[derive(Debug, Clone, Default)]
 pub struct StyleSet {
     normal: StyleSpec,
-    normal_focus: Option<StyleSpec>,
-    hot: Option<StyleSpec>,
-    hot_focus: Option<StyleSpec>,
-    pushed: Option<StyleSpec>,
-    pushed_focus: Option<StyleSpec>,
-    disabled: Option<StyleSpec>,
-    disabled_focus: Option<StyleSpec>,
+    slots: HashMap<VisualState, StyleSpec>,
 }
 
 impl StyleSet {
@@ -79,15 +207,10 @@ impl StyleSet {
 
     /// 设置某状态槽。
     pub fn set(&mut self, state: VisualState, spec: StyleSpec) {
-        match (state.base, state.focused) {
-            (BaseState::Normal, false) => self.normal = spec,
-            (BaseState::Normal, true) => self.normal_focus = Some(spec),
-            (BaseState::Hot, false) => self.hot = Some(spec),
-            (BaseState::Hot, true) => self.hot_focus = Some(spec),
-            (BaseState::Pushed, false) => self.pushed = Some(spec),
-            (BaseState::Pushed, true) => self.pushed_focus = Some(spec),
-            (BaseState::Disabled, false) => self.disabled = Some(spec),
-            (BaseState::Disabled, true) => self.disabled_focus = Some(spec),
+        if state == VisualState::default() {
+            self.normal = spec;
+        } else {
+            self.slots.insert(state, spec);
         }
     }
 
@@ -97,7 +220,7 @@ impl StyleSet {
         self
     }
 
-    /// 便捷：设置某基础状态（无 focus）槽。
+    /// 便捷：设置某基础状态（无 focus/selected）槽。
     pub fn with_state(mut self, base: BaseState, spec: StyleSpec) -> Self {
         self.set(VisualState::new(base, false), spec);
         self
@@ -105,38 +228,49 @@ impl StyleSet {
 
     /// 取某状态槽（不做回退）。
     fn slot(&self, state: VisualState) -> Option<&StyleSpec> {
-        match (state.base, state.focused) {
-            (BaseState::Normal, false) => Some(&self.normal),
-            (BaseState::Normal, true) => self.normal_focus.as_ref(),
-            (BaseState::Hot, false) => self.hot.as_ref(),
-            (BaseState::Hot, true) => self.hot_focus.as_ref(),
-            (BaseState::Pushed, false) => self.pushed.as_ref(),
-            (BaseState::Pushed, true) => self.pushed_focus.as_ref(),
-            (BaseState::Disabled, false) => self.disabled.as_ref(),
-            (BaseState::Disabled, true) => self.disabled_focus.as_ref(),
+        if state == VisualState::default() {
+            Some(&self.normal)
+        } else {
+            self.slots.get(&state)
         }
     }
 
-    /// 解析出生效样式：
-    /// 1. focus 槽缺省 → 退到同基础状态的非 focus 槽；
-    /// 2. 该基础状态槽仍缺省 → 退到 Normal 槽；
-    /// 3. 字段级：最终结果的每个缺省字段再由 Normal 兜底。
+    /// 解析出生效样式：从 Normal 开始逐层叠加基础、focus、selected 及组合状态。
+    /// 后叠加的状态只覆盖自身声明的字段，因此 focus 可覆盖 hot，同时继承 hot 的其它字段。
     pub fn resolve(&self, state: VisualState) -> StyleSpec {
-        // 第一步：状态槽回退，找到「生效槽」。
-        let effective = self
-            .slot(state)
-            .or_else(|| {
-                if state.focused {
-                    self.slot(VisualState::new(state.base, false))
-                } else {
-                    None
-                }
-            })
-            .cloned()
-            .unwrap_or_default();
-        // 第二步：字段级回退到 Normal 槽。
-        effective.fill_from(&self.normal)
+        let mut effective = self.normal.clone();
+        for candidate in style_layers(state) {
+            if let Some(spec) = self.slot(candidate) {
+                effective = spec.fill_from(&effective);
+            }
+        }
+        effective
     }
+
+    /// 所有状态槽可能产生的阴影，用于计算状态切换时的完整视觉脏区。
+    pub(crate) fn shadows(&self) -> impl Iterator<Item = Shadow> + '_ {
+        std::iter::once(self.normal.shadow).chain(self.slots.values().map(|slot| slot.shadow)).flatten()
+    }
+}
+
+fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
+    let has_base = state.base != BaseState::Normal;
+    [
+        has_base.then(|| VisualState::new(state.base, false)),
+        state.focused.then(|| VisualState::new(BaseState::Normal, true)),
+        (has_base && state.focused).then(|| VisualState::new(state.base, true)),
+        state
+            .selected
+            .then(|| VisualState::with_selected(BaseState::Normal, false, true)),
+        (has_base && state.selected)
+            .then(|| VisualState::with_selected(state.base, false, true)),
+        (state.focused && state.selected)
+            .then(|| VisualState::with_selected(BaseState::Normal, true, true)),
+        (has_base && state.focused && state.selected)
+            .then(|| VisualState::with_selected(state.base, true, true)),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 #[cfg(test)]
@@ -171,6 +305,39 @@ mod tests {
     }
 
     #[test]
+    fn focus_样式覆盖hot且继承其余字段() {
+        let mut set = StyleSet::new();
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            StyleSpec {
+                bg_color: Some(Color::BLACK),
+                border_width: Some(2.0),
+                ..Default::default()
+            },
+        );
+        set.set(
+            VisualState::new(BaseState::Normal, true),
+            spec_bg(Color::WHITE),
+        );
+
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.bg_color, Some(Color::WHITE));
+        assert_eq!(resolved.border_width, Some(2.0));
+    }
+
+    #[test]
+    fn hot_focus_组合样式优先于单独状态() {
+        let mut set = StyleSet::new();
+        let combined = Color::from_u8(255, 0, 0, 255);
+        set.set(VisualState::new(BaseState::Hot, false), spec_bg(Color::BLACK));
+        set.set(VisualState::new(BaseState::Normal, true), spec_bg(Color::WHITE));
+        set.set(VisualState::new(BaseState::Hot, true), spec_bg(combined));
+
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.bg_color, Some(combined));
+    }
+
+    #[test]
     fn 字段级回退_只缺的字段取_normal() {
         let mut set = StyleSet::new();
         set.set(
@@ -186,5 +353,40 @@ mod tests {
         let r = set.resolve(VisualState::new(BaseState::Hot, false));
         assert_eq!(r.bg_color, Some(Color::BLACK)); // 用自己的
         assert_eq!(r.border_width, Some(1.0)); // 从 Normal 继承
+    }
+
+    #[test]
+    fn placeholder_state_fields_fall_back_to_normal() {
+        let mut set = PlaceholderStyleSet::new().with_normal(PlaceholderStyleSpec {
+            font_family: Some("Microsoft YaHei".to_string()),
+            font_size: Some(14.0), fg_color: Some(Color::WHITE),
+            bold: Some(true), italic: Some(false), underline: Some(true),
+        });
+        set.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
+            font_size: Some(16.0), fg_color: Some(Color::BLACK), italic: Some(true),
+            ..Default::default()
+        });
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.font_family.as_deref(), Some("Microsoft YaHei"));
+        assert_eq!(resolved.font_size, Some(16.0));
+        assert_eq!(resolved.fg_color, Some(Color::BLACK));
+        assert_eq!(resolved.bold, Some(true));
+        assert_eq!(resolved.italic, Some(true));
+        assert_eq!(resolved.underline, Some(true));
+    }
+
+    #[test]
+    fn placeholder_focus_overrides_hot_fields() {
+        let mut set = PlaceholderStyleSet::new();
+        set.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
+            font_size: Some(16.0), fg_color: Some(Color::BLACK), ..Default::default()
+        });
+        set.set(VisualState::new(BaseState::Normal, true), PlaceholderStyleSpec {
+            fg_color: Some(Color::WHITE), ..Default::default()
+        });
+
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.font_size, Some(16.0));
+        assert_eq!(resolved.fg_color, Some(Color::WHITE));
     }
 }

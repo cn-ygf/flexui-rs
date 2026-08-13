@@ -1,12 +1,13 @@
 [package]
 name = "flexui-macos"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 [dependencies]
 flexui-geometry = { workspace = true }
 flexui-gfx = { workspace = true }
 flexui-core = { workspace = true }
+flexui-svg = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 objc2-app-kit = { workspace = true }
