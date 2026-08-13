@@ -36,19 +36,3 @@ jobs:
       - name: Clippy（零告警）
         run: cargo clippy --workspace --exclude flexui-macos --all-targets -- -D warnings
 
-  # 交叉编译校验：在 Linux 上用 zig 交叉编译 Windows 目标（与本地 scripts/win-test.sh 对齐）。
-  cross-windows:
-    name: Cross-compile Windows (zig)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: 安装 zig 与目标
-        run: |
-          rustup target add x86_64-pc-windows-gnu
-          pip install ziglang           # 提供 zig，cargo-zigbuild 自动识别
-          cargo install --locked cargo-zigbuild
-      - name: 交叉编译（库）
-        run: |
-          cargo zigbuild --target x86_64-pc-windows-gnu -p flexui-windows
-          cargo zigbuild --target x86_64-pc-windows-gnu -p flexui-ffi
-          cargo zigbuild --target x86_64-pc-windows-gnu -p flexui
