@@ -10,14 +10,14 @@
       <Label text="controls.autoplay.title" height="24" normal-fgcolor="#FFFFFF" font-size="16" bold="true" normal-textalign="center"/>
       <Panel width="112" height="112" normal-bgcolor="#181D42" corner-radius="8"
              normal-fgframes="animations/btn_loading/loading_{1..25}@2.00x.png"
-             normal-fgframes-fps="25" normal-fgframes-play="loop" normal-fgfit="center"/>
+             normal-fgframes-fps="20" normal-fgframes-play="loop" normal-fgfit="center"/>
       <Label text="controls.autoplay.detail" height="36" normal-fgcolor="#9BA5CC" font-size="13" normal-textalign="center"/>
     </VBox>
     <VBox flex="1" padding="20" spacing="10" align="center" normal-bgcolor="#23294F" corner-radius="8">
       <Label text="controls.hot.title" height="24" normal-fgcolor="#FFFFFF" font-size="16" bold="true" normal-textalign="center"/>
       <Button name="loading_on_hot" width="160" height="112" normal-bgcolor="#30386F" hot-bgcolor="#3B4783" corner-radius="8"
               hot-fgframes="animations/btn_loading/loading_{1..25}@2.00x.png"
-              hot-fgframes-fps="25" hot-fgframes-play="loop" normal-fgfit="center"/>
+              hot-fgframes-fps="20" hot-fgframes-play="loop" normal-fgfit="center"/>
       <Label text="controls.hot.detail" height="36" normal-fgcolor="#9BA5CC" font-size="13" normal-textalign="center"/>
     </VBox>
     <VBox flex="1" padding="20" spacing="10" align="center" normal-bgcolor="#23294F" corner-radius="8">
@@ -25,7 +25,7 @@
       <Button name="loading_on_click" width="160" height="112" normal-bgcolor="#30386F" hot-bgcolor="#3B4783"
               pushed-bgcolor="#46538F" corner-radius="8"
               click-fgframes="animations/btn_loading/loading_{1..25}@2.00x.png"
-              click-fgframes-fps="25" click-fgframes-play="once" click-fgframes-finish="restore" normal-fgfit="center"/>
+              click-fgframes-fps="20" click-fgframes-play="once" click-fgframes-finish="restore" normal-fgfit="center"/>
       <Label text="controls.click.detail" height="36" normal-fgcolor="#9BA5CC" font-size="13" normal-textalign="center"/>
     </VBox>
     <VBox flex="1" padding="20" spacing="10" align="center" normal-bgcolor="#23294F" corner-radius="8">
@@ -33,7 +33,7 @@
       <Button name="loading_while_pushed" width="160" height="112" normal-bgcolor="#30386F" hot-bgcolor="#3B4783"
               pushed-bgcolor="#46538F" corner-radius="8"
               pushed-fgframes="animations/btn_loading/loading_{1..25}@2.00x.png"
-              pushed-fgframes-fps="25" pushed-fgframes-play="loop" normal-fgfit="center"/>
+              pushed-fgframes-fps="20" pushed-fgframes-play="loop" normal-fgfit="center"/>
       <Label text="controls.pushed.detail" height="36" normal-fgcolor="#9BA5CC" font-size="13" normal-textalign="center"/>
     </VBox>
   </HBox>
