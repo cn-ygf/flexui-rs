@@ -6,6 +6,7 @@
 mod canvas;
 mod clipboard;
 mod dialog;
+mod native_menu;
 mod view;
 
 pub use canvas::CgCanvas;

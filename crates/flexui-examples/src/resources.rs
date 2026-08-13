@@ -34,7 +34,10 @@ pub(crate) fn original_svg(bytes: &'static [u8]) -> ImageSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui::{layout_node, Context, Corners, Font, Point, Rect, Size, Widget};
+    use flexui::{
+        apply_theme, layout_node, Color, Context, Corners, Font, Point, Rect, Size, Sizing, Theme,
+        Widget,
+    };
 
     struct TestCanvas;
 
@@ -48,7 +51,8 @@ mod tests {
             _radius: Corners,
             _color: flexui::Color,
             _width: f32,
-        ) {}
+        ) {
+        }
         fn draw_text(&mut self, _text: &str, _origin: Point, _font: &Font, _color: flexui::Color) {}
         fn measure_text(&self, text: &str, font: &Font) -> Size {
             Size::new(text.chars().count() as f32 * font.size * 0.5, font.size)
@@ -65,6 +69,13 @@ mod tests {
             .find_map(|child| find_widget(child.as_ref(), name))
     }
 
+    fn load_themed_window(path: &str) -> flexui::WindowDoc {
+        let resources = resources();
+        let mut window = flexui::load_window_res(&resources, path, &Context::new()).unwrap();
+        apply_theme(window.root.as_mut(), &Theme::light());
+        window
+    }
+
     #[test]
     fn embedded_assets_cover_layout_images_and_localizations() {
         let resources = resources();
@@ -73,9 +84,7 @@ mod tests {
             .unwrap()
             .contains("<Window"));
         for page in ["home", "examples", "cloud-play", "cloud-saves"] {
-            let xml = resources
-                .read_string(&format!("pages/{page}.xml"))
-                .unwrap();
+            let xml = resources.read_string(&format!("pages/{page}.xml")).unwrap();
             assert!(xml.contains("page_"));
         }
         assert!(!resources
@@ -94,18 +103,93 @@ mod tests {
             .contains("app.window_title"));
 
         let mut window = flexui::load_window_res(&resources, "app.xml", &Context::new()).unwrap();
+        apply_theme(window.root.as_mut(), &Theme::light());
         layout_node(
             window.root.as_mut(),
             Rect::new(0.0, 0.0, 1000.0, 688.0),
             &TestCanvas,
         );
         assert_eq!(
-            find_widget(window.root.as_ref(), "main_pages").unwrap().base().children.len(),
+            find_widget(window.root.as_ref(), "main_pages")
+                .unwrap()
+                .base()
+                .children
+                .len(),
             4
         );
-        assert!(find_widget(window.root.as_ref(), "page_home").unwrap().base().visible);
+        assert!(
+            find_widget(window.root.as_ref(), "page_home")
+                .unwrap()
+                .base()
+                .visible
+        );
         for page in ["page_examples", "page_cloud_play", "page_cloud_saves"] {
-            assert!(!find_widget(window.root.as_ref(), page).unwrap().base().visible);
+            assert!(
+                !find_widget(window.root.as_ref(), page)
+                    .unwrap()
+                    .base()
+                    .visible
+            );
+        }
+        for button in ["open_settings", "open_login"] {
+            let style = find_widget(window.root.as_ref(), button)
+                .unwrap()
+                .base()
+                .resolved_style();
+            assert!(style.bg_image.is_some(), "{button} background image");
+            assert_eq!(style.bg_color, None, "{button} background color");
+            assert_eq!(style.border_color, None, "{button} border color");
+            assert_eq!(style.border_width, None, "{button} border width");
+        }
+    }
+
+    #[test]
+    fn 登录输入区的透明控件不继承默认主题背景() {
+        let window = load_themed_window("login.xml");
+        for name in ["nation_code_text", "edit_phone", "edit_code", "get_code"] {
+            let style = find_widget(window.root.as_ref(), name)
+                .unwrap()
+                .base()
+                .resolved_style();
+            assert_eq!(
+                style.bg_color,
+                Some(Color::from_u8(0, 0, 0, 0)),
+                "{name} background color"
+            );
+            assert_eq!(style.border_width, Some(0.0), "{name} border width");
+        }
+    }
+
+    #[test]
+    fn 系统设置布局尺寸与原版皮肤一致() {
+        let window = load_themed_window("settings.xml");
+        let root = window.root.as_ref();
+
+        let heading = find_widget(root, "settings_heading").unwrap().base();
+        assert_eq!(heading.font.size, 16.0);
+        assert!(heading.font.bold);
+
+        let body = find_widget(root, "startup_label").unwrap().base();
+        assert_eq!(body.font.size, 14.0);
+
+        let detail = find_widget(root, "keep_network_detail").unwrap().base();
+        assert_eq!(detail.font.size, 12.0);
+
+        let language = find_widget(root, "language").unwrap().base();
+        assert_eq!(language.width, Sizing::Fixed(144.0));
+        assert_eq!(language.height, Sizing::Fixed(28.0));
+
+        for name in [
+            "set_startup",
+            "set_desktop",
+            "set_auto",
+            "set_sleep",
+            "set_audio",
+            "set_notice",
+        ] {
+            let switch = find_widget(root, name).unwrap().base();
+            assert_eq!(switch.width, Sizing::Fixed(30.0), "{name} width");
+            assert_eq!(switch.height, Sizing::Fixed(16.0), "{name} height");
         }
     }
 }

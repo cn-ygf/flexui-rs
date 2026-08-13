@@ -29,25 +29,39 @@ impl LocalizationValue {
 }
 
 impl From<&str> for LocalizationValue {
-    fn from(value: &str) -> Self { Self::String(value.to_owned()) }
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
 }
 impl From<String> for LocalizationValue {
-    fn from(value: String) -> Self { Self::String(value) }
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
 }
 impl From<i32> for LocalizationValue {
-    fn from(value: i32) -> Self { Self::Number(value as f64) }
+    fn from(value: i32) -> Self {
+        Self::Number(value as f64)
+    }
 }
 impl From<i64> for LocalizationValue {
-    fn from(value: i64) -> Self { Self::Number(value as f64) }
+    fn from(value: i64) -> Self {
+        Self::Number(value as f64)
+    }
 }
 impl From<usize> for LocalizationValue {
-    fn from(value: usize) -> Self { Self::Number(value as f64) }
+    fn from(value: usize) -> Self {
+        Self::Number(value as f64)
+    }
 }
 impl From<f64> for LocalizationValue {
-    fn from(value: f64) -> Self { Self::Number(value) }
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
 }
 impl From<bool> for LocalizationValue {
-    fn from(value: bool) -> Self { Self::Bool(value) }
+    fn from(value: bool) -> Self {
+        Self::Bool(value)
+    }
 }
 
 /// SwiftUI `LocalizedStringKey` 风格的稳定字符串标识。
@@ -55,15 +69,23 @@ impl From<bool> for LocalizationValue {
 pub struct LocalizedStringKey(String);
 
 impl LocalizedStringKey {
-    pub fn new(key: impl Into<String>) -> Self { Self(key.into()) }
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl From<&str> for LocalizedStringKey {
-    fn from(value: &str) -> Self { Self::new(value) }
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
 }
 impl From<String> for LocalizedStringKey {
-    fn from(value: String) -> Self { Self::new(value) }
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
 }
 
 /// 可携带默认值、表名和插值参数的本地化资源。
@@ -77,28 +99,45 @@ pub struct LocalizedStringResource {
 
 impl LocalizedStringResource {
     pub fn new(key: impl Into<LocalizedStringKey>) -> Self {
-        Self { key: key.into(), default_value: None, table: "Localizable".into(), arguments: BTreeMap::new() }
+        Self {
+            key: key.into(),
+            default_value: None,
+            table: "Localizable".into(),
+            arguments: BTreeMap::new(),
+        }
     }
     pub fn default_value(mut self, value: impl Into<String>) -> Self {
-        self.default_value = Some(value.into()); self
+        self.default_value = Some(value.into());
+        self
     }
-    pub fn table(mut self, table: impl Into<String>) -> Self { self.table = table.into(); self }
+    pub fn table(mut self, table: impl Into<String>) -> Self {
+        self.table = table.into();
+        self
+    }
     pub fn arg(mut self, name: impl Into<String>, value: impl Into<LocalizationValue>) -> Self {
-        self.arguments.insert(name.into(), value.into()); self
+        self.arguments.insert(name.into(), value.into());
+        self
     }
 }
 
 impl From<LocalizedStringKey> for LocalizedStringResource {
-    fn from(value: LocalizedStringKey) -> Self { Self::new(value) }
+    fn from(value: LocalizedStringKey) -> Self {
+        Self::new(value)
+    }
 }
 impl From<&str> for LocalizedStringResource {
-    fn from(value: &str) -> Self { Self::new(value) }
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 enum Message {
     Text(String),
-    Plural { variable: String, forms: HashMap<String, String> },
+    Plural {
+        variable: String,
+        forms: HashMap<String, String>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -133,8 +172,12 @@ impl Localizer {
         }))))
     }
 
-    pub fn locale(&self) -> String { self.0.read().unwrap().locale.to_string() }
-    pub fn revision(&self) -> u64 { self.0.read().unwrap().revision }
+    pub fn locale(&self) -> String {
+        self.0.read().unwrap().locale.to_string()
+    }
+    pub fn revision(&self) -> u64 {
+        self.0.read().unwrap().revision
+    }
 
     pub fn set_locale(&self, locale: &str) -> Result<(), I18nError> {
         let locale = parse_locale(locale)?;
@@ -169,40 +212,69 @@ impl Localizer {
             messages.insert(key, parse_message(value)?);
         }
         let mut state = self.0.write().unwrap();
-        state.catalogs.entry(locale).or_default().tables
-            .entry(table_name).or_default().extend(messages);
+        state
+            .catalogs
+            .entry(locale)
+            .or_default()
+            .tables
+            .entry(table_name)
+            .or_default()
+            .extend(messages);
         state.revision = state.revision.wrapping_add(1);
         Ok(())
     }
 
     pub fn load_json_res(&self, resources: &ResourceManager, path: &str) -> Result<(), I18nError> {
-        let json = resources.read_string(path).map_err(|error| I18nError::Resource(error.to_string()))?;
+        let json = resources
+            .read_string(path)
+            .map_err(|error| I18nError::Resource(error.to_string()))?;
         self.load_json_str(&json)
     }
 
     /// 加载 Apple String Catalog (`.xcstrings`) 的常用字符串与复数 variation。
     pub fn load_xcstrings_str(&self, json: &str) -> Result<(), I18nError> {
         let root: Value = serde_json::from_str(json).map_err(I18nError::Json)?;
-        let development = root.get("sourceLanguage").and_then(Value::as_str).unwrap_or("en");
-        let strings = root.get("strings").and_then(Value::as_object)
+        let development = root
+            .get("sourceLanguage")
+            .and_then(Value::as_str)
+            .unwrap_or("en");
+        let strings = root
+            .get("strings")
+            .and_then(Value::as_object)
             .ok_or_else(|| I18nError::Format("xcstrings 缺少 strings".into()))?;
         let mut state = self.0.write().unwrap();
         state.development_locale = parse_locale(development)?;
         for (key, entry) in strings {
-            let Some(localizations) = entry.get("localizations").and_then(Value::as_object) else { continue };
+            let Some(localizations) = entry.get("localizations").and_then(Value::as_object) else {
+                continue;
+            };
             for (locale, localization) in localizations {
                 let locale = parse_locale(locale)?.to_string();
-                let Some(message) = parse_xc_message(localization) else { continue };
-                state.catalogs.entry(locale).or_default().tables
-                    .entry(default_table()).or_default().insert(key.clone(), message);
+                let Some(message) = parse_xc_message(localization) else {
+                    continue;
+                };
+                state
+                    .catalogs
+                    .entry(locale)
+                    .or_default()
+                    .tables
+                    .entry(default_table())
+                    .or_default()
+                    .insert(key.clone(), message);
             }
         }
         state.revision = state.revision.wrapping_add(1);
         Ok(())
     }
 
-    pub fn load_xcstrings_res(&self, resources: &ResourceManager, path: &str) -> Result<(), I18nError> {
-        let json = resources.read_string(path).map_err(|error| I18nError::Resource(error.to_string()))?;
+    pub fn load_xcstrings_res(
+        &self,
+        resources: &ResourceManager,
+        path: &str,
+    ) -> Result<(), I18nError> {
+        let json = resources
+            .read_string(path)
+            .map_err(|error| I18nError::Resource(error.to_string()))?;
         self.load_xcstrings_str(&json)
     }
 
@@ -211,23 +283,38 @@ impl Localizer {
         let state = self.0.read().unwrap();
         let message = fallback_locales(&state.locale, &state.development_locale)
             .into_iter()
-            .find_map(|locale| state.catalogs.get(&locale)?.tables.get(&resource.table)?.get(resource.key.as_str()));
+            .find_map(|locale| {
+                state
+                    .catalogs
+                    .get(&locale)?
+                    .tables
+                    .get(&resource.table)?
+                    .get(resource.key.as_str())
+            });
         let template = match message {
             Some(Message::Text(value)) => value.clone(),
             Some(Message::Plural { variable, forms }) => {
                 select_plural(&state.locale, variable, forms, &resource.arguments)
             }
-            None => resource.default_value.clone().unwrap_or_else(|| resource.key.as_str().to_owned()),
+            None => resource
+                .default_value
+                .clone()
+                .unwrap_or_else(|| resource.key.as_str().to_owned()),
         };
         interpolate(&template, &resource.arguments)
     }
 
     pub fn contains(&self, key: &str, table: &str) -> bool {
         let state = self.0.read().unwrap();
-        fallback_locales(&state.locale, &state.development_locale).into_iter().any(|locale| {
-            state.catalogs.get(&locale).and_then(|catalog| catalog.tables.get(table))
-                .is_some_and(|messages| messages.contains_key(key))
-        })
+        fallback_locales(&state.locale, &state.development_locale)
+            .into_iter()
+            .any(|locale| {
+                state
+                    .catalogs
+                    .get(&locale)
+                    .and_then(|catalog| catalog.tables.get(table))
+                    .is_some_and(|messages| messages.contains_key(key))
+            })
     }
 }
 
@@ -259,10 +346,15 @@ struct JsonCatalog {
     strings: HashMap<String, Value>,
 }
 
-fn default_table() -> String { "Localizable".into() }
+fn default_table() -> String {
+    "Localizable".into()
+}
 
 fn parse_locale(value: &str) -> Result<LanguageIdentifier, I18nError> {
-    value.replace('_', "-").parse().map_err(|_| I18nError::InvalidLocale(value.into()))
+    value
+        .replace('_', "-")
+        .parse()
+        .map_err(|_| I18nError::InvalidLocale(value.into()))
 }
 
 fn fallback_locales(locale: &LanguageIdentifier, development: &LanguageIdentifier) -> Vec<String> {
@@ -300,10 +392,16 @@ fn inferred_chinese_script(locale: &str) -> Option<&'static str> {
         return None;
     }
     let subtags: Vec<&str> = subtags.collect();
-    if subtags.iter().any(|subtag| *subtag == "Hans" || *subtag == "Hant") {
+    if subtags
+        .iter()
+        .any(|subtag| *subtag == "Hans" || *subtag == "Hant")
+    {
         return None;
     }
-    if subtags.iter().any(|subtag| matches!(*subtag, "TW" | "HK" | "MO")) {
+    if subtags
+        .iter()
+        .any(|subtag| matches!(*subtag, "TW" | "HK" | "MO"))
+    {
         Some("zh-Hant")
     } else if subtags.iter().any(|subtag| matches!(*subtag, "CN" | "SG")) {
         Some("zh-Hans")
@@ -313,18 +411,37 @@ fn inferred_chinese_script(locale: &str) -> Option<&'static str> {
 }
 
 fn parse_message(value: Value) -> Result<Message, I18nError> {
-    if let Some(text) = value.as_str() { return Ok(Message::Text(text.into())); }
-    let object = value.as_object().ok_or_else(|| I18nError::Format("字符串条目必须是文本或对象".into()))?;
-    if let Some(text) = object.get("value").and_then(Value::as_str) { return Ok(Message::Text(text.into())); }
-    let variable = object.get("variable").and_then(Value::as_str).unwrap_or("count").to_owned();
-    let forms_value = object.get("plural").or_else(|| object.get("variations"))
-        .and_then(Value::as_object).ok_or_else(|| I18nError::Format("复数条目缺少 plural".into()))?;
-    let forms = forms_value.iter().filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_owned()))).collect();
+    if let Some(text) = value.as_str() {
+        return Ok(Message::Text(text.into()));
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| I18nError::Format("字符串条目必须是文本或对象".into()))?;
+    if let Some(text) = object.get("value").and_then(Value::as_str) {
+        return Ok(Message::Text(text.into()));
+    }
+    let variable = object
+        .get("variable")
+        .and_then(Value::as_str)
+        .unwrap_or("count")
+        .to_owned();
+    let forms_value = object
+        .get("plural")
+        .or_else(|| object.get("variations"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| I18nError::Format("复数条目缺少 plural".into()))?;
+    let forms = forms_value
+        .iter()
+        .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_owned())))
+        .collect();
     Ok(Message::Plural { variable, forms })
 }
 
 fn parse_xc_message(localization: &Value) -> Option<Message> {
-    if let Some(value) = localization.pointer("/stringUnit/value").and_then(Value::as_str) {
+    if let Some(value) = localization
+        .pointer("/stringUnit/value")
+        .and_then(Value::as_str)
+    {
         return Some(Message::Text(value.into()));
     }
     let plural = localization.pointer("/variations/plural")?.as_object()?;
@@ -333,7 +450,10 @@ fn parse_xc_message(localization: &Value) -> Option<Message> {
         let value = unit.pointer("/stringUnit/value").and_then(Value::as_str)?;
         forms.insert(category.clone(), value.into());
     }
-    Some(Message::Plural { variable: "count".into(), forms })
+    Some(Message::Plural {
+        variable: "count".into(),
+        forms,
+    })
 }
 
 fn select_plural(
@@ -346,14 +466,30 @@ fn select_plural(
         Some(LocalizationValue::Number(value)) => *value,
         _ => 0.0,
     };
-    let operand = if number.fract() == 0.0 { format!("{number:.0}") } else { number.to_string() };
-    let rules = PluralRules::create(locale.clone(), PluralRuleType::CARDINAL).ok().or_else(|| {
-        locale.language.to_string().parse::<LanguageIdentifier>().ok()
-            .and_then(|language| PluralRules::create(language, PluralRuleType::CARDINAL).ok())
-    });
-    let category = rules.and_then(|rules| rules.select(operand.as_str()).ok())
-        .map(plural_name).unwrap_or("other");
-    forms.get(category).or_else(|| forms.get("other")).cloned().unwrap_or_default()
+    let operand = if number.fract() == 0.0 {
+        format!("{number:.0}")
+    } else {
+        number.to_string()
+    };
+    let rules = PluralRules::create(locale.clone(), PluralRuleType::CARDINAL)
+        .ok()
+        .or_else(|| {
+            locale
+                .language
+                .to_string()
+                .parse::<LanguageIdentifier>()
+                .ok()
+                .and_then(|language| PluralRules::create(language, PluralRuleType::CARDINAL).ok())
+        });
+    let category = rules
+        .and_then(|rules| rules.select(operand.as_str()).ok())
+        .map(plural_name)
+        .unwrap_or("other");
+    forms
+        .get(category)
+        .or_else(|| forms.get("other"))
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn plural_name(category: PluralCategory) -> &'static str {
@@ -418,11 +554,23 @@ mod tests {
         localizer.load_json_str(r#"{"locale":"en","strings":{"hello":"Hello, {name}","items":{"variable":"count","plural":{"one":"{count} item","other":"{count} items"}}}}"#).unwrap();
         localizer.load_json_str(r#"{"locale":"zh-Hans","strings":{"hello":"你好，{name}","items":{"variable":"count","plural":{"other":"{count} 个项目"}}}}"#).unwrap();
         localizer.set_locale("en-US").unwrap();
-        assert_eq!(localizer.text(LocalizedStringResource::new("hello").arg("name", "Ada")), "Hello, Ada");
-        assert_eq!(localizer.text(LocalizedStringResource::new("items").arg("count", 1)), "1 item");
-        assert_eq!(localizer.text(LocalizedStringResource::new("items").arg("count", 2)), "2 items");
+        assert_eq!(
+            localizer.text(LocalizedStringResource::new("hello").arg("name", "Ada")),
+            "Hello, Ada"
+        );
+        assert_eq!(
+            localizer.text(LocalizedStringResource::new("items").arg("count", 1)),
+            "1 item"
+        );
+        assert_eq!(
+            localizer.text(LocalizedStringResource::new("items").arg("count", 2)),
+            "2 items"
+        );
         localizer.set_locale("zh-Hans-CN").unwrap();
-        assert_eq!(localizer.text(LocalizedStringResource::new("items").arg("count", 2)), "2 个项目");
+        assert_eq!(
+            localizer.text(LocalizedStringResource::new("items").arg("count", 2)),
+            "2 个项目"
+        );
     }
 
     #[test]
@@ -432,7 +580,10 @@ mod tests {
         localizer.set_locale("zh-Hans").unwrap();
         assert_eq!(localizer.text("title"), "设置");
         localizer.set_locale("en").unwrap();
-        assert_eq!(localizer.text(LocalizedStringResource::new("files").arg("count", 3)), "3 files");
+        assert_eq!(
+            localizer.text(LocalizedStringResource::new("files").arg("count", 3)),
+            "3 files"
+        );
     }
 
     #[test]
@@ -447,16 +598,26 @@ mod tests {
 
     #[test]
     fn malformed_locale_is_rejected() {
-        assert!(matches!(Localizer::new("not a locale"), Err(I18nError::InvalidLocale(_))));
+        assert!(matches!(
+            Localizer::new("not a locale"),
+            Err(I18nError::InvalidLocale(_))
+        ));
         let localizer = Localizer::new("en").unwrap();
-        assert!(matches!(localizer.set_locale("en-@"), Err(I18nError::InvalidLocale(_))));
+        assert!(matches!(
+            localizer.set_locale("en-@"),
+            Err(I18nError::InvalidLocale(_))
+        ));
     }
 
     #[test]
     fn region_and_script_fallback_keep_the_most_specific_match() {
         let localizer = Localizer::new("en").unwrap();
-        localizer.load_json_str(r#"{"locale":"zh","strings":{"name":"中文"}}"#).unwrap();
-        localizer.load_json_str(r#"{"locale":"zh-Hant","strings":{"name":"繁體中文"}}"#).unwrap();
+        localizer
+            .load_json_str(r#"{"locale":"zh","strings":{"name":"中文"}}"#)
+            .unwrap();
+        localizer
+            .load_json_str(r#"{"locale":"zh-Hant","strings":{"name":"繁體中文"}}"#)
+            .unwrap();
         localizer.set_locale("zh-Hant-TW").unwrap();
         assert_eq!(localizer.text("name"), "繁體中文");
         localizer.set_locale("zh-Hans-CN").unwrap();
@@ -466,8 +627,12 @@ mod tests {
     #[test]
     fn chinese_regions_infer_simplified_or_traditional_script() {
         let localizer = Localizer::new("en").unwrap();
-        localizer.load_json_str(r#"{"locale":"zh-Hans","strings":{"name":"简体中文"}}"#).unwrap();
-        localizer.load_json_str(r#"{"locale":"zh-Hant","strings":{"name":"繁體中文"}}"#).unwrap();
+        localizer
+            .load_json_str(r#"{"locale":"zh-Hans","strings":{"name":"简体中文"}}"#)
+            .unwrap();
+        localizer
+            .load_json_str(r#"{"locale":"zh-Hant","strings":{"name":"繁體中文"}}"#)
+            .unwrap();
         for locale in ["zh-TW", "zh-HK", "zh-MO"] {
             localizer.set_locale(locale).unwrap();
             assert_eq!(localizer.text("name"), "繁體中文");
@@ -481,8 +646,12 @@ mod tests {
     #[test]
     fn catalogs_merge_and_escaped_braces_stay_literal() {
         let localizer = Localizer::new("en").unwrap();
-        localizer.load_json_str(r#"{"locale":"en","strings":{"first":"First"}}"#).unwrap();
-        localizer.load_json_str(r#"{"locale":"en","strings":{"second":"{{name}} = {name}"}}"#).unwrap();
+        localizer
+            .load_json_str(r#"{"locale":"en","strings":{"first":"First"}}"#)
+            .unwrap();
+        localizer
+            .load_json_str(r#"{"locale":"en","strings":{"second":"{{name}} = {name}"}}"#)
+            .unwrap();
         localizer.set_locale("en").unwrap();
         assert_eq!(localizer.text("first"), "First");
         assert_eq!(

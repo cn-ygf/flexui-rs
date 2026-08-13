@@ -15,6 +15,40 @@
       </HBox>
     </VBox>
     <VBox width="fill" spacing="10">
+      <Label text-verbatim="Circular and icon buttons" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="52" spacing="12" align="center">
+        <Button name="circle_text_button" text-verbatim="A" width="44" height="44" corner-radius="22"
+                variant="primary" bold="true" tooltip-verbatim="Circular text button"/>
+        <Button text-verbatim="+" width="44" height="44" corner-radius="22"
+                normal-bgcolor="#FB7299" hot-bgcolor="#FC8BAB" pushed-bgcolor="#E2527B"
+                normal-bordercolor="#FB7299" hot-bordercolor="#FC8BAB" pushed-bordercolor="#E2527B"
+                normal-fgcolor="#FFFFFF" font-size="22" tooltip-verbatim="Circular action"/>
+        <Button name="circle_icon_button" icon="icons/plus.svg" icon-rect="12 12 20 20" width="44" height="44"
+                corner-radius="22" variant="primary" tooltip-verbatim="Centered icon"/>
+        <Button name="icon_button" icon="icons/settings.svg" icon-rect="12 12 20 20" width="44" height="44"
+                corner-radius="6" normal-fgtint="@text-primary" hot-fgtint="@text-primary"
+                pushed-fgtint="@text-primary" tooltip-verbatim="Icon button"/>
+      </HBox>
+      <Label text-verbatim="The button surface stays larger than its centered icon"
+             fgcolor="@text-secondary"/>
+    </VBox>
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Icon and text layout" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="48" spacing="12" align="center">
+        <Button name="auto_icon_text_button" icon="icons/download.svg" text-verbatim="Download" width="156" height="40"
+                variant="primary"/>
+        <Button name="left_icon_text_button" icon="icons/download.svg" icon-rect="14 10 20 20"
+                text-verbatim="Export file" text-rect="46 0 96 40" text-align="left"
+                width="156" height="40" variant="primary"/>
+        <Button name="right_icon_text_button" icon="icons/settings.svg" icon-rect="118 10 20 20"
+                text-verbatim="Settings" text-rect="14 0 94 40" text-align="left"
+                normal-fgtint="@text-primary" hot-fgtint="@text-primary"
+                pushed-fgtint="@text-primary" width="152" height="40"/>
+      </HBox>
+      <Label text-verbatim="Default paired layout, explicit left icon, and explicit right icon"
+             fgcolor="@text-secondary"/>
+    </VBox>
+    <VBox width="fill" spacing="10">
       <Label text-verbatim="Typography" font-size="16" bold="true" fgcolor="@text-primary"/>
       <Label text-verbatim="Primary heading" font-size="18" bold="true" fgcolor="@text-primary"/>
       <Label text-verbatim="Regular body text for everyday interface content." fgcolor="@text-regular"/>

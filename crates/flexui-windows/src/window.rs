@@ -159,6 +159,13 @@ impl WindowHandle for WinWindowHandle {
     fn environment_changed(&mut self) {
         unsafe { broadcast_locale_change(self.hwnd) };
     }
+    fn popup_native_menu(
+        &mut self,
+        menu: &flexui_core::NativeMenu,
+        anchor: flexui_core::NativeMenuPopupAnchor,
+    ) -> Option<String> {
+        crate::native_menu::popup(self.hwnd, menu, anchor)
+    }
 }
 
 /// UTF-8 → NUL 结尾 UTF-16。
@@ -509,7 +516,11 @@ unsafe fn mouse_pos(hwnd: HWND, lparam: LPARAM) -> flexui_core::Point {
 
 unsafe fn window_scale(hwnd: HWND) -> f32 {
     let dpi = GetDpiForWindow(hwnd);
-    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+    if dpi == 0 {
+        1.0
+    } else {
+        dpi as f32 / 96.0
+    }
 }
 
 /// 分发事件；处理具名控件激活 → 窗口委托 on_activate；按需（脏区/整窗）重绘。
@@ -956,9 +967,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 ..Default::default()
             };
             dispatch(hwnd, state, Event::KeyDown { key, mods });
-            if matches!(key, keys::BACKSPACE | keys::TAB | keys::ENTER | keys::ESCAPE
-                | keys::DELETE | keys::LEFT | keys::RIGHT | keys::UP | keys::DOWN
-                | keys::HOME | keys::END) {
+            if matches!(
+                key,
+                keys::BACKSPACE
+                    | keys::TAB
+                    | keys::ENTER
+                    | keys::ESCAPE
+                    | keys::DELETE
+                    | keys::LEFT
+                    | keys::RIGHT
+                    | keys::UP
+                    | keys::DOWN
+                    | keys::HOME
+                    | keys::END
+            ) {
                 0
             } else {
                 DefWindowProcW(hwnd, msg, wparam, lparam)

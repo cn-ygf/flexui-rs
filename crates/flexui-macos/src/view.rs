@@ -140,6 +140,13 @@ impl WindowHandle for MacWindowHandle {
         self.window.deminiaturize(None);
         self.window.zoom(None);
     }
+    fn popup_native_menu(
+        &mut self,
+        menu: &flexui_core::NativeMenu,
+        anchor: flexui_core::NativeMenuPopupAnchor,
+    ) -> Option<String> {
+        crate::native_menu::popup(&self.window, menu, anchor)
+    }
 }
 
 /// 视图内部状态：控件树 + 分发器 + 窗口委托。

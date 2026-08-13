@@ -8,6 +8,7 @@ flexui-geometry = { workspace = true }
 flexui-gfx = { workspace = true }
 flexui-core = { workspace = true }
 flexui-svg = { workspace = true }
+flexui-native-menu = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 objc2-app-kit = { workspace = true }

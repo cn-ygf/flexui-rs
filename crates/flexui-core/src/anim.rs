@@ -56,7 +56,11 @@ pub struct Anim {
 impl Anim {
     /// 当前插值。
     pub fn value_at(&self) -> f32 {
-        let t = if self.dur > 0.0 { (self.elapsed / self.dur).clamp(0.0, 1.0) } else { 1.0 };
+        let t = if self.dur > 0.0 {
+            (self.elapsed / self.dur).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         self.from + (self.to - self.from) * self.easing.apply(t)
     }
     /// 是否结束。
@@ -71,7 +75,12 @@ mod tests {
 
     #[test]
     fn easing_端点一致() {
-        for e in [Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::EaseInOut] {
+        for e in [
+            Easing::Linear,
+            Easing::EaseIn,
+            Easing::EaseOut,
+            Easing::EaseInOut,
+        ] {
             assert!(e.apply(0.0).abs() < 1e-6, "{e:?} @0");
             assert!((e.apply(1.0) - 1.0).abs() < 1e-6, "{e:?} @1");
         }

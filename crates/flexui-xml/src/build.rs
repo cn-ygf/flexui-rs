@@ -49,7 +49,7 @@ impl Context {
         self.localizer.as_ref()
     }
 
-    fn get(&self, key: &str) -> bool {
+    pub(crate) fn get(&self, key: &str) -> bool {
         match key {
             "true" => true,
             "false" => false,
@@ -285,7 +285,7 @@ fn parse_drag_region(s: &str) -> Result<WindowDragRegion, LoadError> {
 
 /// 解析图片来源：有资源管理器则读成字节（支持 zip/内嵌），否则按文件路径。
 /// `.svg` 走矢量光栅化路径。
-fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
+pub(crate) fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
     let is_svg = path.to_lowercase().ends_with(".svg");
     let density = flexui_core::image_density_from_path(path);
     if let Some(rm) = res {
@@ -601,6 +601,21 @@ fn apply_attrs(
             }
             "text" => {}
             "text-verbatim" => node.base_mut().text = v.clone(),
+            "icon" if tag == "button" => {
+                node.apply_property(WidgetProperty::Icon(Some(resolve_image(res, v))));
+            }
+            "icon-rect" | "iconrect" if tag == "button" => {
+                node.apply_property(WidgetProperty::IconRect(Some(parse_local_rect(
+                    v,
+                    "icon-rect",
+                )?)));
+            }
+            "text-rect" | "textrect" if tag == "button" => {
+                node.apply_property(WidgetProperty::TextRect(Some(parse_local_rect(
+                    v,
+                    "text-rect",
+                )?)));
+            }
             "width" => node.base_mut().width = parse_sizing(v),
             "height" => node.base_mut().height = parse_sizing(v),
             "padding" => {
@@ -708,6 +723,21 @@ fn apply_attrs(
         node.apply_property(WidgetProperty::PlaceholderStyle(set));
     }
     Ok(())
+}
+
+fn parse_local_rect(value: &str, property: &str) -> Result<Rect, LoadError> {
+    let values = value
+        .split([',', ' '])
+        .filter(|part| !part.is_empty())
+        .map(str::parse::<f32>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| LoadError(format!("{property} 格式错误: {value}")))?;
+    if values.len() != 4 || values[2] < 0.0 || values[3] < 0.0 {
+        return Err(LoadError(format!(
+            "{property} 需要 x y width height，且宽高不能为负数: {value}"
+        )));
+    }
+    Ok(Rect::new(values[0], values[1], values[2], values[3]))
 }
 
 #[derive(Clone, Copy)]
@@ -914,7 +944,7 @@ fn attr_value<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
 }
 
 /// 目录中存在的普通字符串自动作为 key；`loc:key` 强制绑定，verbatim 属性强制字面量。
-fn resolve_localized(
+pub(crate) fn resolve_localized(
     value: &str,
     args: Option<&str>,
     localizer: Option<&Localizer>,
@@ -1402,7 +1432,9 @@ mod expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui_core::{apply_localizations, find_by_name, layout_node, Canvas, Font, Rect, Size};
+    use flexui_core::{
+        apply_localizations, find_by_name, layout_node, Canvas, Font, Rect, Size, WidgetPropertyKey,
+    };
     use flexui_resource::{DirProvider, ResourceManager};
 
     #[test]
@@ -2042,5 +2074,26 @@ mod tests {
         // 绑定被记录
         assert_eq!(res.bindings.len(), 1);
         assert_eq!(res.bindings[0].0, 1);
+    }
+
+    #[test]
+    fn button_图标与文本矩形属性可由_xml_设置() {
+        let xml = r#"<Button text-verbatim="Export" icon="export.png"
+            icon-rect="12 10 20 20" text-rect="44 0 88 40"/>"#;
+        let result = load_str(xml, &Context::new()).unwrap();
+        assert!(matches!(
+            result.root.property(WidgetPropertyKey::Icon),
+            Some(WidgetProperty::Icon(Some(ImageSource::Path(path)))) if path == "export.png"
+        ));
+        assert!(matches!(
+            result.root.property(WidgetPropertyKey::IconRect),
+            Some(WidgetProperty::IconRect(Some(rect)))
+                if rect == Rect::new(12.0, 10.0, 20.0, 20.0)
+        ));
+        assert!(matches!(
+            result.root.property(WidgetPropertyKey::TextRect),
+            Some(WidgetProperty::TextRect(Some(rect)))
+                if rect == Rect::new(44.0, 0.0, 88.0, 40.0)
+        ));
     }
 }

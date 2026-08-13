@@ -11,6 +11,7 @@ mod canvas;
 mod clipboard;
 mod dialog;
 mod gdiplus;
+mod native_menu;
 mod window;
 
 pub use canvas::GdiCanvas;

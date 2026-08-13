@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NativeMenu>
+  <MenuItem id="xml_new" text-verbatim="New document" shortcut="CmdOrCtrl+N"
+            icon="icons/menu_document.svg"/>
+  <MenuItem id="xml_open" text-verbatim="Open..." shortcut="CmdOrCtrl+O"/>
+  <Separator/>
+  <Submenu text-verbatim="Share" icon="icons/menu_share.svg">
+    <MenuItem id="xml_copy_link" text-verbatim="Copy link" shortcut="CmdOrCtrl+Shift+C"/>
+    <MenuItem id="xml_email" text-verbatim="Email"/>
+  </Submenu>
+  <Separator/>
+  <MenuItem id="xml_pinned" text-verbatim="Pinned" checked="true"/>
+  <MenuItem id="xml_unavailable" text-verbatim="Unavailable" enabled="false"/>
+</NativeMenu>

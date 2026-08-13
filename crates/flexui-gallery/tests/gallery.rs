@@ -1,6 +1,6 @@
 use flexui::{
     apply_theme, find_by_id, find_by_name, layout_node, Canvas, Color, Context, Corners, Font,
-    Point, Rect, Size, Theme,
+    Point, Rect, Size, Theme, WidgetProperty, WidgetPropertyKey,
 };
 
 struct TestCanvas;
@@ -37,8 +37,15 @@ fn embedded_gallery_loads_all_included_pages() {
         find_by_name(doc.root.as_ref(), "pages").unwrap(),
     )
     .unwrap();
-    assert_eq!(pages.base().children.len(), 4);
-    for name in ["apply_bilibili_theme", "restore_default_theme"] {
+    assert_eq!(pages.base().children.len(), 5);
+    for name in [
+        "apply_bilibili_theme",
+        "restore_default_theme",
+        "open_drawn_menu",
+        "open_xml_native_menu",
+        "open_rust_native_menu",
+        "native_context_target",
+    ] {
         assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
     }
     let bilibili_button = find_by_id(
@@ -60,6 +67,25 @@ fn embedded_gallery_loads_all_included_pages() {
         .kind,
         flexui::WidgetKind::Switch
     );
+    let left_icon_button = find_by_id(
+        doc.root.as_ref(),
+        find_by_name(doc.root.as_ref(), "left_icon_text_button").unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        left_icon_button.property(WidgetPropertyKey::Icon),
+        Some(WidgetProperty::Icon(Some(_)))
+    ));
+    assert!(matches!(
+        left_icon_button.property(WidgetPropertyKey::IconRect),
+        Some(WidgetProperty::IconRect(Some(rect)))
+            if rect == Rect::new(14.0, 10.0, 20.0, 20.0)
+    ));
+    assert!(matches!(
+        left_icon_button.property(WidgetPropertyKey::TextRect),
+        Some(WidgetProperty::TextRect(Some(rect)))
+            if rect == Rect::new(46.0, 0.0, 96.0, 40.0)
+    ));
     for name in ["nav_basic", "nav_forms", "default_button", "primary_button"] {
         let widget = find_by_id(
             doc.root.as_ref(),

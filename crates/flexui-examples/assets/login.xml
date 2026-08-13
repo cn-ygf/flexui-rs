@@ -31,6 +31,7 @@
                  focus-bgimage="label/phone_hover@2.00x.png" normal-bgfit="center" focus-bgfit="center"/>
           <HBox name="nation_code" width="68" height="44" align="center" spacing="0" focus-within="true">
             <Button name="nation_code_text" text-verbatim="+86" width="50" height="44" padding="0 0 0 4" focusable="false"
+                    normal-bgcolor="#00000000" border-width="0"
                     normal-fgcolor="#9095BB" hot-fgcolor="#FFFFFF" focus-fgcolor="#FFFFFF"
                     font-size="14" normal-textalign="left"/>
             <Button name="nation_code_arrow" width="6" height="4" focusable="false"
@@ -41,7 +42,8 @@
           </HBox>
           <Separator width="1" height="28" orientation="vertical" normal-bgcolor="#424894"/>
           <Edit name="edit_phone" placeholder="login.phone_placeholder" flex="1" height="44" padding="0 10"
-                number-only="true" max-length="15" normal-fgcolor="#FFFFFF"
+                number-only="true" max-length="15" normal-bgcolor="#00000000" border-width="0"
+                normal-fgcolor="#FFFFFF"
                 placeholder-fgcolor="#9095BB" focus-placeholder-fgcolor="#9095BB" font-size="14"/>
         </HBox>
         <HBox name="auth_code_area" width="256" height="44" align="center" focus-within="true"
@@ -50,16 +52,18 @@
           <Panel width="36" height="44" normal-bgimage="label/password_normal@2.00x.png"
                  focus-bgimage="label/password_hover@2.00x.png" normal-bgfit="center" focus-bgfit="center"/>
           <Edit name="edit_code" placeholder="login.code_placeholder" flex="1" height="44" padding="0 8"
-                number-only="true" max-length="6" normal-fgcolor="#FFFFFF"
+                number-only="true" max-length="6" normal-bgcolor="#00000000" border-width="0"
+                normal-fgcolor="#FFFFFF"
                 placeholder-fgcolor="#9095BB" focus-placeholder-fgcolor="#9095BB" font-size="14"/>
           <Separator width="1" height="28" orientation="vertical" normal-bgcolor="#424894"/>
-          <Button name="get_code" text="login.get_code" width="110" height="44" normal-fgcolor="#00D2C4"
+          <Button name="get_code" text="login.get_code" width="110" height="44"
+                  normal-bgcolor="#00000000" border-width="0" normal-fgcolor="#00D2C4"
                   hot-fgcolor="#73D3CB" pushed-fgcolor="#40A098" font-size="14"/>
         </HBox>
         <Panel height="16" mouse="transparent"/>
         <Button name="btn_login" text="login.submit" width="256" height="40" normal-bgcolor="#00CFC4"
                 hot-bgcolor="#28DED2" pushed-bgcolor="#00A79F" normal-fgcolor="#FFFFFF"
-                corner-radius="6" font-size="14" bold="true"/>
+                border-width="0" corner-radius="6" font-size="14" bold="true"/>
         <Label name="login_status" text="" width="256" height="20" normal-fgcolor="#FF276C"
                font-size="12" normal-textalign="center"/>
       </VBox>
