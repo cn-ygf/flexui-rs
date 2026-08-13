@@ -20,7 +20,12 @@ pub fn paint_tree_in_rect(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Rect) {
 }
 
 fn subtree_focused(node: &dyn Widget) -> bool {
-    node.base().focused || node.base().children.iter().any(|child| subtree_focused(child.as_ref()))
+    node.base().focused
+        || node
+            .base()
+            .children
+            .iter()
+            .any(|child| subtree_focused(child.as_ref()))
 }
 
 fn paint_tree_impl(
@@ -34,12 +39,9 @@ fn paint_tree_impl(
         return;
     }
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_focused(node));
-    let state = crate::style::VisualState::with_selected(
-        b.effective_base(),
-        focus_active,
-        b.selected,
-    );
-    let style = b.style.resolve(state);
+    let state =
+        crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
+    let style = b.style.resolve_over(&b.theme_style, state);
     let rect = b.rect;
     if let Some(dirty) = dirty {
         let visual_rect = style.shadow.map_or(rect, |shadow| {
@@ -64,7 +66,12 @@ fn paint_tree_impl(
 
     // 0. 投影（在背景之下，按 dx/dy 偏移同形填充）。
     if let Some(sh) = style.shadow {
-        let sr = Rect::new(rect.left() + sh.dx, rect.top() + sh.dy, rect.size.width, rect.size.height);
+        let sr = Rect::new(
+            rect.left() + sh.dx,
+            rect.top() + sh.dy,
+            rect.size.width,
+            rect.size.height,
+        );
         cv.fill_round_rect(sr, radius, dim(sh.color, op));
     }
     // 圆角控件的图片、内容和子树必须使用同一裁剪区；阴影保留在裁剪外。
@@ -84,11 +91,21 @@ fn paint_tree_impl(
         }
     }
     // 2. 背景图（支持换色 tint 与渲染方式 fit）
-    let bg_image = b.click_bg_frame_player.image()
-        .or_else(|| b.bg_frame_player.image_for_state(style.bg_animation.as_ref()))
+    let bg_image = b
+        .click_bg_frame_player
+        .image()
+        .or_else(|| {
+            b.bg_frame_player
+                .image_for_state(style.bg_animation.as_ref())
+        })
         .or(style.bg_image.as_ref());
     if let Some(img) = bg_image {
-        cv.draw_image(img, rect, style.bg_tint, style.bg_fit.clone().unwrap_or_default());
+        cv.draw_image(
+            img,
+            rect,
+            style.bg_tint,
+            style.bg_fit.clone().unwrap_or_default(),
+        );
     }
     // 3. 控件内容（文字/图标）；透明时用降低 alpha 的前景色。
     if op < 1.0 {
@@ -99,11 +116,21 @@ fn paint_tree_impl(
         node.paint_content(cv, &style);
     }
     // 4. 前景图
-    let fg_image = b.click_fg_frame_player.image()
-        .or_else(|| b.fg_frame_player.image_for_state(style.fg_animation.as_ref()))
+    let fg_image = b
+        .click_fg_frame_player
+        .image()
+        .or_else(|| {
+            b.fg_frame_player
+                .image_for_state(style.fg_animation.as_ref())
+        })
         .or(style.fg_image.as_ref());
     if let Some(img) = fg_image {
-        cv.draw_image(img, rect, style.fg_tint, style.fg_fit.clone().unwrap_or_default());
+        cv.draw_image(
+            img,
+            rect,
+            style.fg_tint,
+            style.fg_fit.clone().unwrap_or_default(),
+        );
     }
     // 5. 边框
     if let (Some(bc), Some(bw)) = (style.border_color, style.border_width) {
@@ -195,12 +222,7 @@ pub fn draw_aligned_text(
 }
 
 /// 把文本尾部用「…」截断到不超过 max_w（单行）。宽度足够则原样返回。
-pub fn elide_to_width(
-    cv: &dyn Canvas,
-    text: &str,
-    font: &flexui_gfx::Font,
-    max_w: f32,
-) -> String {
+pub fn elide_to_width(cv: &dyn Canvas, text: &str, font: &flexui_gfx::Font, max_w: f32) -> String {
     if max_w <= 0.0 {
         return String::new();
     }
@@ -249,7 +271,13 @@ mod tests {
         fn fill_round_rect(&mut self, r: Rect, _rad: flexui_geometry::Corners, c: Color) {
             self.fills.push((r, c));
         }
-        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, c: Color, _w: f32) {
+        fn stroke_round_rect(
+            &mut self,
+            _r: Rect,
+            _rad: flexui_geometry::Corners,
+            c: Color,
+            _w: f32,
+        ) {
             self.strokes.push(c);
         }
         fn draw_text(&mut self, t: &str, _o: flexui_geometry::Point, _f: &Font, _c: Color) {
@@ -286,14 +314,24 @@ mod tests {
 
         // normal 状态：应出现 normal 底色 + 文字
         paint_tree(&root, &mut rec);
-        assert!(rec.fills.iter().any(|(_, c)| *c == Color::from_u8(10, 10, 10, 255)), "应画 normal 底色");
+        assert!(
+            rec.fills
+                .iter()
+                .any(|(_, c)| *c == Color::from_u8(10, 10, 10, 255)),
+            "应画 normal 底色"
+        );
         assert!(rec.texts.iter().any(|t| t == "hi"), "应画按钮文字");
 
         // 置 hover：应改用 hot 底色
         root.base_mut().children[0].base_mut().hover = true;
         let mut rec2 = Recorder::default();
         paint_tree(&root, &mut rec2);
-        assert!(rec2.fills.iter().any(|(_, c)| *c == Color::from_u8(200, 200, 200, 255)), "hover 应用 hot 底色");
+        assert!(
+            rec2.fills
+                .iter()
+                .any(|(_, c)| *c == Color::from_u8(200, 200, 200, 255)),
+            "hover 应用 hot 底色"
+        );
     }
 
     #[test]
@@ -303,14 +341,18 @@ mod tests {
             opacity: Some(0.5),
             ..Default::default()
         };
-        let panel = Panel::new().style(StyleSet::new().with_normal(spec)).size(10.0, 10.0);
+        let panel = Panel::new()
+            .style(StyleSet::new().with_normal(spec))
+            .size(10.0, 10.0);
         let mut root = VBox::new().push(panel);
         let mut rec = Recorder::default();
         layout_node(&mut root, Rect::new(0.0, 0.0, 50.0, 50.0), &rec);
         paint_tree(&root, &mut rec);
         // 应有一次红色、alpha≈0.5 的填充。
         assert!(
-            rec.fills.iter().any(|(_, c)| c.r == 1.0 && (c.a - 0.5).abs() < 1e-6),
+            rec.fills
+                .iter()
+                .any(|(_, c)| c.r == 1.0 && (c.a - 0.5).abs() < 1e-6),
             "透明度应把红色 alpha 降到 0.5"
         );
     }
@@ -397,7 +439,10 @@ mod tests {
 
         paint_tree(&root, &mut rec);
 
-        assert!(rec.strokes.contains(&focused), "后代获焦时容器应使用 focus 样式");
+        assert!(
+            rec.strokes.contains(&focused),
+            "后代获焦时容器应使用 focus 样式"
+        );
     }
 
     #[test]
@@ -405,7 +450,7 @@ mod tests {
         use flexui_gfx::TextAlign;
         let mut rec = Recorder::default();
         let font = Font::default(); // size14 → 每字 8.4px
-        // 内容宽 30 → 放不下 8 个字，应截断加「…」。
+                                    // 内容宽 30 → 放不下 8 个字，应截断加「…」。
         draw_aligned_text(
             &mut rec,
             "abcdefgh",

@@ -6,6 +6,7 @@ use flexui_gfx::Canvas;
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{
     Base, Clickable, TextControl, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole,
 };
@@ -22,7 +23,7 @@ pub struct Radio {
 
 impl Radio {
     pub fn new(text: impl Into<String>) -> Self {
-        let mut base = Base::new(WidgetRole::Radio);
+        let mut base = Base::new_kind(WidgetRole::Radio, WidgetKind::Radio);
         base.text = text.into();
         Self {
             base,

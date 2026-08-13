@@ -10,6 +10,7 @@ use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::{PlaceholderStyleSet, StyleSpec};
+use crate::theme::WidgetKind;
 use crate::widget::{
     Base, TextControl, TextInputState, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole,
 };
@@ -82,7 +83,7 @@ pub struct Edit {
 impl Edit {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::Edit),
+            base: Base::new_kind(WidgetRole::Edit, WidgetKind::Edit),
             config: EditConfig::default(),
             state: EditState::default(),
             lines: Vec::new(),
@@ -415,7 +416,10 @@ impl Edit {
                 &self.config.placeholder,
                 line_rect,
                 &font,
-                style.fg_color.unwrap_or(PLACEHOLDER_COLOR),
+                style
+                    .fg_color
+                    .or_else(|| self.base.resolved_style().placeholder_color)
+                    .unwrap_or(PLACEHOLDER_COLOR),
                 TextAlign::Left,
                 false,
             );
@@ -617,7 +621,10 @@ impl Widget for Edit {
                 &self.config.placeholder,
                 content,
                 &font,
-                style.fg_color.unwrap_or(PLACEHOLDER_COLOR),
+                style
+                    .fg_color
+                    .or_else(|| self.base.resolved_style().placeholder_color)
+                    .unwrap_or(PLACEHOLDER_COLOR),
                 TextAlign::Left,
                 false,
             );

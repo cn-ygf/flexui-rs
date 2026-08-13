@@ -7,6 +7,7 @@ use crate::common_builders;
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, TextControl, Widget, WidgetRole};
 
 /// 文本标签（不可交互）。
@@ -16,7 +17,7 @@ pub struct Label {
 
 impl Label {
     pub fn new(text: impl Into<String>) -> Self {
-        let mut base = Base::new(WidgetRole::Plain);
+        let mut base = Base::new_kind(WidgetRole::Plain, WidgetKind::Label);
         base.text = text.into();
         Self { base }
     }

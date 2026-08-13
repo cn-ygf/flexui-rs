@@ -7,6 +7,7 @@ use crate::common_builders;
 use crate::layout;
 use crate::sizing::Sizing;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 分隔条：默认横向（占满宽、细高）；纵向则占满高、细宽。线色取 bg_color 或默认灰。
@@ -18,7 +19,7 @@ pub struct Separator {
 
 impl Separator {
     pub fn new() -> Self {
-        let mut base = Base::new(WidgetRole::Plain);
+        let mut base = Base::new_kind(WidgetRole::Plain, WidgetKind::Separator);
         base.hit = crate::widget::HitPolicy::Transparent; // 分隔条不拦截命中
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(1.0);

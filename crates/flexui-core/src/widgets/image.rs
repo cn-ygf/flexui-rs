@@ -6,6 +6,7 @@ use flexui_gfx::{Canvas, ImageSource};
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 图片控件。
@@ -17,7 +18,7 @@ pub struct Image {
 impl Image {
     pub fn new(source: ImageSource) -> Self {
         Self {
-            base: Base::new(WidgetRole::Plain),
+            base: Base::new_kind(WidgetRole::Plain, WidgetKind::Image),
             source,
         }
     }

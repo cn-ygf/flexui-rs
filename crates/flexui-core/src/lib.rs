@@ -13,6 +13,7 @@ pub mod localization;
 pub mod paint;
 pub mod sizing;
 pub mod style;
+pub mod theme;
 pub mod widget;
 pub mod widgets;
 pub mod window;
@@ -30,6 +31,10 @@ pub use sizing::{Align, Justify, Sizing};
 pub use style::{
     BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec,
     VisualState,
+};
+pub use theme::{
+    apply_theme, refresh_theme, Theme, ThemeColorBinding, ThemeColorProperty, ThemeMode,
+    ThemePalette, WidgetKind,
 };
 pub use widget::{
     find_by_id, find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable,

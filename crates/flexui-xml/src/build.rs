@@ -7,8 +7,8 @@ use flexui_core::{
     FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, Image, ImageFit, ImageSource, Insets,
     Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
     Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, TabBox, TextAlign,
-    TitlebarMode, VBox, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
-    WindowDragRegion,
+    ThemeColorBinding, ThemeColorProperty, TitlebarMode, VBox, VisualState, Widget, WidgetId,
+    WidgetProperty, WindowConfig, WindowDragRegion,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -528,6 +528,7 @@ fn apply_attrs(
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
     let mut placeholder_slots: HashMap<VisualState, PlaceholderStyleSpec> = HashMap::new();
+    let mut theme_colors = Vec::new();
 
     for (k, v) in attrs {
         let key = k.to_lowercase();
@@ -538,6 +539,14 @@ fn apply_attrs(
             | "options-args" | "items-args" | "row-height" | "text-args" | "placeholder-args"
             | "tooltip-args" | "title-args" => {}
             "name" => node.base_mut().name = Some(v.clone()),
+            "variant" => node.base_mut().variant = v.trim().to_owned(),
+            "class" | "classes" => {
+                node.base_mut().classes = v
+                    .split_whitespace()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+            }
             "tooltip" if attr_value(attrs, "tooltip-verbatim").is_none() => {
                 let (value, binding) =
                     resolve_localized(v, attr_value(attrs, "tooltip-args"), env.ctx.localizer());
@@ -675,8 +684,10 @@ fn apply_attrs(
             }
             // 其余按分状态样式属性解析。
             _ => {
-                if !apply_placeholder_style_attr(&mut placeholder_slots, &key, v) {
-                    apply_style_attr(&mut slots, &key, v, res)
+                if let Some(binding) = parse_placeholder_theme_binding(&key, v) {
+                    theme_colors.push(binding);
+                } else if !apply_placeholder_style_attr(&mut placeholder_slots, &key, v) {
+                    apply_style_attr(&mut slots, &mut theme_colors, &key, v, res)
                 }
             }
         }
@@ -692,6 +703,7 @@ fn apply_attrs(
         }
         node.base_mut().style = set;
     }
+    node.base_mut().theme_colors = theme_colors;
     if !placeholder_slots.is_empty() {
         let mut set = PlaceholderStyleSet::new();
         for (vs, spec) in placeholder_slots {
@@ -1001,9 +1013,35 @@ fn apply_placeholder_style_attr(
     true
 }
 
+fn parse_placeholder_theme_binding(key: &str, value: &str) -> Option<ThemeColorBinding> {
+    let token = value.trim().strip_prefix('@')?;
+    let parts: Vec<&str> = key.split('-').collect();
+    let (mut idx, mut state, mut focused, mut selected) = (0, BaseState::Normal, false, false);
+    while idx < parts.len() {
+        if let Some(parsed) = parse_state(parts[idx]) {
+            state = parsed;
+        } else if parts[idx] == "focus" {
+            focused = true;
+        } else if parts[idx] == "selected" {
+            selected = true;
+        } else {
+            break;
+        }
+        idx += 1;
+    }
+    (parts.get(idx) == Some(&"placeholder")
+        && matches!(parts[idx + 1..].join("").as_str(), "fgcolor" | "color"))
+    .then(|| ThemeColorBinding {
+        state: VisualState::with_selected(state, focused, selected),
+        property: ThemeColorProperty::Placeholder,
+        token: token.to_owned(),
+    })
+}
+
 /// 解析形如 `[state-][focus-][selected-]prop` 的样式属性并写入对应槽。
 fn apply_style_attr(
     slots: &mut HashMap<VisualState, StyleSpec>,
+    theme_colors: &mut Vec<ThemeColorBinding>,
     key: &str,
     val: &str,
     res: Option<&ResourceManager>,
@@ -1033,12 +1071,40 @@ fn apply_style_attr(
     let prop = parts[idx..].join("");
 
     let vs = VisualState::with_selected(state, focused, selected);
+    if let Some(token) = val.trim().strip_prefix('@') {
+        let property = match prop.as_str() {
+            "bgcolor" => Some(ThemeColorProperty::Background),
+            "fgcolor" => Some(ThemeColorProperty::Foreground),
+            "bordercolor" => Some(ThemeColorProperty::Border),
+            "bgtint" => Some(ThemeColorProperty::BackgroundTint),
+            "fgtint" => Some(ThemeColorProperty::ForegroundTint),
+            "accentcolor" => Some(ThemeColorProperty::Accent),
+            "thumbcolor" => Some(ThemeColorProperty::Thumb),
+            "selectioncolor" => Some(ThemeColorProperty::Selection),
+            "scrollbarcolor" => Some(ThemeColorProperty::Scrollbar),
+            "placeholdercolor" => Some(ThemeColorProperty::Placeholder),
+            _ => None,
+        };
+        if let Some(property) = property {
+            theme_colors.push(ThemeColorBinding {
+                state: vs,
+                property,
+                token: token.to_owned(),
+            });
+            return;
+        }
+    }
     let spec = slots.entry(vs).or_default();
     match prop.as_str() {
         "bgcolor" => spec.bg_color = parse_color(val),
         "fgcolor" => spec.fg_color = parse_color(val),
         "bordercolor" => spec.border_color = parse_color(val),
         "borderwidth" => spec.border_width = val.parse().ok(),
+        "accentcolor" => spec.accent_color = parse_color(val),
+        "thumbcolor" => spec.thumb_color = parse_color(val),
+        "selectioncolor" => spec.selection_color = parse_color(val),
+        "scrollbarcolor" => spec.scrollbar_color = parse_color(val),
+        "placeholdercolor" => spec.placeholder_color = parse_color(val),
         "cornerradius" => spec.corner_radius = val.parse().ok().map(Corners::all),
         "bgimage" => spec.bg_image = Some(resolve_image(res, val)),
         "bgtint" => spec.bg_tint = parse_color(val),
@@ -1564,6 +1630,31 @@ mod tests {
         assert!(g.vertical);
         let sh = s.shadow.unwrap();
         assert_eq!((sh.dx, sh.dy), (0.0, 2.0));
+    }
+
+    #[test]
+    fn xml_主题变体类名与令牌可动态刷新() {
+        let mut result = load_str(
+            r#"<Button variant="primary" class="compact emphasized" fgcolor="@on-brand"/>"#,
+            &Context::new(),
+        )
+        .unwrap();
+        assert_eq!(result.root.base().variant, "primary");
+        assert_eq!(result.root.base().classes, ["compact", "emphasized"]);
+
+        let light = flexui_core::Theme::light();
+        flexui_core::apply_theme(result.root.as_mut(), &light);
+        assert_eq!(
+            result.root.base().resolved_style().fg_color,
+            Some(light.palette.on_brand)
+        );
+
+        let dark = flexui_core::Theme::dark();
+        flexui_core::apply_theme(result.root.as_mut(), &dark);
+        assert_eq!(
+            result.root.base().resolved_style().fg_color,
+            Some(dark.palette.on_brand)
+        );
     }
 
     #[test]

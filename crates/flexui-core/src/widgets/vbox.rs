@@ -5,6 +5,7 @@ use flexui_gfx::Canvas;
 
 use crate::common_builders;
 use crate::layout::{self, Axis};
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Container, Node, Widget, WidgetRole};
 
 /// 纵向弹性容器。
@@ -15,7 +16,7 @@ pub struct VBox {
 impl VBox {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::Plain),
+            base: Base::new_kind(WidgetRole::Plain, WidgetKind::VBox),
         }
     }
     pub fn spacing(mut self, s: f32) -> Self {

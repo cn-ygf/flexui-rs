@@ -1,0 +1,30 @@
+use flexui::{ControlEvent, ResourceManager, Skin, Theme, ThemeMode, WindowCtx, WindowImpl};
+
+use crate::resources;
+
+pub(crate) struct GalleryWindow;
+
+impl WindowImpl for GalleryWindow {
+    fn skin(&self) -> Skin {
+        Skin::res("gallery.xml")
+    }
+
+    fn resources(&self) -> ResourceManager {
+        resources::resources()
+    }
+
+    fn on_init(&mut self, ctx: &mut WindowCtx) {
+        if ctx
+            .theme()
+            .is_some_and(|theme| theme.mode == ThemeMode::Dark)
+        {
+            ctx.set_selected("theme_switch", true);
+        }
+    }
+
+    fn on_control_event(&mut self, name: &str, event: &ControlEvent, ctx: &mut WindowCtx) {
+        if let ("theme_switch", ControlEvent::SelectedChanged(dark)) = (name, event) {
+            ctx.set_theme(if *dark { Theme::dark() } else { Theme::light() });
+        }
+    }
+}

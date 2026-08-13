@@ -8,6 +8,7 @@ use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::sizing::Sizing;
 use crate::style::{StyleSet, StyleSpec};
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Node, Widget, WidgetRole};
 use crate::widgets::{ScrollBarStyle, ScrollView, VBox};
 
@@ -22,11 +23,21 @@ pub struct MenuEntry {
 
 impl MenuEntry {
     pub fn item(label: impl Into<String>, name: impl Into<String>) -> Self {
-        Self { label: label.into(), name: name.into(), icon: None, children: Vec::new() }
+        Self {
+            label: label.into(),
+            name: name.into(),
+            icon: None,
+            children: Vec::new(),
+        }
     }
 
     pub fn submenu(label: impl Into<String>, children: Vec<MenuEntry>) -> Self {
-        Self { label: label.into(), name: String::new(), icon: None, children }
+        Self {
+            label: label.into(),
+            name: String::new(),
+            icon: None,
+            children,
+        }
     }
 
     pub fn icon(mut self, icon: ImageSource) -> Self {
@@ -34,7 +45,9 @@ impl MenuEntry {
         self
     }
 
-    pub fn is_submenu(&self) -> bool { !self.children.is_empty() }
+    pub fn is_submenu(&self) -> bool {
+        !self.children.is_empty()
+    }
 }
 
 /// 根菜单相对锚点的水平对齐方式。
@@ -127,6 +140,27 @@ impl Default for MenuStyle {
     }
 }
 
+impl MenuStyle {
+    /// 从无贴图主题生成菜单外观；调用方仍可继续覆盖任意字段。
+    pub fn from_theme(theme: &crate::Theme) -> Self {
+        let palette = &theme.palette;
+        Self {
+            background: palette.overlay,
+            border: palette.border,
+            text: palette.text_regular,
+            hot_text: palette.text_primary,
+            selected_text: palette.brand,
+            hot_background: palette.fill_pressed,
+            header_text: palette.text_secondary,
+            scrollbar: ScrollBarStyle {
+                thumb_color: palette.text_secondary,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
 /// 菜单项：浮层菜单中的一行。text=标签，selected_index=行号，hover 高亮。
 pub struct MenuItem {
     base: Base,
@@ -144,11 +178,16 @@ pub struct MenuItem {
 
 impl MenuItem {
     pub fn new(label: impl Into<String>, index: usize) -> Self {
-        Self::styled(&MenuEntry::item(label, ""), index, &MenuStyle::default(), false)
+        Self::styled(
+            &MenuEntry::item(label, ""),
+            index,
+            &MenuStyle::default(),
+            false,
+        )
     }
 
     fn styled(entry: &MenuEntry, index: usize, menu: &MenuStyle, selected: bool) -> Self {
-        let mut base = Base::new(WidgetRole::MenuItem);
+        let mut base = Base::new_kind(WidgetRole::MenuItem, WidgetKind::MenuItem);
         base.text = entry.label.clone();
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(menu.row_height);
@@ -161,7 +200,10 @@ impl MenuItem {
         styles.set(
             crate::style::VisualState::new(crate::style::BaseState::Hot, false),
             StyleSpec {
-                bg_color: menu.hot_background_image.is_none().then_some(menu.hot_background),
+                bg_color: menu
+                    .hot_background_image
+                    .is_none()
+                    .then_some(menu.hot_background),
                 bg_image: menu.hot_background_image.clone(),
                 bg_fit: menu.hot_background_fit.clone(),
                 fg_color: Some(menu.hot_text),
@@ -169,24 +211,19 @@ impl MenuItem {
             },
         );
         styles.set(
-            crate::style::VisualState::with_selected(
-                crate::style::BaseState::Normal,
-                false,
-                true,
-            ),
+            crate::style::VisualState::with_selected(crate::style::BaseState::Normal, false, true),
             StyleSpec {
                 fg_color: Some(menu.selected_text),
                 ..Default::default()
             },
         );
         styles.set(
-            crate::style::VisualState::with_selected(
-                crate::style::BaseState::Hot,
-                false,
-                true,
-            ),
+            crate::style::VisualState::with_selected(crate::style::BaseState::Hot, false, true),
             StyleSpec {
-                bg_color: menu.hot_background_image.is_none().then_some(menu.hot_background),
+                bg_color: menu
+                    .hot_background_image
+                    .is_none()
+                    .then_some(menu.hot_background),
                 bg_image: menu.hot_background_image.clone(),
                 bg_fit: menu.hot_background_fit.clone(),
                 fg_color: Some(menu.hot_text),
@@ -203,14 +240,17 @@ impl MenuItem {
             icon: entry.icon.clone(),
             icon_size: menu.icon_size,
             icon_inset: menu.icon_inset,
-            submenu_indicator: entry.is_submenu().then(|| menu.submenu_indicator.clone()).flatten(),
+            submenu_indicator: entry
+                .is_submenu()
+                .then(|| menu.submenu_indicator.clone())
+                .flatten(),
             submenu_indicator_size: menu.submenu_indicator_size,
             submenu_indicator_inset: menu.submenu_indicator_inset,
         }
     }
 
     fn header(label: impl Into<String>, menu: &MenuStyle) -> Self {
-        let mut base = Base::new(WidgetRole::Plain);
+        let mut base = Base::new_kind(WidgetRole::Plain, WidgetKind::MenuItem);
         base.text = label.into();
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(menu.header_height);
@@ -266,20 +306,39 @@ impl Widget for MenuItem {
         if self.selected_mark {
             let mark_rect = flexui_geometry::Rect::new(
                 self.base.rect.left() + 10.0,
-                self.base.rect.top() + (self.base.rect.size.height - self.selected_image_size.height) / 2.0,
+                self.base.rect.top()
+                    + (self.base.rect.size.height - self.selected_image_size.height) / 2.0,
                 self.selected_image_size.width,
                 self.selected_image_size.height,
             );
             if let Some(image) = &self.selected_image {
                 cv.draw_image(image, mark_rect, None, ImageFit::Stretch);
             } else {
-                draw_aligned_text(cv, "✓", mark_rect, &self.base.font, color, TextAlign::Center, false);
+                draw_aligned_text(
+                    cv,
+                    "✓",
+                    mark_rect,
+                    &self.base.font,
+                    color,
+                    TextAlign::Center,
+                    false,
+                );
             }
         }
-        draw_aligned_text(cv, &self.base.text, content, &self.base.font, color, TextAlign::Left, true);
+        draw_aligned_text(
+            cv,
+            &self.base.text,
+            content,
+            &self.base.font,
+            color,
+            TextAlign::Left,
+            true,
+        );
         if let Some(indicator) = &self.submenu_indicator {
             let indicator_rect = flexui_geometry::Rect::new(
-                self.base.rect.right() - self.submenu_indicator_inset - self.submenu_indicator_size.width,
+                self.base.rect.right()
+                    - self.submenu_indicator_inset
+                    - self.submenu_indicator_size.width,
                 self.base.rect.top()
                     + (self.base.rect.size.height - self.submenu_indicator_size.height) / 2.0,
                 self.submenu_indicator_size.width,
@@ -404,8 +463,7 @@ fn build_menu_entries_inner(
 
 /// 便捷：由纯标签列表构建菜单（下拉框用；各项不具名）。
 pub fn build_menu_labels(labels: &[String], owner: Option<crate::widget::WidgetId>) -> Node {
-    let items: Vec<(String, String)> =
-        labels.iter().map(|l| (l.clone(), String::new())).collect();
+    let items: Vec<(String, String)> = labels.iter().map(|l| (l.clone(), String::new())).collect();
     build_menu(&items, owner)
 }
 
@@ -432,7 +490,10 @@ mod tests {
 
     #[test]
     fn build_menu_行号与具名() {
-        let items = vec![("A".to_string(), "a".to_string()), ("B".to_string(), String::new())];
+        let items = vec![
+            ("A".to_string(), "a".to_string()),
+            ("B".to_string(), String::new()),
+        ];
         let node = build_menu(&items, None);
         let ch = &node.base().children;
         assert_eq!(ch.len(), 2);
@@ -485,6 +546,10 @@ mod tests {
         assert_eq!(node.base().height, Sizing::Fixed(228.0));
         assert_eq!(node.base().padding, style.panel_padding);
         assert!(node.is_scrollable());
-        assert!(node.base().children.iter().all(|item| item.base().height == Sizing::Fixed(32.0)));
+        assert!(node
+            .base()
+            .children
+            .iter()
+            .all(|item| item.base().height == Sizing::Fixed(32.0)));
     }
 }

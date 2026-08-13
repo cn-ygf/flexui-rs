@@ -6,6 +6,7 @@ use flexui_gfx::Canvas;
 use crate::common_builders;
 use crate::layout;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{
     Base, Clickable, TextControl, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole,
 };
@@ -20,7 +21,7 @@ pub struct CheckBox {
 
 impl CheckBox {
     pub fn new(text: impl Into<String>) -> Self {
-        let mut base = Base::new(WidgetRole::CheckBox);
+        let mut base = Base::new_kind(WidgetRole::CheckBox, WidgetKind::CheckBox);
         base.text = text.into();
         Self {
             base,
@@ -73,6 +74,24 @@ impl Widget for CheckBox {
 /// 开关轨道由通用背景样式绘制，这里只画可移动圆点。
 fn paint_switch_knob(base: &Base, cv: &mut dyn Canvas, style: &StyleSpec) {
     let content = layout::content_rect(base);
+    let track = Rect::new(
+        content.left(),
+        content.top(),
+        content.size.width,
+        content.size.height,
+    );
+    let track_color = if base.selected {
+        style
+            .bg_color
+            .or(style.accent_color)
+            .unwrap_or_else(|| Color::from_u8(52, 120, 246, 255))
+    } else {
+        style
+            .bg_color
+            .or(style.border_color)
+            .unwrap_or_else(|| Color::from_u8(140, 150, 170, 255))
+    };
+    cv.fill_round_rect(track, Corners::all(content.size.height / 2.0), track_color);
     let diameter = (content.size.height - 8.0).max(8.0);
     let x = if base.selected {
         content.right() - diameter - 4.0
@@ -89,7 +108,7 @@ fn paint_switch_knob(base: &Base, cv: &mut dyn Canvas, style: &StyleSpec) {
         knob,
         Corners::all(diameter / 2.0),
         style
-            .fg_color
+            .thumb_color
             .unwrap_or_else(|| Color::from_u8(255, 255, 255, 255)),
     );
 }

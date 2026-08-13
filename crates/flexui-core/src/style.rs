@@ -83,6 +83,16 @@ pub struct StyleSpec {
     pub fg_fit: Option<ImageFit>,
     pub border_color: Option<Color>,
     pub border_width: Option<f32>,
+    /// 进度、已填充轨道及选择指示器等使用的强调色。
+    pub accent_color: Option<Color>,
+    /// 滑块拖柄等可移动指示器的填充色。
+    pub thumb_color: Option<Color>,
+    /// 列表选中行等局部选择区域的背景色。
+    pub selection_color: Option<Color>,
+    /// 控件内部滚动条颜色。
+    pub scrollbar_color: Option<Color>,
+    /// Edit 未设置专属占位样式时使用的主题占位文字色。
+    pub placeholder_color: Option<Color>,
     pub corner_radius: Option<Corners>,
     pub text_align: Option<TextAlign>,
     /// 控件自身透明度 0~1（作用于本控件的背景/内容/边框，不含子控件）。
@@ -107,7 +117,10 @@ pub struct PlaceholderStyleSpec {
 impl PlaceholderStyleSpec {
     fn fill_from(&self, base: &PlaceholderStyleSpec) -> Self {
         Self {
-            font_family: self.font_family.clone().or_else(|| base.font_family.clone()),
+            font_family: self
+                .font_family
+                .clone()
+                .or_else(|| base.font_family.clone()),
             font_size: self.font_size.or(base.font_size),
             fg_color: self.fg_color.or(base.fg_color),
             bold: self.bold.or(base.bold),
@@ -136,7 +149,9 @@ pub struct PlaceholderStyleSet {
 }
 
 impl PlaceholderStyleSet {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn set(&mut self, state: VisualState, spec: PlaceholderStyleSpec) {
         if state == VisualState::default() {
@@ -152,7 +167,11 @@ impl PlaceholderStyleSet {
     }
 
     fn slot(&self, state: VisualState) -> Option<&PlaceholderStyleSpec> {
-        if state == VisualState::default() { Some(&self.normal) } else { self.slots.get(&state) }
+        if state == VisualState::default() {
+            Some(&self.normal)
+        } else {
+            self.slots.get(&state)
+        }
     }
 
     /// 按视觉状态逐层叠加：normal → base → focus → base+focus → selected 组合。
@@ -169,20 +188,31 @@ impl PlaceholderStyleSet {
 
 impl StyleSpec {
     /// 用另一份样式做「兜底」：self 缺省的字段取 base 的值。
-    fn fill_from(&self, base: &StyleSpec) -> StyleSpec {
+    pub(crate) fn fill_from(&self, base: &StyleSpec) -> StyleSpec {
         StyleSpec {
             bg_color: self.bg_color.or(base.bg_color),
             fg_color: self.fg_color.or(base.fg_color),
             bg_image: self.bg_image.clone().or_else(|| base.bg_image.clone()),
-            bg_animation: self.bg_animation.clone().or_else(|| base.bg_animation.clone()),
+            bg_animation: self
+                .bg_animation
+                .clone()
+                .or_else(|| base.bg_animation.clone()),
             bg_tint: self.bg_tint.or(base.bg_tint),
             bg_fit: self.bg_fit.clone().or_else(|| base.bg_fit.clone()),
             fg_image: self.fg_image.clone().or_else(|| base.fg_image.clone()),
-            fg_animation: self.fg_animation.clone().or_else(|| base.fg_animation.clone()),
+            fg_animation: self
+                .fg_animation
+                .clone()
+                .or_else(|| base.fg_animation.clone()),
             fg_tint: self.fg_tint.or(base.fg_tint),
             fg_fit: self.fg_fit.clone().or_else(|| base.fg_fit.clone()),
             border_color: self.border_color.or(base.border_color),
             border_width: self.border_width.or(base.border_width),
+            accent_color: self.accent_color.or(base.accent_color),
+            thumb_color: self.thumb_color.or(base.thumb_color),
+            selection_color: self.selection_color.or(base.selection_color),
+            scrollbar_color: self.scrollbar_color.or(base.scrollbar_color),
+            placeholder_color: self.placeholder_color.or(base.placeholder_color),
             corner_radius: self.corner_radius.or(base.corner_radius),
             text_align: self.text_align.or(base.text_align),
             opacity: self.opacity.or(base.opacity),
@@ -247,23 +277,57 @@ impl StyleSet {
         effective
     }
 
+    /// 先解析 base，再让当前样式集逐字段覆盖。
+    pub fn resolve_over(&self, base: &StyleSet, state: VisualState) -> StyleSpec {
+        self.resolve(state).fill_from(&base.resolve(state))
+    }
+
+    /// 把当前样式集叠加在 base 之上，并保留全部视觉状态。
+    pub fn merged_over(&self, base: &StyleSet) -> StyleSet {
+        let mut result = StyleSet::new();
+        for state in all_visual_states() {
+            result.set(state, self.resolve_over(base, state));
+        }
+        result
+    }
+
     /// 所有状态槽可能产生的阴影，用于计算状态切换时的完整视觉脏区。
     pub(crate) fn shadows(&self) -> impl Iterator<Item = Shadow> + '_ {
-        std::iter::once(self.normal.shadow).chain(self.slots.values().map(|slot| slot.shadow)).flatten()
+        std::iter::once(self.normal.shadow)
+            .chain(self.slots.values().map(|slot| slot.shadow))
+            .flatten()
     }
+}
+
+fn all_visual_states() -> impl Iterator<Item = VisualState> {
+    [
+        BaseState::Normal,
+        BaseState::Hot,
+        BaseState::Pushed,
+        BaseState::Disabled,
+    ]
+    .into_iter()
+    .flat_map(|base| {
+        [false, true].into_iter().flat_map(move |focused| {
+            [false, true]
+                .into_iter()
+                .map(move |selected| VisualState::with_selected(base, focused, selected))
+        })
+    })
 }
 
 fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
     let has_base = state.base != BaseState::Normal;
     [
         has_base.then(|| VisualState::new(state.base, false)),
-        state.focused.then(|| VisualState::new(BaseState::Normal, true)),
+        state
+            .focused
+            .then(|| VisualState::new(BaseState::Normal, true)),
         (has_base && state.focused).then(|| VisualState::new(state.base, true)),
         state
             .selected
             .then(|| VisualState::with_selected(BaseState::Normal, false, true)),
-        (has_base && state.selected)
-            .then(|| VisualState::with_selected(state.base, false, true)),
+        (has_base && state.selected).then(|| VisualState::with_selected(state.base, false, true)),
         (state.focused && state.selected)
             .then(|| VisualState::with_selected(BaseState::Normal, true, true)),
         (has_base && state.focused && state.selected)
@@ -288,7 +352,10 @@ mod tests {
     #[test]
     fn 未设置状态回退到_normal() {
         let mut set = StyleSet::new();
-        set.set(VisualState::new(BaseState::Normal, false), spec_bg(Color::WHITE));
+        set.set(
+            VisualState::new(BaseState::Normal, false),
+            spec_bg(Color::WHITE),
+        );
         // Hot 未设置 → 应回退到 Normal 的白色
         let r = set.resolve(VisualState::new(BaseState::Hot, false));
         assert_eq!(r.bg_color, Some(Color::WHITE));
@@ -297,8 +364,14 @@ mod tests {
     #[test]
     fn focus_槽缺省回退到非_focus() {
         let mut set = StyleSet::new();
-        set.set(VisualState::new(BaseState::Normal, false), spec_bg(Color::WHITE));
-        set.set(VisualState::new(BaseState::Hot, false), spec_bg(Color::BLACK));
+        set.set(
+            VisualState::new(BaseState::Normal, false),
+            spec_bg(Color::WHITE),
+        );
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            spec_bg(Color::BLACK),
+        );
         // Hot+focus 未设置 → 回退到 Hot 非 focus 的黑色
         let r = set.resolve(VisualState::new(BaseState::Hot, true));
         assert_eq!(r.bg_color, Some(Color::BLACK));
@@ -329,8 +402,14 @@ mod tests {
     fn hot_focus_组合样式优先于单独状态() {
         let mut set = StyleSet::new();
         let combined = Color::from_u8(255, 0, 0, 255);
-        set.set(VisualState::new(BaseState::Hot, false), spec_bg(Color::BLACK));
-        set.set(VisualState::new(BaseState::Normal, true), spec_bg(Color::WHITE));
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            spec_bg(Color::BLACK),
+        );
+        set.set(
+            VisualState::new(BaseState::Normal, true),
+            spec_bg(Color::WHITE),
+        );
         set.set(VisualState::new(BaseState::Hot, true), spec_bg(combined));
 
         let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
@@ -349,7 +428,10 @@ mod tests {
             },
         );
         // Hot 只设置了 bg，其它字段（border_width）应从 Normal 继承
-        set.set(VisualState::new(BaseState::Hot, false), spec_bg(Color::BLACK));
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            spec_bg(Color::BLACK),
+        );
         let r = set.resolve(VisualState::new(BaseState::Hot, false));
         assert_eq!(r.bg_color, Some(Color::BLACK)); // 用自己的
         assert_eq!(r.border_width, Some(1.0)); // 从 Normal 继承
@@ -359,13 +441,21 @@ mod tests {
     fn placeholder_state_fields_fall_back_to_normal() {
         let mut set = PlaceholderStyleSet::new().with_normal(PlaceholderStyleSpec {
             font_family: Some("Microsoft YaHei".to_string()),
-            font_size: Some(14.0), fg_color: Some(Color::WHITE),
-            bold: Some(true), italic: Some(false), underline: Some(true),
+            font_size: Some(14.0),
+            fg_color: Some(Color::WHITE),
+            bold: Some(true),
+            italic: Some(false),
+            underline: Some(true),
         });
-        set.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
-            font_size: Some(16.0), fg_color: Some(Color::BLACK), italic: Some(true),
-            ..Default::default()
-        });
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            PlaceholderStyleSpec {
+                font_size: Some(16.0),
+                fg_color: Some(Color::BLACK),
+                italic: Some(true),
+                ..Default::default()
+            },
+        );
         let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
         assert_eq!(resolved.font_family.as_deref(), Some("Microsoft YaHei"));
         assert_eq!(resolved.font_size, Some(16.0));
@@ -378,12 +468,21 @@ mod tests {
     #[test]
     fn placeholder_focus_overrides_hot_fields() {
         let mut set = PlaceholderStyleSet::new();
-        set.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
-            font_size: Some(16.0), fg_color: Some(Color::BLACK), ..Default::default()
-        });
-        set.set(VisualState::new(BaseState::Normal, true), PlaceholderStyleSpec {
-            fg_color: Some(Color::WHITE), ..Default::default()
-        });
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            PlaceholderStyleSpec {
+                font_size: Some(16.0),
+                fg_color: Some(Color::BLACK),
+                ..Default::default()
+            },
+        );
+        set.set(
+            VisualState::new(BaseState::Normal, true),
+            PlaceholderStyleSpec {
+                fg_color: Some(Color::WHITE),
+                ..Default::default()
+            },
+        );
 
         let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
         assert_eq!(resolved.font_size, Some(16.0));

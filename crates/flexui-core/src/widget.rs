@@ -5,6 +5,7 @@
 //! 这样统一绘制/布局/分发管线可对任意控件生效，减少每控件样板。
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use flexui_geometry::{Insets, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageSource};
@@ -15,6 +16,7 @@ use crate::frame_animation::{FrameAnimation, FramePlayer};
 use crate::localization::LocalizationBinding;
 use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
+use crate::theme::{Theme, ThemeColorBinding, WidgetKind};
 
 /// 控件唯一 id。
 pub type WidgetId = u64;
@@ -67,6 +69,8 @@ pub enum WidgetPropertyKey {
     Tooltip,
     Font,
     Style,
+    Variant,
+    Classes,
     Width,
     Height,
     Padding,
@@ -112,6 +116,8 @@ pub enum WidgetProperty {
     Tooltip(Option<String>),
     Font(Font),
     Style(StyleSet),
+    Variant(String),
+    Classes(Vec<String>),
     Width(Sizing),
     Height(Sizing),
     Padding(Insets),
@@ -167,6 +173,11 @@ pub struct Base {
     pub id: WidgetId,
     pub name: Option<String>,
     pub role: WidgetRole,
+    pub kind: WidgetKind,
+    /// 主题控件变体，例如 primary、danger、nav。
+    pub variant: String,
+    /// 可叠加主题类名，按声明顺序覆盖。
+    pub classes: Vec<String>,
     /// 文本内容（Label/Button/Edit/CheckBox/Radio 复用）。
     pub text: String,
     /// 悬停提示文本（Tooltip）；None 表示无提示。
@@ -175,6 +186,13 @@ pub struct Base {
     pub localizations: Vec<LocalizationBinding>,
     pub font: Font,
     pub style: StyleSet,
+    /// 当前主题计算出的样式层，显式 style 始终覆盖它。
+    pub theme_style: StyleSet,
+    /// XML `@token` 颜色绑定，切换主题时重新求值。
+    pub theme_colors: Vec<ThemeColorBinding>,
+    /// 最近应用的主题，供运行时修改 variant/class 后立即重算。
+    pub(crate) applied_theme: Option<Arc<Theme>>,
+    pub(crate) theme_root: bool,
     /// 点击触发的背景/前景动画定义（覆盖当前状态图片，结束后恢复）。
     pub click_bg_animation: Option<FrameAnimation>,
     pub click_fg_animation: Option<FrameAnimation>,
@@ -228,16 +246,41 @@ pub struct Base {
 }
 
 impl Base {
+    /// 兼容构造：按事件角色推导最接近的控件外观类型。
     pub fn new(role: WidgetRole) -> Self {
+        let kind = match role {
+            WidgetRole::Button => WidgetKind::Button,
+            WidgetRole::CheckBox => WidgetKind::CheckBox,
+            WidgetRole::Radio => WidgetKind::Radio,
+            WidgetRole::TabBox => WidgetKind::TabBox,
+            WidgetRole::Edit => WidgetKind::Edit,
+            WidgetRole::Slider => WidgetKind::Slider,
+            WidgetRole::ComboBox => WidgetKind::ComboBox,
+            WidgetRole::MenuItem => WidgetKind::MenuItem,
+            WidgetRole::ListView => WidgetKind::ListView,
+            WidgetRole::Plain => WidgetKind::Panel,
+        };
+        Self::new_kind(role, kind)
+    }
+
+    /// 为自定义控件显式指定事件角色和主题外观类型。
+    pub fn new_kind(role: WidgetRole, kind: WidgetKind) -> Self {
         Self {
             id: next_id(),
             name: None,
             role,
+            kind,
+            variant: String::new(),
+            classes: Vec::new(),
             text: String::new(),
             tooltip: None,
             localizations: Vec::new(),
             font: Font::default(),
             style: StyleSet::new(),
+            theme_style: StyleSet::new(),
+            theme_colors: Vec::new(),
+            applied_theme: None,
+            theme_root: false,
             click_bg_animation: None,
             click_fg_animation: None,
             bg_frame_player: FramePlayer::default(),
@@ -297,7 +340,13 @@ impl Base {
 
     /// 解析当前生效样式。
     pub fn resolved_style(&self) -> StyleSpec {
-        self.style.resolve(self.visual_state())
+        self.style
+            .resolve_over(&self.theme_style, self.visual_state())
+    }
+
+    /// 显式层和主题层所有状态可能产生的阴影。
+    pub(crate) fn style_shadows(&self) -> impl Iterator<Item = crate::style::Shadow> + '_ {
+        self.style.shadows().chain(self.theme_style.shadows())
     }
 }
 

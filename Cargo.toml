@@ -13,6 +13,7 @@ members = [
     "crates/flexui-windows",
     "crates/flexui",
     "crates/flexui-examples",
+    "crates/flexui-gallery",
     "crates/flexui-ffi",
 ]
 

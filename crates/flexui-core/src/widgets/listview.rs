@@ -12,6 +12,7 @@ use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 选中行高亮色。
@@ -30,7 +31,7 @@ pub struct ListView {
 impl ListView {
     pub fn new() -> Self {
         Self {
-            base: Base::new(WidgetRole::ListView),
+            base: Base::new_kind(WidgetRole::ListView, WidgetKind::ListView),
             items: Vec::new(),
             row_h: 28.0,
             selection: None,
@@ -99,7 +100,7 @@ impl Widget for ListView {
             }
             let row = Rect::new(content.left(), y, content.size.width, self.row_h);
             if self.selection == Some(i) {
-                cv.fill_rect(row, SEL_COLOR);
+                cv.fill_rect(row, style.selection_color.unwrap_or(SEL_COLOR));
             }
             let text_rect = Rect::new(
                 row.left() + 8.0,
@@ -131,7 +132,12 @@ impl Widget for ListView {
             };
             let ty = content.top() + t * (vh - thumb_h);
             let thumb = Rect::new(content.right() - track_w, ty, track_w, thumb_h);
-            cv.fill_rect(thumb, Color::from_u8(120, 128, 148, 200));
+            cv.fill_rect(
+                thumb,
+                style
+                    .scrollbar_color
+                    .unwrap_or(Color::from_u8(120, 128, 148, 200)),
+            );
         }
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {

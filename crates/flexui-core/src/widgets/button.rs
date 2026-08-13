@@ -7,6 +7,7 @@ use crate::common_builders;
 use crate::layout;
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Clickable, TextControl, Widget, WidgetRole};
 
 /// 按钮：完整 4×2 状态，点击触发回调。
@@ -16,7 +17,7 @@ pub struct Button {
 
 impl Button {
     pub fn new(text: impl Into<String>) -> Self {
-        let mut base = Base::new(WidgetRole::Button);
+        let mut base = Base::new_kind(WidgetRole::Button, WidgetKind::Button);
         base.text = text.into();
         Self { base }
     }

@@ -8,6 +8,7 @@ use crate::common_builders;
 use crate::layout;
 use crate::sizing::Sizing;
 use crate::style::StyleSpec;
+use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
 
 /// 进度条：轨道用 bg_color（或默认灰），进度用 fg_color（或默认蓝），圆角胶囊。
@@ -18,7 +19,7 @@ pub struct Progress {
 
 impl Progress {
     pub fn new() -> Self {
-        let mut base = Base::new(WidgetRole::Plain);
+        let mut base = Base::new_kind(WidgetRole::Plain, WidgetKind::Progress);
         base.width = Sizing::Fill;
         base.height = Sizing::Fixed(8.0);
         Self { base, value: 0.0 }
@@ -52,7 +53,10 @@ impl Widget for Progress {
             return;
         }
         let track = style.bg_color.unwrap_or(Color::from_u8(60, 64, 74, 255));
-        let fill = style.fg_color.unwrap_or(Color::from_u8(52, 120, 246, 255));
+        let fill = style
+            .accent_color
+            .or(style.fg_color)
+            .unwrap_or(Color::from_u8(52, 120, 246, 255));
         let radius = Corners::all(content.size.height / 2.0);
         cv.fill_round_rect(content, radius, track);
         let v = self.value;

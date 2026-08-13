@@ -1,0 +1,28 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="22">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Form controls" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Inputs and selection controls with theme-driven states" fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Text input" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Edit name="name_edit" placeholder-verbatim="Your name" width="360" height="38" padding="12 8"/>
+      <Edit placeholder-verbatim="Read-only value" text-verbatim="FlexUI" readonly="true"
+            width="360" height="38" padding="12 8"/>
+      <Edit placeholder-verbatim="Disabled input" enabled="false" width="360" height="38" padding="12 8"/>
+    </VBox>
+    <VBox width="fill" spacing="12">
+      <Label text-verbatim="Selection" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <CheckBox text-verbatim="Remember this setting" checked="true" height="26"/>
+      <CheckBox text-verbatim="Receive update notifications" height="26"/>
+      <HBox height="28" spacing="12" align="center">
+        <Label text-verbatim="Automatic updates" width="150"/>
+        <CheckBox switch="true" checked="true" width="48" height="26"/>
+      </HBox>
+      <Radio text-verbatim="Standard plan" group="21" selected="true" height="26"/>
+      <Radio text-verbatim="Professional plan" group="21" height="26"/>
+      <ComboBox options="Daily,Weekly,Monthly" selected="1" width="240" height="38"/>
+    </VBox>
+  </VBox>
+</ScrollView>
