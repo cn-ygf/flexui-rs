@@ -1503,7 +1503,11 @@ impl Dispatcher {
                 targets.dedup();
                 for tb_id in targets {
                     let before = control_snapshot(root, tb_id);
-                    visit_mut(root, tb_id, &mut |w| { w.set_selected_index(ti); });
+                    let mut changed = false;
+                    visit_mut(root, tb_id, &mut |w| changed = w.set_selected_index(ti));
+                    if changed {
+                        self.needs_layout = true;
+                    }
                     if let (Some(before), Some(after)) = (before, control_snapshot(root, tb_id)) {
                         self.emit_snapshot_changes(root, tb_id, before, after);
                     }
@@ -2864,6 +2868,7 @@ mod tests {
         click_at(&mut disp, &mut root, Point::new(50.0, 30.0));
         // TabBox 是第三个子节点
         assert_eq!(root.base().children[2].selected_index(), Some(1));
+        assert!(disp.take_layout(), "TabBox 翻页需要重新布局新页面");
     }
 
     #[test]
@@ -2929,6 +2934,7 @@ mod tests {
         click_at(&mut disp, &mut root, Point::new(50.0, 30.0));
 
         assert_eq!(root.base().children[2].selected_index(), Some(1));
+        assert!(disp.take_layout(), "纯 Rust TabBox 绑定也需要触发布局");
     }
 
     #[test]

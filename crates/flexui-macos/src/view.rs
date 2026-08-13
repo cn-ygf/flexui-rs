@@ -1,6 +1,6 @@
 //! 自定义 NSView 子类：承载 flexui 控件树、事件分发与窗口委托回调。
 //!
-//! - `drawRect:`：布局 + 统一绘制管线。
+//! - `drawRect:`：按需布局，并只绘制 AppKit 提供的脏区域。
 //! - 鼠标/键盘：翻译成 `Event` 交 `Dispatcher`；点击具名控件后调窗口委托 `on_activate`。
 //! - `isFlipped=true`：左上原点、y 向下。
 
@@ -22,7 +22,7 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    apply_localizations, find_mut_by_id, layout_node, paint_tree, Dispatcher, Event, Mods,
+    apply_localizations, find_mut_by_id, layout_node, paint_tree_in_rect, Dispatcher, Event, Mods,
     MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate,
     WindowDragRegion, WindowHandle,
 };
@@ -52,6 +52,16 @@ fn to_nsrect(r: Rect) -> NSRect {
     NSRect::new(
         NSPoint::new(r.origin.x as f64, r.origin.y as f64),
         NSSize::new(r.size.width as f64, r.size.height as f64),
+    )
+}
+
+/// AppKit 脏矩形 → 框架逻辑矩形（视图为 flipped，坐标方向一致）。
+fn from_nsrect(r: NSRect) -> Rect {
+    Rect::new(
+        r.origin.x as f32,
+        r.origin.y as f32,
+        r.size.width.max(0.0) as f32,
+        r.size.height.max(0.0) as f32,
     )
 }
 
@@ -146,6 +156,8 @@ pub struct AppState {
     pub timers: Vec<Retained<NSTimer>>,
     /// 每窗口独立图片缓存，随窗口释放原生 NSImage。
     pub image_cache: SharedImageCache,
+    /// 控件几何是否需要在下一次绘制前重新布局；帧动画只更新像素，不触发布局。
+    pub layout_dirty: bool,
     /// 内容区精确拖动范围；平台默认策略由 NSWindow 自己处理。
     pub drag_region: WindowDragRegion,
     /// owned modal 的 owner；关闭时恢复 owner 输入。
@@ -164,7 +176,7 @@ define_class!(
 
     impl FlexView {
         #[unsafe(method(drawRect:))]
-        fn draw_rect(&self, _dirty: NSRect) {
+        fn draw_rect(&self, dirty: NSRect) {
             let b = self.bounds();
             let size = Size::new(b.size.width as f32, b.size.height as f32);
             let scale = self
@@ -173,11 +185,24 @@ define_class!(
                 .unwrap_or(1.0);
             let mut st = self.ivars().state.borrow_mut();
             let image_cache = st.image_cache.clone();
-            let AppState { root, disp, .. } = &mut *st;
-            let cv_measure = CgCanvas::with_image_cache(scale, image_cache.clone());
-            layout_node(root.as_mut(), Rect::new(0.0, 0.0, size.width, size.height), &cv_measure);
+            let AppState {
+                root,
+                disp,
+                layout_dirty,
+                ..
+            } = &mut *st;
+            if *layout_dirty {
+                let cv_measure = CgCanvas::with_image_cache(scale, image_cache.clone());
+                layout_node(
+                    root.as_mut(),
+                    Rect::new(0.0, 0.0, size.width, size.height),
+                    &cv_measure,
+                );
+                *layout_dirty = false;
+            }
+            let dirty = from_nsrect(dirty);
             let mut cv = CgCanvas::with_image_cache(scale, image_cache);
-            paint_tree(root.as_ref(), &mut cv);
+            paint_tree_in_rect(root.as_ref(), &mut cv, dirty);
             disp.paint_overlays(&mut cv, size);
         }
 
@@ -628,6 +653,7 @@ impl FlexView {
             root,
             disp,
             delegate,
+            layout_dirty,
             ..
         } = &mut *st;
         if let Some(window) = window.as_ref() {
@@ -638,6 +664,7 @@ impl FlexView {
         }
         let redraw = disp.take_redraw();
         let layout = disp.take_layout();
+        *layout_dirty |= layout;
         let dirty = disp.take_dirty();
         drop(st);
         if redraw || layout {
@@ -666,6 +693,7 @@ impl FlexView {
                 child_windows: Vec::new(),
                 timers: Vec::new(),
                 image_cache: Rc::new(RefCell::new(ImageCache::default())),
+                layout_dirty: true,
                 drag_region: environment.drag_region,
                 modal_owner: environment.modal_owner,
             }),
@@ -680,7 +708,13 @@ impl FlexView {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
-        let AppState { root, disp, delegate, .. } = &mut *st;
+        let AppState {
+            root,
+            disp,
+            delegate,
+            layout_dirty,
+            ..
+        } = &mut *st;
         if let Some(win) = window {
             let mut handle = MacWindowHandle::new(win);
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
@@ -690,6 +724,7 @@ impl FlexView {
             if !allow {
                 let redraw = disp.take_redraw();
                 let layout = disp.take_layout();
+                *layout_dirty |= layout;
                 let dirty = disp.take_dirty();
                 drop(st);
                 if redraw || layout {
@@ -811,7 +846,13 @@ impl FlexView {
         let mut close_requested = false;
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
-        let AppState { root, disp, delegate, .. } = &mut *st;
+        let AppState {
+            root,
+            disp,
+            delegate,
+            layout_dirty,
+            ..
+        } = &mut *st;
         if let Some(win) = window.as_ref() {
             let mut handle = MacWindowHandle::new(win.clone());
             let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
@@ -821,6 +862,7 @@ impl FlexView {
         }
         let redraw = disp.take_redraw();
         let layout = disp.take_layout();
+        *layout_dirty |= layout;
         let dirty = disp.take_dirty();
         drop(st);
         if close_requested {
@@ -850,11 +892,13 @@ impl FlexView {
                 window.setTitle(&NSString::from_str(&localizer.text(title)));
             }
             st.locale_revision = localizer.revision();
+            st.layout_dirty = true;
         }
         let AppState {
             root,
             disp,
             delegate,
+            layout_dirty,
             ..
         } = &mut *st;
         disp.tick_anims(root.as_mut(), 0.016);
@@ -897,6 +941,7 @@ impl FlexView {
             }
         }
         let layout = disp.take_layout();
+        *layout_dirty |= layout;
         let redraw = disp.take_redraw();
         let dirty = disp.take_dirty();
         drop(st);
@@ -940,8 +985,12 @@ impl FlexView {
             root,
             disp,
             delegate,
+            layout_dirty,
             ..
         } = &mut *st;
+        if matches!(ev, Event::WindowResized { .. } | Event::ScaleChanged { .. }) {
+            *layout_dirty = true;
+        }
         disp.handle(root.as_mut(), &ev);
         let window_event = flexui_core::WindowEvent::from_event(&ev);
         let acts = disp.take_activations();
@@ -1006,7 +1055,8 @@ impl FlexView {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
             }
         }
-        let _layout = disp.take_layout();
+        let layout = disp.take_layout();
+        *layout_dirty |= layout;
         let need = disp.take_redraw();
         let dirty = disp.take_dirty();
         drop(st);
