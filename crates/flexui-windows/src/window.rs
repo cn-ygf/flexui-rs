@@ -772,6 +772,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_ACTIVATE => {
+            let focused = (wparam & 0xFFFF) != WA_INACTIVE as usize;
+            dispatch(hwnd, state, Event::WindowFocusChanged { focused });
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_LBUTTONDOWN => {
             dispatch(
                 hwnd,
@@ -1140,6 +1145,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
             let lp = Point::new(pt.x as f32 / scale, pt.y as f32 / scale);
             let st = &*state;
+            // 菜单打开时，标题栏首次点击只交给菜单做点外收起，避免被非客户区拖动截走。
+            if st.disp.has_overlays() {
+                return HTCLIENT as isize;
+            }
             let in_drag_region = match st.drag_region {
                 WindowDragRegion::PlatformDefault => lp.y < DEFAULT_DRAG_STRIP,
                 WindowDragRegion::Disabled => false,

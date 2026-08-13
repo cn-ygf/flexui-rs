@@ -48,6 +48,8 @@ pub enum Event {
     WindowResized { width: f32, height: f32 },
     /// 缩放因子改变（HiDPI）。
     ScaleChanged { scale: f32 },
+    /// 窗口获得或失去键盘激活状态。
+    WindowFocusChanged { focused: bool },
 }
 
 /// 平台无关的按键码常量（后端把各自的原始键码映射到这些值再发出）。

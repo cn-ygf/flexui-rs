@@ -236,6 +236,13 @@ impl Dispatcher {
         !self.overlays.is_empty()
     }
 
+    /// 关闭当前窗口的全部菜单浮层。
+    pub fn dismiss_overlays(&mut self) {
+        if !self.overlays.is_empty() {
+            self.close_overlays();
+        }
+    }
+
     /// 测试辅助：栈顶浮层第 i 个菜单项的中心点（需先 paint_overlays 布局）。
     #[cfg(test)]
     fn top_overlay_item_center(&self, i: usize) -> Option<Point> {
@@ -311,10 +318,11 @@ impl Dispatcher {
             let window_margin = self.overlays[i].window_margin;
             let is_submenu = self.overlays[i].parent_item.is_some();
             let alignment = self.overlays[i].style.alignment;
+            let offset = self.overlays[i].style.offset;
             let min_w = anchor.size.width; // 菜单至少与锚点同宽
             let node = self.overlays[i].root.as_mut();
             let desired = node.measure(window, &*cv);
-            let rect = if is_submenu {
+            let mut rect = if is_submenu {
                 place_submenu(anchor, desired, window, window_margin)
             } else {
                 place_overlay(
@@ -326,6 +334,8 @@ impl Dispatcher {
                     alignment,
                 )
             };
+            rect.origin.x += offset.x;
+            rect.origin.y += offset.y;
             layout_node(node, rect, &*cv);
             paint_tree(&*node, cv);
         }
@@ -671,6 +681,10 @@ impl Dispatcher {
     /// 分发一个事件到控件树。
     pub fn handle(&mut self, root: &mut dyn Widget, ev: &Event) {
         self.ensure_focus_valid(root);
+        if matches!(ev, Event::WindowFocusChanged { focused: false }) {
+            self.dismiss_overlays();
+            return;
+        }
         // 有模态浮层时事件独占给浮层（主树不收事件）。
         if !self.overlays.is_empty() {
             self.handle_with_overlay(root, ev);
@@ -1398,6 +1412,27 @@ mod tests {
     }
 
     #[test]
+    fn 菜单偏移在自动摆放后生效() {
+        let mut disp = Dispatcher::new();
+        disp.open_styled_menu(
+            Rect::new(150.0, 50.0, 20.0, 20.0),
+            vec![("设置".into(), "settings".into())],
+            Some(crate::widgets::MenuStyle {
+                width: Some(100.0),
+                offset: Point::new(10.0, -6.0),
+                alignment: crate::widgets::MenuAlignment::End,
+                ..Default::default()
+            }),
+            None,
+        );
+
+        disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
+
+        assert_eq!(disp.overlays[0].root.base().rect.left(), 80.0);
+        assert_eq!(disp.overlays[0].root.base().rect.top(), 64.0);
+    }
+
+    #[test]
     fn 浮层滚轮只滚菜单且保持打开() {
         let mut root = ScrollView::new()
             .push(Panel::new().height(200.0))
@@ -1669,6 +1704,25 @@ mod tests {
         disp.handle(&mut root, &Event::MouseUp { pos: child, button: MouseButton::Left });
         assert_eq!(disp.take_activations(), vec!["repair".to_string()]);
         assert!(!disp.has_overlays());
+    }
+
+    #[test]
+    fn 窗口失焦关闭全部菜单浮层() {
+        let mut root = Button::new("").name("main");
+        let mut disp = Dispatcher::new();
+        disp.open_menu(
+            Rect::new(20.0, 20.0, 20.0, 20.0),
+            vec![("设置".into(), "settings".into())],
+        );
+        assert!(disp.has_overlays());
+
+        disp.handle(&mut root, &Event::WindowFocusChanged { focused: true });
+        assert!(disp.has_overlays());
+
+        disp.handle(&mut root, &Event::WindowFocusChanged { focused: false });
+
+        assert!(!disp.has_overlays());
+        assert!(disp.take_redraw());
     }
 
     #[test]

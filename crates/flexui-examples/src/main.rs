@@ -148,6 +148,8 @@ fn settings_menu_style() -> MenuStyle {
         submenu_indicator_inset: 8.0,
         window_margin: Insets::new(8.0, 8.0, 8.0, 8.0),
         alignment: MenuAlignment::End,
+        // 原图四周包含阴影留白，让可见面板右边和顶部贴齐按钮锚点。
+        offset: flexui::Point::new(22.0, -22.0),
         submenu_align_panel_top: true,
         submenu_style: Some(Box::new(submenu)),
         ..Default::default()
@@ -203,10 +205,9 @@ impl WindowImpl for UuExample {
                 }
             }
             "open_settings" => {
-                let button_rect = ctx
+                let anchor = ctx
                     .with("open_settings", |widget| widget.base().rect)
                     .unwrap_or(Rect::new(908.0, 2.0, 24.0, 24.0));
-                let anchor = Rect::new(button_rect.left(), button_rect.top(), button_rect.size.width, button_rect.size.height);
                 ctx.open_styled_menu_entries(anchor, settings_menu_entries(ctx), settings_menu_style());
             }
             "menu_settings" => {

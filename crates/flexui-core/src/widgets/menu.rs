@@ -1,6 +1,6 @@
 //! Menu：浮层菜单项 `MenuItem` 与构建器 `build_menu`（供下拉/右键菜单复用）。
 
-use flexui_geometry::{Color, Corners, Insets, Size};
+use flexui_geometry::{Color, Corners, Insets, Point, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource, TextAlign};
 
 use crate::common_builders;
@@ -80,6 +80,8 @@ pub struct MenuStyle {
     /// 浮层在窗口内摆放时保留的边距。
     pub window_margin: Insets,
     pub alignment: MenuAlignment,
+    /// 菜单完成自动摆放后的额外逻辑像素偏移。
+    pub offset: Point,
     /// 子菜单顶部是否与父菜单面板顶部对齐；默认与触发它的菜单项顶部对齐。
     pub submenu_align_panel_top: bool,
     pub submenu_style: Option<Box<MenuStyle>>,
@@ -118,6 +120,7 @@ impl Default for MenuStyle {
             scrollbar: ScrollBarStyle::default(),
             window_margin: Insets::default(),
             alignment: MenuAlignment::Start,
+            offset: Point::default(),
             submenu_align_panel_top: false,
             submenu_style: None,
         }
