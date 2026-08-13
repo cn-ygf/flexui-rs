@@ -35,7 +35,8 @@ pub(crate) fn original_svg(bytes: &'static [u8]) -> ImageSource {
 mod tests {
     use super::*;
     use flexui::{
-        apply_theme, layout_node, Context, Corners, Font, Point, Rect, Size, Theme, Widget,
+        apply_theme, layout_node, Color, Context, Corners, Font, Point, Rect, Size, Sizing, Theme,
+        Widget,
     };
 
     struct TestCanvas;
@@ -66,6 +67,13 @@ mod tests {
             .children
             .iter()
             .find_map(|child| find_widget(child.as_ref(), name))
+    }
+
+    fn load_themed_window(path: &str) -> flexui::WindowDoc {
+        let resources = resources();
+        let mut window = flexui::load_window_res(&resources, path, &Context::new()).unwrap();
+        apply_theme(window.root.as_mut(), &Theme::light());
+        window
     }
 
     #[test]
@@ -132,6 +140,56 @@ mod tests {
             assert_eq!(style.bg_color, None, "{button} background color");
             assert_eq!(style.border_color, None, "{button} border color");
             assert_eq!(style.border_width, None, "{button} border width");
+        }
+    }
+
+    #[test]
+    fn 登录输入区的透明控件不继承默认主题背景() {
+        let window = load_themed_window("login.xml");
+        for name in ["nation_code_text", "edit_phone", "edit_code", "get_code"] {
+            let style = find_widget(window.root.as_ref(), name)
+                .unwrap()
+                .base()
+                .resolved_style();
+            assert_eq!(
+                style.bg_color,
+                Some(Color::from_u8(0, 0, 0, 0)),
+                "{name} background color"
+            );
+            assert_eq!(style.border_width, Some(0.0), "{name} border width");
+        }
+    }
+
+    #[test]
+    fn 系统设置布局尺寸与原版皮肤一致() {
+        let window = load_themed_window("settings.xml");
+        let root = window.root.as_ref();
+
+        let heading = find_widget(root, "settings_heading").unwrap().base();
+        assert_eq!(heading.font.size, 16.0);
+        assert!(heading.font.bold);
+
+        let body = find_widget(root, "startup_label").unwrap().base();
+        assert_eq!(body.font.size, 14.0);
+
+        let detail = find_widget(root, "keep_network_detail").unwrap().base();
+        assert_eq!(detail.font.size, 12.0);
+
+        let language = find_widget(root, "language").unwrap().base();
+        assert_eq!(language.width, Sizing::Fixed(144.0));
+        assert_eq!(language.height, Sizing::Fixed(28.0));
+
+        for name in [
+            "set_startup",
+            "set_desktop",
+            "set_auto",
+            "set_sleep",
+            "set_audio",
+            "set_notice",
+        ] {
+            let switch = find_widget(root, name).unwrap().base();
+            assert_eq!(switch.width, Sizing::Fixed(30.0), "{name} width");
+            assert_eq!(switch.height, Sizing::Fixed(16.0), "{name} height");
         }
     }
 }

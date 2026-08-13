@@ -4,7 +4,7 @@
 <Panel normal-bgcolor="#30386F" font-family="Microsoft YaHei" mouse="transparent">
   <VBox spacing="0" normal-bgcolor="#30386F" mouse="transparent">
     <HBox height="42" padding="5 10" normal-bgcolor="#343C78" mouse="transparent">
-      <Label text="settings.title" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="18" mouse="transparent"/>
+      <Label text="settings.title" flex="1" height="32" normal-fgcolor="#AEB5D6" font-size="12" mouse="transparent"/>
       <Button name="close_settings" tooltip="settings.close" width="28" height="28"
               normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
               pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"/>
@@ -13,74 +13,74 @@
       <VBox width="180" spacing="0" normal-bgcolor="#343C78">
         <Button text="settings.system" width="180" height="48" padding="0 0 0 52"
                 normal-bgimage="button/setform_system_selected.svg" normal-bgfit="stretch"
-                normal-fgcolor="#FFFFFF" font-size="15" normal-textalign="left"/>
+                normal-fgcolor="#FFFFFF" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.features" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.acceleration" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.repair" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.authorization" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.ai" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.downloads" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Button text="settings.about" width="180" height="48" padding="0 0 0 52" normal-bgcolor="#343C78"
-                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" font-size="15" normal-textalign="left"/>
+                hot-bgcolor="#3D4785" normal-fgcolor="#B7BBD9" border-width="0" font-size="14" normal-textalign="left"/>
         <Panel flex="1" mouse="transparent"/>
       </VBox>
-      <VBox flex="1" spacing="0" padding="18 24" normal-bgcolor="#30386F">
-        <Label text="settings.system" height="34" normal-fgcolor="#FFFFFF" font-size="20" bold="true"/>
-        <HBox height="54" align="center">
-          <Label text="settings.language" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <ComboBox name="language" options="settings.locale.system,settings.locale.simplified_chinese,settings.locale.traditional_chinese,settings.locale.english" selected="0" width="150" height="36"
+      <VBox flex="1" spacing="0" padding="0 24" normal-bgcolor="#30386F">
+        <Label name="settings_heading" text="settings.system" height="32" normal-fgcolor="#FFFFFF" font-size="16" bold="true"/>
+        <HBox height="40" align="center">
+          <Label name="language_label" text="settings.language" flex="1" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+          <ComboBox name="language" options="settings.locale.system,settings.locale.simplified_chinese,settings.locale.traditional_chinese,settings.locale.english" selected="0" width="144" height="28"
                     padding="0 10" normal-bgcolor="#3D4785" normal-fgcolor="#FFFFFF" border-width="1"
-                    normal-bordercolor="#4F5A9A" corner-radius="6"/>
+                    normal-bordercolor="#4F5A9A" corner-radius="6" font-size="12"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
-        <HBox height="58" align="center">
-          <Label text="settings.startup" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <Switch name="set_startup" width="52" height="26" normal-trackcolor="#565E99"
+        <HBox height="40" align="center">
+          <Label name="startup_label" text="settings.startup" flex="1" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+          <Switch name="set_startup" width="30" height="16" normal-trackcolor="#565E99"
                   selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
-        <HBox height="58" align="center">
-          <Label text="settings.desktop_shortcut" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <Switch name="set_desktop" width="52" height="26" normal-trackcolor="#565E99"
+        <HBox height="40" align="center">
+          <Label text="settings.desktop_shortcut" flex="1" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+          <Switch name="set_desktop" width="30" height="16" normal-trackcolor="#565E99"
                   selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
-        <HBox height="58" align="center">
-          <Label text="settings.auto_accelerate" flex="1" height="32" normal-fgcolor="#FFFFFF" font-size="16"/>
-          <Switch name="set_auto" width="52" height="26" normal-trackcolor="#565E99"
+        <HBox height="40" align="center">
+          <Label text="settings.auto_accelerate" flex="1" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+          <Switch name="set_auto" width="30" height="16" normal-trackcolor="#565E99"
                   selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
-        <HBox height="70" align="center">
-          <VBox flex="1" spacing="2">
-            <Label text="settings.keep_network" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
-            <Label text="settings.keep_network.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+        <HBox height="64" align="center">
+          <VBox flex="1" spacing="0">
+            <Label text="settings.keep_network" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+            <Label name="keep_network_detail" text="settings.keep_network.detail" height="24" normal-fgcolor="#B7BBD9" font-size="12"/>
           </VBox>
-          <Switch name="set_sleep" width="52" height="26" normal-trackcolor="#565E99"
+          <Switch name="set_sleep" width="30" height="16" normal-trackcolor="#565E99"
                   selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
-        <HBox height="70" align="center">
-          <VBox flex="1" spacing="2">
-            <Label text="settings.sound" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
-            <Label text="settings.sound.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+        <HBox height="64" align="center">
+          <VBox flex="1" spacing="0">
+            <Label text="settings.sound" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+            <Label text="settings.sound.detail" height="24" normal-fgcolor="#B7BBD9" font-size="12"/>
           </VBox>
-          <Switch name="set_audio" width="52" height="26" normal-trackcolor="#565E99"
+          <Switch name="set_audio" width="30" height="16" normal-trackcolor="#565E99"
                   selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Separator height="1" normal-bgcolor="#474F82"/>
-        <HBox height="70" align="center">
-          <VBox flex="1" spacing="2">
-            <Label text="settings.badge" height="26" normal-fgcolor="#FFFFFF" font-size="16"/>
-            <Label text="settings.badge.detail" height="22" normal-fgcolor="#AEB5D6" font-size="13"/>
+        <HBox height="64" align="center">
+          <VBox flex="1" spacing="0">
+            <Label text="settings.badge" height="24" normal-fgcolor="#FFFFFF" font-size="14"/>
+            <Label text="settings.badge.detail" height="24" normal-fgcolor="#B7BBD9" font-size="12"/>
           </VBox>
-          <Switch name="set_notice" checked="true" width="52" height="26"
+          <Switch name="set_notice" checked="true" width="30" height="16"
                   normal-trackcolor="#565E99" selected-trackcolor="#00CFC4" thumbcolor="#FFFFFF"/>
         </HBox>
         <Label name="settings_status" text="settings.session_only" flex="1" height="24"
