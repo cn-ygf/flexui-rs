@@ -37,8 +37,15 @@ fn embedded_gallery_loads_all_included_pages() {
         find_by_name(doc.root.as_ref(), "pages").unwrap(),
     )
     .unwrap();
-    assert_eq!(pages.base().children.len(), 4);
-    for name in ["apply_bilibili_theme", "restore_default_theme"] {
+    assert_eq!(pages.base().children.len(), 5);
+    for name in [
+        "apply_bilibili_theme",
+        "restore_default_theme",
+        "open_drawn_menu",
+        "open_xml_native_menu",
+        "open_rust_native_menu",
+        "native_context_target",
+    ] {
         assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
     }
     let bilibili_button = find_by_id(

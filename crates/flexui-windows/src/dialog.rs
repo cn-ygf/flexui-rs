@@ -7,12 +7,12 @@ use flexui_core::dialog::{DialogKind, FileDialog};
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::UI::Controls::Dialogs::{
-    GetOpenFileNameW, GetSaveFileNameW, OPENFILENAMEW, OFN_EXPLORER, OFN_FILEMUSTEXIST,
-    OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
+    GetOpenFileNameW, GetSaveFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR,
+    OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
 use windows_sys::Win32::UI::Shell::{
-    SHBrowseForFolderW, SHGetPathFromIDListW, BROWSEINFOW, BFFM_INITIALIZED, BFFM_SETSELECTIONW,
-    BIF_RETURNONLYFSDIRS,
+    SHBrowseForFolderW, SHGetPathFromIDListW, BFFM_INITIALIZED, BFFM_SETSELECTIONW,
+    BIF_RETURNONLYFSDIRS, BROWSEINFOW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
 
@@ -54,7 +54,11 @@ fn build_filter(opts: &FileDialog) -> Vec<u16> {
             let pat = if f.extensions.is_empty() {
                 "*.*".to_string()
             } else {
-                f.extensions.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";")
+                f.extensions
+                    .iter()
+                    .map(|e| format!("*.{e}"))
+                    .collect::<Vec<_>>()
+                    .join(";")
             };
             push(&pat);
         }
@@ -76,7 +80,10 @@ unsafe fn file_dialog(save: bool, opts: &FileDialog) -> Option<PathBuf> {
     }
     let filter = build_filter(opts);
     let title = opts.title.as_ref().map(|t| wide(t));
-    let initdir = opts.default_dir.as_ref().map(|d| wide(&d.to_string_lossy()));
+    let initdir = opts
+        .default_dir
+        .as_ref()
+        .map(|d| wide(&d.to_string_lossy()));
 
     let mut ofn: OPENFILENAMEW = std::mem::zeroed();
     ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
@@ -88,9 +95,17 @@ unsafe fn file_dialog(save: bool, opts: &FileDialog) -> Option<PathBuf> {
     ofn.Flags = OFN_EXPLORER
         | OFN_NOCHANGEDIR
         | OFN_PATHMUSTEXIST
-        | if save { OFN_OVERWRITEPROMPT } else { OFN_FILEMUSTEXIST };
+        | if save {
+            OFN_OVERWRITEPROMPT
+        } else {
+            OFN_FILEMUSTEXIST
+        };
 
-    let ok = if save { GetSaveFileNameW(&mut ofn) } else { GetOpenFileNameW(&mut ofn) };
+    let ok = if save {
+        GetSaveFileNameW(&mut ofn)
+    } else {
+        GetOpenFileNameW(&mut ofn)
+    };
     if ok == 0 {
         return None;
     }
@@ -109,7 +124,10 @@ unsafe extern "system" fn browse_cb(hwnd: HWND, msg: u32, _lp: LPARAM, data: LPA
 /// 目录选择对话框（经典样式，无需 OLE 初始化）。
 unsafe fn folder_dialog(opts: &FileDialog) -> Option<PathBuf> {
     let title = opts.title.as_ref().map(|t| wide(t));
-    let default = opts.default_dir.as_ref().map(|d| wide(&d.to_string_lossy()));
+    let default = opts
+        .default_dir
+        .as_ref()
+        .map(|d| wide(&d.to_string_lossy()));
     let mut display = vec![0u16; 260];
 
     let mut bi: BROWSEINFOW = std::mem::zeroed();

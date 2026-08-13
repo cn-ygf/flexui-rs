@@ -10,8 +10,9 @@ pub use flexui_core::*;
 
 // XML 布局加载。
 pub use flexui_xml::{
-    build_fragment_res, build_fragment_str, load_res, load_str as load_xml_str, load_window_res,
-    load_window_str, Context, LoadError, LoadResult, WindowDoc,
+    build_fragment_res, build_fragment_str, load_native_menu_res, load_native_menu_str, load_res,
+    load_str as load_xml_str, load_window_res, load_window_str, Context, LoadError, LoadResult,
+    WindowDoc,
 };
 
 // 资源系统（RM1-5）。

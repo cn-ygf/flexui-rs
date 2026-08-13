@@ -37,7 +37,9 @@ fn embed_assets(crate_dir: &Path) {
             .expect("资源必须位于 assets 目录")
             .to_string_lossy()
             .replace('\\', "/");
-        archive.start_file(name, options).expect("写入资源包条目失败");
+        archive
+            .start_file(name, options)
+            .expect("写入资源包条目失败");
         let bytes = std::fs::read(&path).expect("读取示例资源失败");
         archive.write_all(&bytes).expect("写入示例资源失败");
     }
@@ -48,8 +50,7 @@ fn embed_assets(crate_dir: &Path) {
 fn main() {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     embed_assets(&crate_dir);
-    let manifest = crate_dir
-        .join("../flexui-windows/flexui.manifest");
+    let manifest = crate_dir.join("../flexui-windows/flexui.manifest");
     let icon = crate_dir.join("assets/app.ico");
     println!("cargo:rerun-if-changed={}", manifest.display());
     println!("cargo:rerun-if-changed={}", icon.display());
@@ -58,9 +59,7 @@ fn main() {
         let icon = icon.to_string_lossy();
         let manifest = manifest.to_string_lossy();
         let mut resources = winresource::WindowsResource::new();
-        resources
-            .set_icon(&icon)
-            .set_manifest_file(&manifest);
+        resources.set_icon(&icon).set_manifest_file(&manifest);
         resources.compile().expect("编译 Windows 图标资源失败");
     }
 }

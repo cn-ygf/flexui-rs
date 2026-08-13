@@ -193,8 +193,9 @@ pub extern "C" fn flex_ctx_close(ctx: *mut c_void) {
 pub struct FlexDelegate {
     pub on_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
     pub on_click: Option<extern "C" fn(name: *const c_char, ctx: *mut c_void, user: *mut c_void)>,
-    pub on_context:
-        Option<extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void)>,
+    pub on_context: Option<
+        extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void),
+    >,
     /// 返回非 0 允许关闭，0 阻止关闭。
     pub on_close: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void) -> c_int>,
 }
@@ -227,7 +228,13 @@ impl WindowDelegate for CDelegate {
     fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
         if let Some(f) = self.d.on_context {
             if let Ok(cn) = CString::new(name) {
-                f(cn.as_ptr(), x, y, ctx as *mut _ as *mut c_void, self.user_ptr());
+                f(
+                    cn.as_ptr(),
+                    x,
+                    y,
+                    ctx as *mut _ as *mut c_void,
+                    self.user_ptr(),
+                );
             }
         }
     }
@@ -267,7 +274,10 @@ pub extern "C" fn flex_run(
         let deleg: Box<dyn WindowDelegate> = if delegate.is_null() {
             Box::new(flexui_core::NoopDelegate)
         } else {
-            Box::new(CDelegate { d: unsafe { *delegate }, user: user as usize })
+            Box::new(CDelegate {
+                d: unsafe { *delegate },
+                user: user as usize,
+            })
         };
         backend::run(
             flexui_core::WindowConfig::new(title, width as f32, height as f32),
@@ -334,7 +344,11 @@ fn build_fd(opts: *const FlexFileDialog) -> FileDialog {
             fd = fd.default_name(n);
         }
         if let Some(exts) = cstr(o.filter_exts) {
-            let e: Vec<&str> = exts.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            let e: Vec<&str> = exts
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
             if !e.is_empty() {
                 fd = fd.filter(cstr(o.filter_name).unwrap_or("文件"), &e);
             }
@@ -344,7 +358,12 @@ fn build_fd(opts: *const FlexFileDialog) -> FileDialog {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn dialog_out(kind: DialogKind, opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+fn dialog_out(
+    kind: DialogKind,
+    opts: *const FlexFileDialog,
+    out: *mut c_char,
+    out_len: c_int,
+) -> c_int {
     catch_unwind(AssertUnwindSafe(|| {
         let fd = build_fd(opts);
         match backend::show_dialog(kind, &fd) {
@@ -358,28 +377,44 @@ fn dialog_out(kind: DialogKind, opts: *const FlexFileDialog, out: *mut c_char, o
 /// 打开文件对话框，路径写入 out；返回长度，取消/出错 -1。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[no_mangle]
-pub extern "C" fn flex_dialog_open_file(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+pub extern "C" fn flex_dialog_open_file(
+    opts: *const FlexFileDialog,
+    out: *mut c_char,
+    out_len: c_int,
+) -> c_int {
     dialog_out(DialogKind::OpenFile, opts, out, out_len)
 }
 
 /// 打开目录对话框。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[no_mangle]
-pub extern "C" fn flex_dialog_open_directory(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+pub extern "C" fn flex_dialog_open_directory(
+    opts: *const FlexFileDialog,
+    out: *mut c_char,
+    out_len: c_int,
+) -> c_int {
     dialog_out(DialogKind::OpenDirectory, opts, out, out_len)
 }
 
 /// 保存文件对话框。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[no_mangle]
-pub extern "C" fn flex_dialog_save_file(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+pub extern "C" fn flex_dialog_save_file(
+    opts: *const FlexFileDialog,
+    out: *mut c_char,
+    out_len: c_int,
+) -> c_int {
     dialog_out(DialogKind::SaveFile, opts, out, out_len)
 }
 
 /// 保存到目录对话框。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[no_mangle]
-pub extern "C" fn flex_dialog_save_directory(opts: *const FlexFileDialog, out: *mut c_char, out_len: c_int) -> c_int {
+pub extern "C" fn flex_dialog_save_directory(
+    opts: *const FlexFileDialog,
+    out: *mut c_char,
+    out_len: c_int,
+) -> c_int {
     dialog_out(DialogKind::SaveDirectory, opts, out, out_len)
 }
 
@@ -410,8 +445,9 @@ pub extern "C" fn flex_run_xml(
             let b = w.base_mut();
             if b.role == WidgetRole::Button {
                 if let Some(name) = b.name.clone() {
-                    b.on_click =
-                        Some(Box::new(move |_ctx: &mut flexui_core::EventCtx| fire_click(&name)));
+                    b.on_click = Some(Box::new(move |_ctx: &mut flexui_core::EventCtx| {
+                        fire_click(&name)
+                    }));
                 }
             }
         });

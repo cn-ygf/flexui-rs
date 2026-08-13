@@ -113,6 +113,14 @@ pub trait WindowHandle {
     fn minimize(&mut self);
     fn maximize(&mut self);
     fn restore(&mut self);
+    /// 在系统原生菜单中同步等待选择；取消时返回 None。
+    fn popup_native_menu(
+        &mut self,
+        _menu: &crate::NativeMenu,
+        _anchor: crate::NativeMenuPopupAnchor,
+    ) -> Option<String> {
+        None
+    }
     /// 共享环境发生变化；平台可立即通知同一应用中的其他窗口。
     fn environment_changed(&mut self) {}
 }
@@ -521,6 +529,26 @@ impl<'a> WindowCtx<'a> {
     }
     pub fn restore(&mut self) {
         self.win.restore();
+    }
+    /// 弹出 AppKit/Win32 原生菜单，并同步返回被选择的命令 ID。
+    pub fn popup_native_menu(
+        &mut self,
+        menu: &crate::NativeMenu,
+        anchor: crate::NativeMenuAnchor,
+    ) -> Option<String> {
+        let anchor = match anchor {
+            crate::NativeMenuAnchor::Cursor => crate::NativeMenuPopupAnchor::Cursor,
+            crate::NativeMenuAnchor::Window(point) => crate::NativeMenuPopupAnchor::Window(point),
+            crate::NativeMenuAnchor::Screen(point) => crate::NativeMenuPopupAnchor::Screen(point),
+            crate::NativeMenuAnchor::Control(name) => {
+                let rect = self.get(&name, |widget| widget.base().rect)?;
+                crate::NativeMenuPopupAnchor::Window(flexui_geometry::Point::new(
+                    rect.left(),
+                    rect.bottom(),
+                ))
+            }
+        };
+        self.win.popup_native_menu(menu, anchor)
     }
 }
 

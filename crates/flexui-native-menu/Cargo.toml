@@ -1,0 +1,10 @@
+[package]
+name = "flexui-native-menu"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+flexui-core = { workspace = true }
+flexui-svg = { workspace = true }
+muda = { workspace = true }
+image = { workspace = true }

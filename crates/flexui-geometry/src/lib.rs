@@ -66,7 +66,12 @@ impl Rect {
     pub fn deflate(&self, insets: Insets) -> Rect {
         let w = (self.size.width - insets.left - insets.right).max(0.0);
         let h = (self.size.height - insets.top - insets.bottom).max(0.0);
-        Rect::new(self.origin.x + insets.left, self.origin.y + insets.top, w, h)
+        Rect::new(
+            self.origin.x + insets.left,
+            self.origin.y + insets.top,
+            w,
+            h,
+        )
     }
 
     /// 四边收缩相同值。

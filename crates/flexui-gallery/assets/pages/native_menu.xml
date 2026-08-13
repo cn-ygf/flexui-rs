@@ -1,0 +1,42 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="20">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Popup menu comparison" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="FlexUI overlay and operating-system native menus" fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <VBox width="fill" spacing="12">
+      <Label text-verbatim="FlexUI drawn menu" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="42" spacing="10">
+        <Button name="open_drawn_menu" text-verbatim="Drawn menu" width="132" height="36"/>
+      </HBox>
+      <Label text-verbatim="Rendered by FlexUI with theme styles, icons and nested menus"
+             fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <VBox width="fill" spacing="12">
+      <Label text-verbatim="System native menu" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="42" spacing="10">
+        <Button name="open_xml_native_menu" text-verbatim="XML menu" variant="primary"
+                width="132" height="36"/>
+        <Button name="open_rust_native_menu" text-verbatim="Rust menu" width="132" height="36"/>
+      </HBox>
+      <Label text-verbatim="AppKit NSMenu or Win32 HMENU with shortcuts, icons, separators and submenus"
+             fgcolor="@text-secondary"/>
+    </VBox>
+    <VBox width="fill" spacing="12">
+      <Label text-verbatim="Window and pointer anchors" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox height="42" spacing="10">
+        <Button name="open_position_native_menu" text-verbatim="Window position"
+                width="156" height="36"/>
+        <Button name="native_context_target" text-verbatim="Right-click here"
+                width="156" height="36"/>
+      </HBox>
+    </VBox>
+    <VBox width="fill" spacing="8">
+      <Label text-verbatim="Last command" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Label name="native_menu_result" text-verbatim="None" height="28"
+             fgcolor="@brand" bold="true"/>
+    </VBox>
+  </VBox>
+</ScrollView>

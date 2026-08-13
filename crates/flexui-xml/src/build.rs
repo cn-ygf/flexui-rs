@@ -49,7 +49,7 @@ impl Context {
         self.localizer.as_ref()
     }
 
-    fn get(&self, key: &str) -> bool {
+    pub(crate) fn get(&self, key: &str) -> bool {
         match key {
             "true" => true,
             "false" => false,
@@ -285,7 +285,7 @@ fn parse_drag_region(s: &str) -> Result<WindowDragRegion, LoadError> {
 
 /// 解析图片来源：有资源管理器则读成字节（支持 zip/内嵌），否则按文件路径。
 /// `.svg` 走矢量光栅化路径。
-fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
+pub(crate) fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageSource {
     let is_svg = path.to_lowercase().ends_with(".svg");
     let density = flexui_core::image_density_from_path(path);
     if let Some(rm) = res {
@@ -914,7 +914,7 @@ fn attr_value<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
 }
 
 /// 目录中存在的普通字符串自动作为 key；`loc:key` 强制绑定，verbatim 属性强制字面量。
-fn resolve_localized(
+pub(crate) fn resolve_localized(
     value: &str,
     args: Option<&str>,
     localizer: Option<&Localizer>,

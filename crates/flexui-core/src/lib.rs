@@ -10,6 +10,7 @@ pub mod event;
 pub mod frame_animation;
 pub mod layout;
 pub mod localization;
+pub mod native_menu;
 pub mod paint;
 pub mod sizing;
 pub mod style;
@@ -26,6 +27,10 @@ pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
 pub use layout::{layout_node, Axis};
 pub use localization::{apply_localizations, LocalizationBinding};
+pub use native_menu::{
+    NativeMenu, NativeMenuAnchor, NativeMenuEntry, NativeMenuItem, NativeMenuPopupAnchor,
+    NativeSubmenu,
+};
 pub use paint::{paint_tree, paint_tree_in_rect};
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{

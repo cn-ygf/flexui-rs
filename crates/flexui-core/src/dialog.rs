@@ -92,6 +92,9 @@ mod tests {
         assert_eq!(d.default_name.as_deref(), Some("a.png"));
         assert_eq!(d.filters.len(), 2);
         // 去重合集。
-        assert_eq!(d.all_extensions(), vec!["png".to_string(), "jpg".to_string()]);
+        assert_eq!(
+            d.all_extensions(),
+            vec!["png".to_string(), "jpg".to_string()]
+        );
     }
 }

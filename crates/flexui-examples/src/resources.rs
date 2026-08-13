@@ -48,7 +48,8 @@ mod tests {
             _radius: Corners,
             _color: flexui::Color,
             _width: f32,
-        ) {}
+        ) {
+        }
         fn draw_text(&mut self, _text: &str, _origin: Point, _font: &Font, _color: flexui::Color) {}
         fn measure_text(&self, text: &str, font: &Font) -> Size {
             Size::new(text.chars().count() as f32 * font.size * 0.5, font.size)
@@ -73,9 +74,7 @@ mod tests {
             .unwrap()
             .contains("<Window"));
         for page in ["home", "examples", "cloud-play", "cloud-saves"] {
-            let xml = resources
-                .read_string(&format!("pages/{page}.xml"))
-                .unwrap();
+            let xml = resources.read_string(&format!("pages/{page}.xml")).unwrap();
             assert!(xml.contains("page_"));
         }
         assert!(!resources
@@ -100,12 +99,26 @@ mod tests {
             &TestCanvas,
         );
         assert_eq!(
-            find_widget(window.root.as_ref(), "main_pages").unwrap().base().children.len(),
+            find_widget(window.root.as_ref(), "main_pages")
+                .unwrap()
+                .base()
+                .children
+                .len(),
             4
         );
-        assert!(find_widget(window.root.as_ref(), "page_home").unwrap().base().visible);
+        assert!(
+            find_widget(window.root.as_ref(), "page_home")
+                .unwrap()
+                .base()
+                .visible
+        );
         for page in ["page_examples", "page_cloud_play", "page_cloud_saves"] {
-            assert!(!find_widget(window.root.as_ref(), page).unwrap().base().visible);
+            assert!(
+                !find_widget(window.root.as_ref(), page)
+                    .unwrap()
+                    .base()
+                    .visible
+            );
         }
     }
 }

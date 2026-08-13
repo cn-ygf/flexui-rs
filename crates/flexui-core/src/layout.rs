@@ -82,7 +82,11 @@ pub fn measure_axis(b: &mut Base, axis: Axis, avail: Size, cv: &dyn Canvas) -> S
         (avail.width - b.padding.horizontal()).max(0.0),
         (avail.height - b.padding.vertical()).max(0.0),
     );
-    let n = b.children.iter().filter(|child| child.base().visible).count();
+    let n = b
+        .children
+        .iter()
+        .filter(|child| child.base().visible)
+        .count();
     let mut main = 0.0f32;
     let mut cross = 0.0f32;
     for child in b.children.iter_mut() {
@@ -108,7 +112,11 @@ pub fn measure_axis(b: &mut Base, axis: Axis, avail: Size, cv: &dyn Canvas) -> S
 /// 无 Fill 时按 justify 分布剩余空间；交叉轴按 align 对齐；尊重每子 margin。
 pub fn arrange_axis(b: &mut Base, axis: Axis, content: Rect, cv: &dyn Canvas) {
     let child_count = b.children.len();
-    let visible_count = b.children.iter().filter(|child| child.base().visible).count();
+    let visible_count = b
+        .children
+        .iter()
+        .filter(|child| child.base().visible)
+        .count();
     if visible_count == 0 {
         return;
     }
@@ -309,9 +317,29 @@ mod tests {
     impl Canvas for FakeCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: flexui_geometry::Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: flexui_geometry::Color, _w: f32) {}
-        fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: flexui_geometry::Color) {}
-        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: flexui_geometry::Color, _w: f32) {}
-        fn draw_text(&mut self, _t: &str, _o: flexui_geometry::Point, _f: &Font, _c: flexui_geometry::Color) {}
+        fn fill_round_rect(
+            &mut self,
+            _r: Rect,
+            _rad: flexui_geometry::Corners,
+            _c: flexui_geometry::Color,
+        ) {
+        }
+        fn stroke_round_rect(
+            &mut self,
+            _r: Rect,
+            _rad: flexui_geometry::Corners,
+            _c: flexui_geometry::Color,
+            _w: f32,
+        ) {
+        }
+        fn draw_text(
+            &mut self,
+            _t: &str,
+            _o: flexui_geometry::Point,
+            _f: &Font,
+            _c: flexui_geometry::Color,
+        ) {
+        }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
         }
@@ -320,8 +348,12 @@ mod tests {
     #[test]
     fn vbox_按期望高度纵向排列() {
         let mut root = VBox::new();
-        root.base_mut().children.push(Box::new(Panel::new().size(100.0, 30.0)));
-        root.base_mut().children.push(Box::new(Panel::new().size(100.0, 50.0)));
+        root.base_mut()
+            .children
+            .push(Box::new(Panel::new().size(100.0, 30.0)));
+        root.base_mut()
+            .children
+            .push(Box::new(Panel::new().size(100.0, 50.0)));
         root.base_mut().spacing = 10.0;
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 400.0), &cv);
@@ -335,7 +367,9 @@ mod tests {
     fn vbox_flex_grow_分摊剩余空间() {
         let mut root = VBox::new();
         // 固定 40 高 + 一个 grow=1 的填充
-        root.base_mut().children.push(Box::new(Panel::new().size(10.0, 40.0)));
+        root.base_mut()
+            .children
+            .push(Box::new(Panel::new().size(10.0, 40.0)));
         let mut fill = Panel::new();
         fill.base_mut().flex_grow = 1.0;
         root.base_mut().children.push(Box::new(fill));
@@ -350,8 +384,12 @@ mod tests {
     #[test]
     fn hbox_横向排列() {
         let mut root = HBox::new();
-        root.base_mut().children.push(Box::new(Panel::new().size(30.0, 20.0)));
-        root.base_mut().children.push(Box::new(Panel::new().size(50.0, 20.0)));
+        root.base_mut()
+            .children
+            .push(Box::new(Panel::new().size(30.0, 20.0)));
+        root.base_mut()
+            .children
+            .push(Box::new(Panel::new().size(50.0, 20.0)));
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 300.0, 100.0), &cv);
         let c = &root.base().children;
@@ -367,7 +405,10 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         // 子控件填充内容区：(10,10,80,80)
-        assert_eq!(root.base().children[0].base().rect, Rect::new(10.0, 10.0, 80.0, 80.0));
+        assert_eq!(
+            root.base().children[0].base().rect,
+            Rect::new(10.0, 10.0, 80.0, 80.0)
+        );
     }
 
     #[test]
@@ -379,12 +420,19 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         // 内容区：x=5,y=10,w=100-5-15=80,h=100-10-20=70
-        assert_eq!(root.base().children[0].base().rect, Rect::new(5.0, 10.0, 80.0, 70.0));
+        assert_eq!(
+            root.base().children[0].base().rect,
+            Rect::new(5.0, 10.0, 80.0, 70.0)
+        );
     }
 
     #[test]
     fn margin_每边不同_影响排布() {
-        let mut root = VBox::new().push(Panel::new().size(50.0, 30.0).margin_ltrb(5.0, 10.0, 15.0, 20.0));
+        let mut root = VBox::new().push(
+            Panel::new()
+                .size(50.0, 30.0)
+                .margin_ltrb(5.0, 10.0, 15.0, 20.0),
+        );
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 200.0), &cv);
         let c = root.base().children[0].base().rect;

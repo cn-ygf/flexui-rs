@@ -193,14 +193,22 @@ impl ResourceProvider for ZipProvider {
         match &self.source {
             ZipSource::File(p) => {
                 let file = std::fs::File::open(p)?;
-                extract(ZipArchive::new(BufReader::new(file))?, path, self.password.as_deref())
+                extract(
+                    ZipArchive::new(BufReader::new(file))?,
+                    path,
+                    self.password.as_deref(),
+                )
             }
-            ZipSource::Bytes(b) => {
-                extract(ZipArchive::new(Cursor::new(b.clone()))?, path, self.password.as_deref())
-            }
-            ZipSource::Static(b) => {
-                extract(ZipArchive::new(Cursor::new(*b))?, path, self.password.as_deref())
-            }
+            ZipSource::Bytes(b) => extract(
+                ZipArchive::new(Cursor::new(b.clone()))?,
+                path,
+                self.password.as_deref(),
+            ),
+            ZipSource::Static(b) => extract(
+                ZipArchive::new(Cursor::new(*b))?,
+                path,
+                self.password.as_deref(),
+            ),
         }
     }
 }
@@ -250,7 +258,8 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut w = zip::ZipWriter::new(&mut cursor);
-            w.start_file("skin/main.xml", FileOptions::<()>::default()).unwrap();
+            w.start_file("skin/main.xml", FileOptions::<()>::default())
+                .unwrap();
             w.write_all(content).unwrap();
             w.finish().unwrap();
         }
