@@ -1451,6 +1451,19 @@ mod tests {
     }
 
     #[test]
+    fn hot_focus_组合样式可覆盖单独状态() {
+        let xml = r##"<Edit normal-bgcolor="#FFFFFF" hot-bgcolor="#000000"
+            focus-bgcolor="#00FF00" hot-focus-bgcolor="#FF0000"/>"##;
+        let result = load_str(xml, &Context::new()).unwrap();
+        let style = result
+            .root
+            .base()
+            .style
+            .resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(style.bg_color, Some(Color::from_u8(255, 0, 0, 255)));
+    }
+
+    #[test]
     fn 分状态样式与_tabbar_绑定() {
         let xml = r##"<VBox spacing="10" padding="8">
             <Button text="ok" width="120" height="40"

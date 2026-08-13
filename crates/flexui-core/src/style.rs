@@ -2,7 +2,7 @@
 //!
 //! - 基础状态 4 种：Normal / Hot / Pushed / Disabled，优先级 Disabled>Pushed>Hot>Normal。
 //! - focus 维度正交叠加：4×2 = 8 个样式槽。
-//! - 每个样式槽 `StyleSpec` 所有字段可缺省，解析时按「状态回退 + 字段级回退到 Normal」补全。
+//! - 每个样式槽 `StyleSpec` 所有字段可缺省，解析时按状态层叠并逐字段继承。
 
 use std::collections::HashMap;
 
@@ -149,22 +149,15 @@ impl PlaceholderStyleSet {
         if state == VisualState::default() { Some(&self.normal) } else { self.slots.get(&state) }
     }
 
-    /// 按视觉状态解析，并对缺省字段回退到 normal。
+    /// 按视觉状态逐层叠加：normal → base → focus → base+focus → selected 组合。
     pub fn resolve(&self, state: VisualState) -> PlaceholderStyleSpec {
-        let chain = [
-            state,
-            VisualState::with_selected(state.base, false, state.selected),
-            VisualState::with_selected(state.base, state.focused, false),
-            VisualState::new(state.base, false),
-        ];
-        let mut effective = PlaceholderStyleSpec::default();
-        for candidate in chain {
+        let mut effective = self.normal.clone();
+        for candidate in style_layers(state) {
             if let Some(spec) = self.slot(candidate) {
-                effective = spec.clone();
-                break;
+                effective = spec.fill_from(&effective);
             }
         }
-        effective.fill_from(&self.normal)
+        effective
     }
 }
 
@@ -234,29 +227,42 @@ impl StyleSet {
         }
     }
 
-    /// 解析出生效样式：按「specific→general」回退链找生效槽，再字段级回退到 Normal。
-    /// 回退链：全维度 → 去 focus → 去 selected → 仅 base。
+    /// 解析出生效样式：从 Normal 开始逐层叠加基础、focus、selected 及组合状态。
+    /// 后叠加的状态只覆盖自身声明的字段，因此 focus 可覆盖 hot，同时继承 hot 的其它字段。
     pub fn resolve(&self, state: VisualState) -> StyleSpec {
-        let chain = [
-            state,
-            VisualState::with_selected(state.base, false, state.selected),
-            VisualState::with_selected(state.base, state.focused, false),
-            VisualState::new(state.base, false),
-        ];
-        let mut effective = StyleSpec::default();
-        for cand in chain {
-            if let Some(s) = self.slot(cand) {
-                effective = s.clone();
-                break;
+        let mut effective = self.normal.clone();
+        for candidate in style_layers(state) {
+            if let Some(spec) = self.slot(candidate) {
+                effective = spec.fill_from(&effective);
             }
         }
-        effective.fill_from(&self.normal)
+        effective
     }
 
     /// 所有状态槽可能产生的阴影，用于计算状态切换时的完整视觉脏区。
     pub(crate) fn shadows(&self) -> impl Iterator<Item = Shadow> + '_ {
         std::iter::once(self.normal.shadow).chain(self.slots.values().map(|slot| slot.shadow)).flatten()
     }
+}
+
+fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
+    let has_base = state.base != BaseState::Normal;
+    [
+        has_base.then(|| VisualState::new(state.base, false)),
+        state.focused.then(|| VisualState::new(BaseState::Normal, true)),
+        (has_base && state.focused).then(|| VisualState::new(state.base, true)),
+        state
+            .selected
+            .then(|| VisualState::with_selected(BaseState::Normal, false, true)),
+        (has_base && state.selected)
+            .then(|| VisualState::with_selected(state.base, false, true)),
+        (state.focused && state.selected)
+            .then(|| VisualState::with_selected(BaseState::Normal, true, true)),
+        (has_base && state.focused && state.selected)
+            .then(|| VisualState::with_selected(state.base, true, true)),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 #[cfg(test)]
@@ -288,6 +294,39 @@ mod tests {
         // Hot+focus 未设置 → 回退到 Hot 非 focus 的黑色
         let r = set.resolve(VisualState::new(BaseState::Hot, true));
         assert_eq!(r.bg_color, Some(Color::BLACK));
+    }
+
+    #[test]
+    fn focus_样式覆盖hot且继承其余字段() {
+        let mut set = StyleSet::new();
+        set.set(
+            VisualState::new(BaseState::Hot, false),
+            StyleSpec {
+                bg_color: Some(Color::BLACK),
+                border_width: Some(2.0),
+                ..Default::default()
+            },
+        );
+        set.set(
+            VisualState::new(BaseState::Normal, true),
+            spec_bg(Color::WHITE),
+        );
+
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.bg_color, Some(Color::WHITE));
+        assert_eq!(resolved.border_width, Some(2.0));
+    }
+
+    #[test]
+    fn hot_focus_组合样式优先于单独状态() {
+        let mut set = StyleSet::new();
+        let combined = Color::from_u8(255, 0, 0, 255);
+        set.set(VisualState::new(BaseState::Hot, false), spec_bg(Color::BLACK));
+        set.set(VisualState::new(BaseState::Normal, true), spec_bg(Color::WHITE));
+        set.set(VisualState::new(BaseState::Hot, true), spec_bg(combined));
+
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.bg_color, Some(combined));
     }
 
     #[test]
@@ -326,5 +365,20 @@ mod tests {
         assert_eq!(resolved.bold, Some(true));
         assert_eq!(resolved.italic, Some(true));
         assert_eq!(resolved.underline, Some(true));
+    }
+
+    #[test]
+    fn placeholder_focus_overrides_hot_fields() {
+        let mut set = PlaceholderStyleSet::new();
+        set.set(VisualState::new(BaseState::Hot, false), PlaceholderStyleSpec {
+            font_size: Some(16.0), fg_color: Some(Color::BLACK), ..Default::default()
+        });
+        set.set(VisualState::new(BaseState::Normal, true), PlaceholderStyleSpec {
+            fg_color: Some(Color::WHITE), ..Default::default()
+        });
+
+        let resolved = set.resolve(VisualState::new(BaseState::Hot, true));
+        assert_eq!(resolved.font_size, Some(16.0));
+        assert_eq!(resolved.fg_color, Some(Color::WHITE));
     }
 }
