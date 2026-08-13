@@ -73,10 +73,10 @@ mod tests {
             .unwrap()
             .contains("<Window"));
         for page in ["home", "examples", "cloud-play", "cloud-saves"] {
-            assert!(resources
+            let xml = resources
                 .read_string(&format!("pages/{page}.xml"))
-                .unwrap()
-                .contains("<Panel"));
+                .unwrap();
+            assert!(xml.contains("page_"));
         }
         assert!(!resources
             .read("label/uu_logo@2.00x.png")

@@ -1,2 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Panel name="page_home" normal-bgcolor="#181D42" mouse="transparent"/>
+<VBox name="page_home" flex="1" spacing="18" padding="18 40" normal-bgcolor="#181D42">
+  <HBox height="356" spacing="16">
+    <VBox width="218" height="356" spacing="8">
+      <Button name="btn_start" width="218" height="320"
+              normal-bgimage="common/steam_card@2.00x.png" hot-bgimage="common/steam_card_hot@2.00x.png"
+              pushed-bgimage="common/steam_card_hot@2.00x.png" normal-bgfit="stretch"/>
+      <Label text="app.game.steam_store" height="28" normal-fgcolor="#FFFFFF" font-size="17"
+             normal-textalign="center"/>
+    </VBox>
+    <VBox width="218" height="356" spacing="8">
+      <Button width="218" height="320" normal-bgimage="common/empty_card@2.00x.png"
+              hot-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
+    </VBox>
+    <VBox width="218" height="356" spacing="8">
+      <Button width="218" height="320" normal-bgimage="common/empty_card@2.00x.png"
+              hot-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
+    </VBox>
+    <VBox width="218" height="356" spacing="8">
+      <Button width="218" height="320" normal-bgimage="common/empty_card@2.00x.png"
+              hot-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
+    </VBox>
+  </HBox>
+  <HBox height="136" spacing="16">
+    <Image src="button/default_banner@2.00x.png" width="452" height="136"/>
+    <VBox flex="1" spacing="16">
+      <HBox height="60" spacing="16">
+        <Button width="218" height="60" normal-bgimage="button/membership_recharge.svg" normal-bgfit="stretch"/>
+        <Button text="app.my_games" width="218" height="60" normal-bgcolor="#30386F"
+                hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
+      </HBox>
+      <HBox height="60" spacing="16">
+        <Image src="button/college_student_discount@2.00x.png" width="218" height="60"/>
+        <Button text="app.my_coupons" width="218" height="60" normal-bgcolor="#30386F"
+                hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
+      </HBox>
+    </VBox>
+  </HBox>
+  <Label name="home_status" text="app.status.choose_game" height="22"
+         normal-fgcolor="#7D89B7" font-size="13"/>
+</VBox>

@@ -42,6 +42,7 @@ impl WindowImpl for MainWindow {
             }
             "minimize" => ctx.minimize(),
             "close_window" => ctx.close(),
+            "btn_start" => ctx.set_localized_text("home_status", "app.status.steam_selected"),
             _ => {}
         }
     }
