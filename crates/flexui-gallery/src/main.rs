@@ -2,6 +2,7 @@
 
 mod app;
 mod resources;
+mod themes;
 
 use app::GalleryWindow;
 use flexui::Window;

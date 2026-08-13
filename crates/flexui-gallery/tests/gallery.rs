@@ -38,6 +38,18 @@ fn embedded_gallery_loads_all_included_pages() {
     )
     .unwrap();
     assert_eq!(pages.base().children.len(), 4);
+    for name in ["apply_bilibili_theme", "restore_default_theme"] {
+        assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
+    }
+    let bilibili_button = find_by_id(
+        doc.root.as_ref(),
+        find_by_name(doc.root.as_ref(), "apply_bilibili_theme").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bilibili_button.base().resolved_style().bg_color,
+        Some(Color::from_u8(251, 114, 153, 255))
+    );
     assert_eq!(
         find_by_id(
             doc.root.as_ref(),

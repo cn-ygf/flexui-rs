@@ -2,11 +2,19 @@
 <Window title="FlexUI Gallery" width="920" height="640" min-width="760" min-height="520"
         resizable="true" titlebar="system">
   <VBox name="root" width="fill" height="fill">
-    <HBox height="58" padding="20 14" align="center" bgcolor="@surface"
+    <HBox height="64" padding="20 14" spacing="8" align="center" bgcolor="@surface"
           bordercolor="@border-light" borderwidth="1">
       <Label text-verbatim="FlexUI Gallery" width="fill" font-size="20" bold="true"
              fgcolor="@text-primary"/>
-      <Label text-verbatim="Dark mode" width="84" fgcolor="@text-secondary"/>
+      <Panel width="18" height="18" bgcolor="#FB7299" corner-radius="4" mouse="transparent"/>
+      <Button name="apply_bilibili_theme" class="theme-action" variant="primary"
+              text-verbatim="Bilibili Pink" width="116" height="36"
+              normal-bgcolor="#FB7299" hot-bgcolor="#FC8BAB" pushed-bgcolor="#E2527B"
+              normal-bordercolor="#FB7299" hot-bordercolor="#FC8BAB" pushed-bordercolor="#E2527B"
+              normal-fgcolor="#FFFFFF" corner-radius="6"/>
+      <Button name="restore_default_theme" class="theme-action"
+              text-verbatim="Default" width="88" height="36"/>
+      <Label text-verbatim="Dark" width="40" fgcolor="@text-secondary"/>
       <Switch name="theme_switch" width="48" height="26" thumbcolor="@surface"/>
     </HBox>
     <HBox width="fill" height="fill">
