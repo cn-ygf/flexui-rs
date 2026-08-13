@@ -140,6 +140,7 @@ impl ResourceProvider for DirProvider {
 enum ZipSource {
     File(PathBuf),
     Bytes(Vec<u8>),
+    Static(&'static [u8]),
 }
 
 /// 带密码 zip provider：来源为磁盘文件（RM2）或内嵌字节（RM3）。
@@ -177,6 +178,13 @@ impl ZipProvider {
             password: None,
         }
     }
+    /// 从编译期内嵌的静态字节读（无复制、无密码）。
+    pub fn embedded_plain_static(bytes: &'static [u8]) -> Self {
+        Self {
+            source: ZipSource::Static(bytes),
+            password: None,
+        }
+    }
 }
 
 impl ResourceProvider for ZipProvider {
@@ -189,6 +197,9 @@ impl ResourceProvider for ZipProvider {
             }
             ZipSource::Bytes(b) => {
                 extract(ZipArchive::new(Cursor::new(b.clone()))?, path, self.password.as_deref())
+            }
+            ZipSource::Static(b) => {
+                extract(ZipArchive::new(Cursor::new(*b))?, path, self.password.as_deref())
             }
         }
     }
@@ -235,6 +246,17 @@ mod tests {
         cursor.into_inner()
     }
 
+    fn make_plain_zip(content: &[u8]) -> Vec<u8> {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut cursor);
+            w.start_file("skin/main.xml", FileOptions::<()>::default()).unwrap();
+            w.write_all(content).unwrap();
+            w.finish().unwrap();
+        }
+        cursor.into_inner()
+    }
+
     #[test]
     fn 路径规范化() {
         assert_eq!(normalize("res://a/b.xml").unwrap(), "a/b.xml");
@@ -251,6 +273,15 @@ mod tests {
         assert_eq!(rm.read_string("skin/main.xml").unwrap(), "<VBox/>");
         assert!(rm.exists("skin/main.xml"));
         assert!(rm.read("skin/none.xml").is_err());
+    }
+
+    #[test]
+    fn 静态内嵌_zip_读取() {
+        let bytes = make_plain_zip(b"STATIC");
+        let leaked = Box::leak(bytes.into_boxed_slice());
+        let mut rm = ResourceManager::new();
+        rm.mount(ZipProvider::embedded_plain_static(leaked));
+        assert_eq!(rm.read_string("skin/main.xml").unwrap(), "STATIC");
     }
 
     #[test]

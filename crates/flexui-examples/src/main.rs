@@ -1,9 +1,9 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use flexui::{
-    build_window, Color, DirProvider, ImageFit, ImageSource, Insets, LocalizedStringResource,
+    build_window, Color, ImageFit, ImageSource, Insets, LocalizedStringResource,
     Localizer, MenuAlignment, MenuEntry, MenuStyle, Rect, ResourceManager, ScrollBarStyle, Size,
-    Skin, Window, WindowCtx, WindowImpl,
+    Skin, Window, WindowCtx, WindowImpl, ZipProvider,
 };
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -12,6 +12,7 @@ const ORIGINAL_LOGIN_XML: &str = include_str!("../assets/data/original_login.xml
 const ORIGINAL_CHS_XML: &str = include_str!("../assets/data/chs.xml");
 const ORIGINAL_CHT_XML: &str = include_str!("../assets/data/cht_tw.xml");
 const ORIGINAL_EN_XML: &str = include_str!("../assets/data/en.xml");
+const EMBEDDED_ASSETS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/assets.zip"));
 
 #[derive(Clone, Copy)]
 enum NationLanguage {
@@ -180,9 +181,8 @@ fn settings_menu_entries(ctx: &WindowCtx) -> Vec<MenuEntry> {
 }
 
 fn resources() -> ResourceManager {
-    let assets = format!("{}/assets", env!("CARGO_MANIFEST_DIR"));
     let mut resources = ResourceManager::new();
-    resources.mount(DirProvider::new(assets));
+    resources.mount(ZipProvider::embedded_plain_static(EMBEDDED_ASSETS));
     resources
 }
 
@@ -384,5 +384,16 @@ mod tests {
             simplified.iter().map(|(_, name)| name).collect::<HashSet<_>>().len(),
             simplified.len()
         );
+    }
+
+    #[test]
+    fn embedded_assets_cover_layout_images_and_localizations() {
+        let resources = resources();
+        assert!(resources.read_string("app.xml").unwrap().contains("<Window"));
+        assert!(!resources.read("label/uu_logo@2.00x.png").unwrap().is_empty());
+        assert!(resources
+            .read_string("i18n/zh-Hans.json")
+            .unwrap()
+            .contains("app.window_title"));
     }
 }

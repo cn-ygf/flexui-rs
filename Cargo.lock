@@ -261,6 +261,7 @@ dependencies = [
  "flexui",
  "roxmltree",
  "winresource",
+ "zip",
 ]
 
 [[package]]
