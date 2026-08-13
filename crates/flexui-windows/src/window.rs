@@ -19,8 +19,8 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, InvalidateRect, ScreenToClient, UpdateWindow, ValidateRect, HDC,
-    PAINTSTRUCT,
+    BeginPaint, EndPaint, GetDC, InvalidateRect, ReleaseDC, ScreenToClient, UpdateWindow,
+    ValidateRect, HDC, PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -292,7 +292,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     let mut style = if frameless {
         // 保留 WS_CAPTION 的标准顶层窗口语义，让 Shell/DWM 提供最小化、最大化和还原动画；
         // 可见标题栏仍由 WM_NCCALCSIZE 完全移除。
-        let mut value = WS_OVERLAPPED | WS_CAPTION | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX;
+        let mut value = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
         if config.resizable {
             value |= WS_MAXIMIZEBOX;
         }
@@ -301,7 +301,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         }
         value
     } else {
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE
+        WS_OVERLAPPEDWINDOW
     };
     if !config.resizable {
         style &= !WS_MAXIMIZEBOX;
@@ -349,9 +349,6 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     );
     if hwnd.is_null() {
         eprintln!("[flexui] CreateWindowExW 失败");
-        if is_modal && IsWindow(owner) != 0 {
-            EnableWindow(owner, 1);
-        }
         return hwnd;
     }
 
@@ -396,20 +393,26 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
             0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
+        // FRAMECHANGED 会移除系统标题栏客户区，首帧与还原缓存必须以最终尺寸为准。
+        let mut final_client: RECT = std::mem::zeroed();
+        if GetClientRect(hwnd, &mut final_client) != 0 {
+            (*state).client_size = (
+                (final_client.right - final_client.left).max(0) as u16,
+                (final_client.bottom - final_client.top).max(0) as u16,
+            );
+        }
     }
 
     if is_modal {
-        // owned tool window 不出现在任务栏；相对 owner 居中，并阻止 owner 接收输入。
+        // owned tool window 不出现在任务栏；显示前先相对 owner 居中。
         let mut owner_rect: RECT = std::mem::zeroed();
         if GetWindowRect(owner, &mut owner_rect) != 0 {
             let x = owner_rect.left + ((owner_rect.right - owner_rect.left) - outer_width) / 2;
             let y = owner_rect.top + ((owner_rect.bottom - owner_rect.top) - outer_height) / 2;
             SetWindowPos(hwnd, HWND_TOP, x, y, outer_width, outer_height, SWP_NOACTIVATE);
         }
-        EnableWindow(owner, 0);
     }
     DragAcceptFiles(hwnd, 1);
-    ShowWindow(hwnd, SW_SHOW);
     SetTimer(hwnd, 1, 530, None);
     SetTimer(hwnd, 2, 16, None);
 
@@ -437,13 +440,39 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
                 a.easing,
             );
         }
-        InvalidateRect(hwnd, null(), 0);
         nw
     };
+
+    // 窗口保持隐藏，先完成首次布局、图片解码和离屏帧预热。否则 WS_VISIBLE/CreateWindowExW
+    // 会让 DWM 在首帧准备完成前展示空白表面，主窗口和模态窗口都会出现白闪。
+    prepare_first_frame(hwnd, &mut *state);
+    if is_modal {
+        // 子窗口首帧就绪后再冻结 owner，避免 owner 已禁用而对话框仍未出现的空档。
+        EnableWindow(owner, 0);
+    }
+    ShowWindow(hwnd, SW_SHOW);
+    // 显示会产生新的更新区；此时布局和图片均已缓存，同步提交不会再暴露半成品帧。
+    InvalidateRect(hwnd, null(), 0);
+    UpdateWindow(hwnd);
+
     for w in new_wins {
         create_window(w, hwnd);
     }
     hwnd
+}
+
+/// 在窗口尚未显示时生成完整离屏帧，预热布局、图片缓存和持久离屏缓冲。
+unsafe fn prepare_first_frame(hwnd: HWND, state: &mut AppState) {
+    let mut client: RECT = std::mem::zeroed();
+    if GetClientRect(hwnd, &mut client) == 0 {
+        return;
+    }
+    let hdc = GetDC(hwnd);
+    if hdc.is_null() {
+        return;
+    }
+    paint_window(hwnd, hdc, client, state);
+    ReleaseDC(hwnd, hdc);
 }
 
 /// 取窗口关联的 AppState（可能为空）。
