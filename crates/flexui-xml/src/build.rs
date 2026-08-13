@@ -547,6 +547,9 @@ fn apply_attrs(node: &mut dyn Widget, tag: &str, attrs: &[(String, String)], env
             "focusable" | "tabstop" => node.base_mut().focusable = parse_bool(v),
             "focus-within" | "focuswithin" => node.base_mut().focus_within = parse_bool(v),
             "switch" => { node.apply_property(WidgetProperty::SwitchStyle(tag == "checkbox" && parse_bool(v))); }
+            "indicator" | "show-indicator" => {
+                node.apply_property(WidgetProperty::IndicatorVisible(parse_bool(v)));
+            }
             "multiline" => { node.apply_property(WidgetProperty::Multiline(parse_bool(v))); }
             "readonly" | "read-only" => { node.apply_property(WidgetProperty::ReadOnly(parse_bool(v))); }
             "numberonly" | "number-only" => { node.apply_property(WidgetProperty::NumberOnly(parse_bool(v))); }

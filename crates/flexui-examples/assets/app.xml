@@ -20,14 +20,22 @@
         <Image src="label/uu_logo@2.00x.png" width="40" height="46"/>
         <Button tooltip="app.tooltip.back" width="28" height="34" normal-bgimage="button/back_normal@2.00x.png"
                 hot-bgimage="button/back_hover@2.00x.png" normal-bgfit="center"/>
-        <Button text="app.nav.home" width="72" height="42" normal-bgcolor="#181D42" normal-fgcolor="#FFFFFF"
-                font-size="18" bold="true" normal-textalign="center"/>
-        <Button text="app.nav.games" width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
-                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
-        <Button text="app.nav.cloud_play" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
-                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
-        <Button text="app.nav.cloud_saves" width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
-                normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" font-size="17"/>
+        <Radio name="nav_home" text="app.nav.home" group="1" tab-index="0" checked="true" indicator="false"
+               width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="18" normal-textalign="center"/>
+        <Radio name="nav_examples" text="app.nav.examples" group="1" tab-index="1" indicator="false"
+               width="72" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="17" normal-textalign="center"/>
+        <Radio name="nav_cloud_play" text="app.nav.cloud_play" group="1" tab-index="2" indicator="false"
+               width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="17" normal-textalign="center"/>
+        <Radio name="nav_cloud_saves" text="app.nav.cloud_saves" group="1" tab-index="3" indicator="false"
+               width="84" height="42" normal-bgcolor="#181D42" hot-bgcolor="#222957"
+               normal-fgcolor="#8F98BF" hot-fgcolor="#FFFFFF" selected-fgcolor="#FFFFFF"
+               font-size="17" normal-textalign="center"/>
         <Panel flex="1" mouse="transparent"/>
         <Edit name="search" placeholder="app.search.placeholder" width="168" height="36" padding="3 18 3 36"
               normal-bgimage="edit/edit_search_normal@2.00x.png"
@@ -41,46 +49,12 @@
       </HBox>
     </VBox>
 
-    <VBox flex="1" spacing="18" padding="18 40" normal-bgcolor="#181D42">
-      <HBox height="356" spacing="16">
-        <VBox width="218" height="356" spacing="8">
-          <Button name="btn_start" width="218" height="320"
-                  normal-bgimage="common/steam_card@2.00x.png" hot-bgimage="common/steam_card_hot@2.00x.png"
-                  pushed-bgimage="common/steam_card_hot@2.00x.png" normal-bgfit="stretch"/>
-          <Label text="app.game.steam_store" height="28" normal-fgcolor="#FFFFFF" font-size="17"
-                 normal-textalign="center"/>
-        </VBox>
-        <VBox width="218" height="356" spacing="8">
-          <Button width="218" height="320" normal-bgimage="common/empty_card@2.00x.png"
-                  hot-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
-        </VBox>
-        <VBox width="218" height="356" spacing="8">
-          <Button width="218" height="320" normal-bgimage="common/empty_card@2.00x.png"
-                  hot-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
-        </VBox>
-        <VBox width="218" height="356" spacing="8">
-          <Button width="218" height="320" normal-bgimage="common/empty_card@2.00x.png"
-                  hot-bgimage="common/empty_card_hot@2.00x.png" normal-bgfit="stretch"/>
-        </VBox>
-      </HBox>
-      <HBox height="136" spacing="16">
-        <Image src="button/default_banner@2.00x.png" width="452" height="136"/>
-        <VBox flex="1" spacing="16">
-          <HBox height="60" spacing="16">
-            <Button width="218" height="60" normal-bgimage="button/membership_recharge.svg" normal-bgfit="stretch"/>
-            <Button text="app.my_games" width="218" height="60" normal-bgcolor="#30386F"
-                    hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
-          </HBox>
-          <HBox height="60" spacing="16">
-            <Image src="button/college_student_discount@2.00x.png" width="218" height="60"/>
-            <Button text="app.my_coupons" width="218" height="60" normal-bgcolor="#30386F"
-                    hot-bgcolor="#3B4783" normal-fgcolor="#FFFFFF" font-size="16" corner-radius="8"/>
-          </HBox>
-        </VBox>
-      </HBox>
-      <Label name="home_status" text="app.status.choose_game" height="22"
-             normal-fgcolor="#7D89B7" font-size="13"/>
-    </VBox>
+    <TabBox name="main_pages" bindgroup="1" selected="0" flex="1">
+      <Include src="pages/home.xml"/>
+      <Include src="pages/examples.xml"/>
+      <Include src="pages/cloud-play.xml"/>
+      <Include src="pages/cloud-saves.xml"/>
+    </TabBox>
   </VBox>
 </Panel>
 </Window>

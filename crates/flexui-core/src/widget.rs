@@ -71,6 +71,7 @@ pub enum WidgetProperty {
     MaxChars(Option<usize>),
     AutoSelectAll(bool),
     SwitchStyle(bool),
+    IndicatorVisible(bool),
     Group(Option<u32>),
     TabIndex(Option<usize>),
     SelectedIndex(usize),
