@@ -597,8 +597,15 @@ impl Edit {
         if layout.text().is_empty() {
             return;
         }
-        let y = rect.top() + (rect.size.height - layout.height()) / 2.0;
-        cv.draw_text_layout(layout, Point::new(rect.left(), y.max(rect.top())), color);
+        cv.draw_text_layout(
+            layout,
+            Point::new(rect.left(), Self::layout_y(layout, rect)),
+            color,
+        );
+    }
+
+    fn layout_y(layout: &TextLayout, rect: Rect) -> f32 {
+        (rect.top() + (rect.size.height - layout.height()) / 2.0).max(rect.top())
     }
 
     fn update_single_line_scroll(&self, caret: f32, total: f32, content: Rect) {
@@ -723,12 +730,17 @@ impl Widget for Edit {
                 .map(|layout| layout.x_for_char(display_cursor))
                 .unwrap_or(x);
             self.update_single_line_scroll(display_x, total, content);
-            let y = content.top() + (content.size.height - self.base.font.size) / 2.0;
+            let caret_h = self
+                .display_layout
+                .as_ref()
+                .map(TextLayout::height)
+                .unwrap_or(self.line_h.max(self.base.font.size));
+            let y = (content.top() + (content.size.height - caret_h) / 2.0).max(content.top());
             self.caret_rect.set(Some(Rect::new(
                 content.left() - self.scroll_x.get() + display_x + 1.0,
-                y.max(content.top()),
+                y,
                 1.5,
-                self.base.font.size,
+                caret_h,
             )));
         }
     }
@@ -739,16 +751,8 @@ impl Widget for Edit {
         }
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
-        let caret_h = self.base.font.size;
-        let cy = content.top() + (content.size.height - caret_h) / 2.0;
         if self.shows_placeholder() {
             self.scroll_x.set(0.0);
-            self.caret_rect.set(Some(Rect::new(
-                content.left(),
-                cy.max(content.top()),
-                1.5,
-                caret_h,
-            )));
             let style = self
                 .config
                 .placeholder_style
@@ -765,6 +769,10 @@ impl Widget for Edit {
                         &generated
                     }
                 };
+            let line_h = placeholder.height();
+            let line_y = Self::layout_y(placeholder, content);
+            self.caret_rect
+                .set(Some(Rect::new(content.left(), line_y, 1.5, line_h)));
             cv.save();
             cv.clip_rect(self.text_clip_rect(content));
             Self::draw_input_layout(
@@ -777,10 +785,7 @@ impl Widget for Edit {
                     .unwrap_or(PLACEHOLDER_COLOR),
             );
             if self.base.focused && self.base.caret_on {
-                cv.fill_rect(
-                    Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h),
-                    color,
-                );
+                cv.fill_rect(Rect::new(content.left(), line_y, 1.5, line_h), color);
             }
             cv.restore();
             return;
@@ -807,6 +812,8 @@ impl Widget for Edit {
         let before_w = text_layout.x_for_char(self.state.cursor);
         let marked_end_w = text_layout.x_for_char(self.state.cursor + marked_chars);
         let total_w = text_layout.width();
+        let line_h = text_layout.height();
+        let line_y = Self::layout_y(text_layout, content);
         self.update_single_line_scroll(marked_end_w, total_w, content);
         let origin_x = content.left() - self.scroll_x.get();
         cv.save();
@@ -814,7 +821,7 @@ impl Widget for Edit {
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
         if self.state.marked.is_empty() {
             if let Some((lo, hi)) = self.sel_range() {
-                for rect in text_layout.selection_rects(lo..hi, cy.max(content.top()), caret_h) {
+                for rect in text_layout.selection_rects(lo..hi, line_y, line_h) {
                     cv.fill_rect(
                         Rect::new(
                             origin_x + rect.left(),
@@ -838,7 +845,7 @@ impl Widget for Edit {
 
         // 组合串下划线。
         if !self.state.marked.is_empty() {
-            let uy = (cy + caret_h - 1.0).min(content.bottom() - 1.0);
+            let uy = (line_y + line_h - 1.0).min(content.bottom() - 1.0);
             let left = before_w.min(marked_end_w);
             let right = before_w.max(marked_end_w);
             cv.fill_rect(
@@ -846,13 +853,8 @@ impl Widget for Edit {
                 color,
             );
         }
-        // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与字号一致、垂直居中。
-        let caret = Rect::new(
-            origin_x + marked_end_w + 1.0,
-            cy.max(content.top()),
-            1.5,
-            caret_h,
-        );
+        // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与排版行一致、垂直居中。
+        let caret = Rect::new(origin_x + marked_end_w + 1.0, line_y, 1.5, line_h);
         self.caret_rect.set(Some(caret));
         if self.base.focused && self.base.caret_on {
             cv.fill_rect(caret, color);
@@ -1125,10 +1127,13 @@ mod tests {
         last_text: RefCell<String>,
         last_font: RefCell<Option<Font>>,
         last_color: RefCell<Option<Color>>,
+        fills: Vec<(Rect, Color)>,
         advance_draws: usize,
     }
     impl Canvas for RecCanvas {
-        fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+        fn fill_rect(&mut self, r: Rect, c: Color) {
+            self.fills.push((r, c));
+        }
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
         fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
@@ -1157,6 +1162,7 @@ mod tests {
             last_text: RefCell::new(String::new()),
             last_font: RefCell::new(None),
             last_color: RefCell::new(None),
+            fills: Vec::new(),
             advance_draws: 0,
         };
         let mut cv = cv;
@@ -1173,6 +1179,7 @@ mod tests {
             last_text: RefCell::new(String::new()),
             last_font: RefCell::new(None),
             last_color: RefCell::new(None),
+            fills: Vec::new(),
             advance_draws: 0,
         }
     }
@@ -1204,6 +1211,29 @@ mod tests {
         edit.on_event(&kd(keys::BACKSPACE, false));
         edit.paint_content(&mut cv, &StyleSpec::default());
         assert_eq!(*cv.last_text.borrow(), "请输入");
+    }
+
+    #[test]
+    fn 单行选区和光标覆盖实际排版行高() {
+        let mut edit = Edit::new().text("fjord你好");
+        edit.select_all();
+        edit.base_mut().focused = true;
+        let mut cv = rec_canvas();
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        edit.paint_content(&mut cv, &StyleSpec::default());
+
+        let layout = edit.display_layout.as_ref().unwrap();
+        let selection = cv
+            .fills
+            .iter()
+            .find_map(|(rect, color)| (*color == SEL_COLOR).then_some(*rect))
+            .expect("必须绘制选区背景");
+        assert!((selection.size.height - layout.height()).abs() < 0.01);
+        assert!(
+            (selection.top() - Edit::layout_y(layout, layout::content_rect(edit.base()))).abs()
+                < 0.01
+        );
+        assert!((edit.text_input_rect().unwrap().size.height - layout.height()).abs() < 0.01);
     }
 
     #[test]

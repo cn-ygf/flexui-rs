@@ -18,7 +18,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_MEASURING_MODE, DWRITE_STRIKETHROUGH, DWRITE_TEXT_METRICS, DWRITE_UNDERLINE,
     DWRITE_WORD_WRAPPING_NO_WRAP,
 };
-use windows::Win32::Graphics::Gdi::{AlphaBlend, BitBlt, AC_SRC_OVER, BLENDFUNCTION, HDC, SRCCOPY};
+use windows::Win32::Graphics::Gdi::{BitBlt, GetCurrentObject, HDC, OBJ_BITMAP, SRCCOPY};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 
 const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
@@ -27,6 +27,24 @@ const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
 pub(crate) struct DirectWriteLayout {
     layout: IDWriteTextLayout,
     size: Size,
+}
+
+struct RenderedTextBitmap {
+    _target: IDWriteBitmapRenderTarget,
+    bitmap: *mut gp::GpBitmap,
+    scale: f32,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+impl Drop for RenderedTextBitmap {
+    fn drop(&mut self) {
+        if !self.bitmap.is_null() {
+            unsafe { gp::GdipDisposeImage(self.bitmap as *mut gp::GpImage) };
+        }
+    }
 }
 
 struct DirectWriteSystem {
@@ -127,7 +145,7 @@ impl DirectWriteSystem {
         if gp::GdipGetDC(graphics, &mut raw_hdc) != 0 || raw_hdc.is_null() {
             return Err(E_FAIL.into());
         }
-        let result = (|| {
+        let result: WinResult<Option<RenderedTextBitmap>> = (|| {
             let scale = scale.max(0.1);
             let padding = 2i32;
             let full_x = (origin.x * scale).floor() as i32 - padding;
@@ -139,7 +157,7 @@ impl DirectWriteSystem {
             let (blit_x, blit_y, blit_width, blit_height) =
                 clipped_blit(full_x, full_y, full_width, full_height, clip, scale);
             if blit_width <= 0 || blit_height <= 0 {
-                return Ok(());
+                return Ok(None);
             }
             let source = HDC(raw_hdc.cast());
             let target = unsafe {
@@ -150,6 +168,15 @@ impl DirectWriteSystem {
                 )?
             };
             unsafe { target.SetPixelsPerDip(scale)? };
+            let identity = DWRITE_MATRIX {
+                m11: 1.0,
+                m12: 0.0,
+                m21: 0.0,
+                m22: 1.0,
+                dx: 0.0,
+                dy: 0.0,
+            };
+            unsafe { target.SetCurrentTransform(Some(&identity))? };
             let memory = unsafe { target.GetMemoryDC() };
             unsafe {
                 BitBlt(
@@ -176,45 +203,76 @@ impl DirectWriteSystem {
                     origin.x - blit_x as f32 / scale,
                     origin.y - blit_y as f32 / scale,
                 )?;
-                if alpha == u8::MAX {
-                    BitBlt(
-                        source,
-                        blit_x,
-                        blit_y,
-                        blit_width,
-                        blit_height,
-                        Some(memory),
-                        0,
-                        0,
-                        SRCCOPY,
-                    )?;
-                } else if !AlphaBlend(
-                    source,
-                    blit_x,
-                    blit_y,
-                    blit_width,
-                    blit_height,
-                    memory,
-                    0,
-                    0,
-                    blit_width,
-                    blit_height,
-                    BLENDFUNCTION {
-                        BlendOp: AC_SRC_OVER as u8,
-                        BlendFlags: 0,
-                        SourceConstantAlpha: alpha,
-                        AlphaFormat: 0,
-                    },
-                )
-                .as_bool()
-                {
-                    return Err(windows::core::Error::from_win32());
+                let hbitmap = GetCurrentObject(memory, OBJ_BITMAP);
+                if hbitmap.0.is_null() {
+                    return Err(E_FAIL.into());
                 }
+                let mut bitmap: *mut gp::GpBitmap = std::ptr::null_mut();
+                if gp::GdipCreateBitmapFromHBITMAP(hbitmap.0, std::ptr::null_mut(), &mut bitmap)
+                    != 0
+                    || bitmap.is_null()
+                {
+                    return Err(E_FAIL.into());
+                }
+                Ok(Some(RenderedTextBitmap {
+                    _target: target,
+                    bitmap,
+                    scale,
+                    x: blit_x,
+                    y: blit_y,
+                    width: blit_width,
+                    height: blit_height,
+                }))
             }
-            Ok(())
         })();
         gp::GdipReleaseDC(graphics, raw_hdc);
-        result
+        let Some(rendered) = result? else {
+            return Ok(());
+        };
+
+        let mut attributes: *mut gp::GpImageAttributes = std::ptr::null_mut();
+        if alpha < u8::MAX {
+            if gp::GdipCreateImageAttributes(&mut attributes) != 0 || attributes.is_null() {
+                return Err(E_FAIL.into());
+            }
+            let matrix = opacity_matrix(alpha as f32 / 255.0);
+            if gp::GdipSetImageAttributesColorMatrix(
+                attributes,
+                gp::ColorAdjustTypeDefault,
+                1,
+                &matrix,
+                std::ptr::null(),
+                gp::ColorMatrixFlagsDefault,
+            ) != 0
+            {
+                gp::GdipDisposeImageAttributes(attributes);
+                return Err(E_FAIL.into());
+            }
+        }
+        let status = gp::GdipDrawImageRectRect(
+            graphics,
+            rendered.bitmap as *mut gp::GpImage,
+            rendered.x as f32 / rendered.scale,
+            rendered.y as f32 / rendered.scale,
+            rendered.width as f32 / rendered.scale,
+            rendered.height as f32 / rendered.scale,
+            0.0,
+            0.0,
+            rendered.width as f32,
+            rendered.height as f32,
+            gp::UnitPixel,
+            attributes,
+            0,
+            std::ptr::null_mut(),
+        );
+        if !attributes.is_null() {
+            gp::GdipDisposeImageAttributes(attributes);
+        }
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(E_FAIL.into())
+        }
     }
 }
 
@@ -286,6 +344,16 @@ fn colorref(color: Color) -> COLORREF {
 
 fn alpha_byte(color: Color) -> u8 {
     (color.a.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn opacity_matrix(alpha: f32) -> gp::ColorMatrix {
+    let mut matrix = [0.0; 25];
+    matrix[0] = 1.0;
+    matrix[6] = 1.0;
+    matrix[12] = 1.0;
+    matrix[18] = alpha.clamp(0.0, 1.0);
+    matrix[24] = 1.0;
+    gp::ColorMatrix { m: matrix }
 }
 
 struct DrawContext<'a> {
@@ -428,5 +496,16 @@ mod tests {
         assert_eq!(alpha_byte(Color::rgba(0.0, 0.0, 0.0, -1.0)), 0);
         assert_eq!(alpha_byte(Color::rgba(0.0, 0.0, 0.0, 0.5)), 128);
         assert_eq!(alpha_byte(Color::rgba(0.0, 0.0, 0.0, 2.0)), 255);
+    }
+
+    #[test]
+    fn 透明度矩阵只改变alpha通道() {
+        let matrix = opacity_matrix(0.5);
+        assert_eq!(matrix.m[0], 1.0);
+        assert_eq!(matrix.m[6], 1.0);
+        assert_eq!(matrix.m[12], 1.0);
+        assert_eq!(matrix.m[18], 0.5);
+        assert_eq!(matrix.m[24], 1.0);
+        assert_eq!(matrix.m.iter().filter(|&&value| value != 0.0).count(), 5);
     }
 }

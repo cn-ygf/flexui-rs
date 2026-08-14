@@ -920,6 +920,7 @@ fn intersect_rect(a: Rect, b: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Gdiplus, OffscreenBitmap};
 
     #[test]
     fn 嵌套裁剪取矩形交集() {
@@ -936,6 +937,32 @@ mod tests {
                 Rect::new(20.0, 20.0, 5.0, 5.0),
             ),
             Rect::new(20.0, 20.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn directwrite文字写回后保持不透明() {
+        let _gdiplus = Gdiplus::startup().expect("GDI+ 初始化失败");
+        let bitmap = OffscreenBitmap::new(120, 48).expect("创建离屏位图失败");
+        let mut canvas = GdiCanvas::new(bitmap.graphics());
+        canvas.clear(Color::WHITE);
+        let layout = canvas.layout_text("FlexUI 你好", &Font::system(18.0));
+        canvas.draw_text_layout(&layout, Point::new(6.0, 6.0), Color::BLACK);
+        drop(canvas);
+
+        let mut pixels = Vec::new();
+        for y in 0..48 {
+            for x in 0..120 {
+                let pixel = bitmap.get_pixel(x, y);
+                if pixel != 0xffff_ffff {
+                    pixels.push(pixel);
+                }
+            }
+        }
+        assert!(!pixels.is_empty(), "DirectWrite 必须产生可见文字像素");
+        assert!(
+            pixels.iter().all(|pixel| pixel >> 24 == 0xff),
+            "写回 GDI+ 后备位图时不能丢失 alpha"
         );
     }
 }
