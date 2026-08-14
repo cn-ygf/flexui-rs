@@ -7,7 +7,7 @@ use std::ffi::c_void;
 use std::sync::Arc;
 
 use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextLayout};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;
 
@@ -24,6 +24,8 @@ const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
 pub struct GdiCanvas<'a> {
     g: *mut gp::GpGraphics,
     saved: Vec<u32>,
+    saved_clips: Vec<Option<Rect>>,
+    clip: Option<Rect>,
     dpi_scale: f32,
     image_cache: Option<&'a mut ImageCache>,
 }
@@ -40,6 +42,8 @@ impl GdiCanvas<'_> {
         Self {
             g,
             saved: Vec::new(),
+            saved_clips: Vec::new(),
+            clip: None,
             dpi_scale: 1.0,
             image_cache: None,
         }
@@ -805,6 +809,48 @@ impl Canvas for GdiCanvas<'_> {
         }
     }
 
+    fn layout_text(&self, text: &str, font: &Font) -> TextLayout {
+        crate::text::layout_text(text, font).unwrap_or_else(|| {
+            let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
+            for index in 0..=text.chars().count() {
+                let prefix = text.chars().take(index).collect::<String>();
+                boundaries.push(flexui_gfx::TextBoundary {
+                    char_index: index,
+                    x: self.measure_text_advance(&prefix, font),
+                });
+            }
+            let size = self.measure_text_advance_size(text, font);
+            TextLayout::new(
+                text,
+                font.clone(),
+                size,
+                font.size,
+                (size.height - font.size).max(0.0),
+                boundaries,
+            )
+        })
+    }
+
+    fn draw_text_layout(&mut self, layout: &TextLayout, origin: Point, color: Color) {
+        if unsafe {
+            crate::text::draw_text_layout(self.g, self.dpi_scale, self.clip, layout, origin, color)
+        } {
+            if layout.font().underline {
+                self.fill_rect(
+                    Rect::new(
+                        origin.x,
+                        origin.y + layout.ascent() + layout.descent() - 1.0,
+                        layout.width(),
+                        1.0,
+                    ),
+                    color,
+                );
+            }
+            return;
+        }
+        self.draw_text_advance(layout.text(), origin, layout.font(), color);
+    }
+
     fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
         match source {
             ImageSource::Path(path) => self.draw_path_source(path, 1.0, rect, tint, &fit),
@@ -823,15 +869,21 @@ impl Canvas for GdiCanvas<'_> {
         let mut state: u32 = 0;
         unsafe { gp::GdipSaveGraphics(self.g, &mut state) };
         self.saved.push(state);
+        self.saved_clips.push(self.clip);
     }
 
     fn restore(&mut self) {
         if let Some(state) = self.saved.pop() {
             unsafe { gp::GdipRestoreGraphics(self.g, state) };
+            self.clip = self.saved_clips.pop().flatten();
         }
     }
 
     fn clip_rect(&mut self, rect: Rect) {
+        self.clip = Some(match self.clip {
+            Some(current) => intersect_rect(current, rect),
+            None => rect,
+        });
         unsafe {
             gp::GdipSetClipRect(
                 self.g,
@@ -845,10 +897,45 @@ impl Canvas for GdiCanvas<'_> {
     }
 
     fn clip_round_rect(&mut self, rect: Rect, radius: Corners) {
+        self.clip = Some(match self.clip {
+            Some(current) => intersect_rect(current, rect),
+            None => rect,
+        });
         unsafe {
             let path = self.build_round_path(rect, radius);
             gp::GdipSetClipPath(self.g, path, COMBINE_INTERSECT);
             gp::GdipDeletePath(path);
         }
+    }
+}
+
+fn intersect_rect(a: Rect, b: Rect) -> Rect {
+    let left = a.left().max(b.left());
+    let top = a.top().max(b.top());
+    let right = a.right().min(b.right()).max(left);
+    let bottom = a.bottom().min(b.bottom()).max(top);
+    Rect::new(left, top, right - left, bottom - top)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 嵌套裁剪取矩形交集() {
+        assert_eq!(
+            intersect_rect(
+                Rect::new(10.0, 10.0, 40.0, 30.0),
+                Rect::new(20.0, 5.0, 40.0, 20.0),
+            ),
+            Rect::new(20.0, 10.0, 30.0, 15.0)
+        );
+        assert_eq!(
+            intersect_rect(
+                Rect::new(0.0, 0.0, 10.0, 10.0),
+                Rect::new(20.0, 20.0, 5.0, 5.0),
+            ),
+            Rect::new(20.0, 20.0, 0.0, 0.0)
+        );
     }
 }

@@ -10,7 +10,20 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextBoundary, TextLayout};
+
+use core_foundation::attributed_string::CFMutableAttributedString;
+use core_foundation::base::{CFRange, TCFType};
+use core_foundation::boolean::CFBoolean;
+use core_foundation::string::CFString;
+use core_graphics::context::CGContext;
+use core_graphics::geometry::CGAffineTransform;
+use core_text::font::{self as ct_font, CTFont};
+use core_text::font_descriptor::{kCTFontBoldTrait, kCTFontItalicTrait};
+use core_text::line::CTLine;
+use core_text::string_attributes::{
+    kCTFontAttributeName, kCTForegroundColorFromContextAttributeName,
+};
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -383,6 +396,81 @@ fn to_nsfont(font: &Font) -> Retained<NSFont> {
     f
 }
 
+#[derive(Clone)]
+struct CoreTextLayout {
+    line: CTLine,
+}
+
+fn to_ctfont(font: &Font) -> CTFont {
+    let base = font
+        .family
+        .as_deref()
+        .and_then(|family| ct_font::new_from_name(family, font.size as f64).ok())
+        .unwrap_or_else(|| {
+            ct_font::new_ui_font_for_language(
+                ct_font::kCTFontSystemFontType,
+                font.size as f64,
+                None,
+            )
+        });
+    let mut traits = 0;
+    if font.bold {
+        traits |= kCTFontBoldTrait;
+    }
+    if font.italic {
+        traits |= kCTFontItalicTrait;
+    }
+    if traits == 0 {
+        base
+    } else {
+        base.clone_with_symbolic_traits(traits, traits)
+            .unwrap_or(base)
+    }
+}
+
+fn core_text_layout(text: &str, font: &Font) -> TextLayout {
+    let ct_font = to_ctfont(font);
+    let mut attributed = CFMutableAttributedString::new();
+    let string = CFString::new(text);
+    attributed.replace_str(&string, CFRange::init(0, 0));
+    let range = CFRange::init(0, attributed.char_len());
+    attributed.set_attribute(range, unsafe { kCTFontAttributeName }, &ct_font);
+    attributed.set_attribute(
+        range,
+        unsafe { kCTForegroundColorFromContextAttributeName },
+        &CFBoolean::true_value(),
+    );
+    let line = CTLine::new_with_attributed_string(attributed.as_concrete_TypeRef());
+    let bounds = line.get_typographic_bounds();
+    let ascent = (bounds.ascent as f32).max(ct_font.ascent() as f32);
+    let descent = (bounds.descent as f32).max(ct_font.descent() as f32);
+    let height = (ascent + descent).max(font.size);
+
+    let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
+    boundaries.push(TextBoundary {
+        char_index: 0,
+        x: line.get_string_offset_for_string_index(0) as f32,
+    });
+    let mut utf16_index = 0usize;
+    for (char_index, ch) in text.chars().enumerate() {
+        utf16_index += ch.len_utf16();
+        boundaries.push(TextBoundary {
+            char_index: char_index + 1,
+            x: line.get_string_offset_for_string_index(utf16_index as isize) as f32,
+        });
+    }
+
+    TextLayout::new(
+        text,
+        font.clone(),
+        Size::new(bounds.width as f32, height),
+        ascent,
+        descent,
+        boundaries,
+    )
+    .with_platform_data(Rc::new(CoreTextLayout { line }))
+}
+
 /// 构造文字属性字典：字体 + 前景色（+ 下划线）。
 fn text_attributes(font: &Font, color: Color) -> Retained<NSDictionary<NSString, AnyObject>> {
     let ns_font = to_nsfont(font);
@@ -473,6 +561,48 @@ impl Canvas for CgCanvas {
         Size::new(sz.width as f32, sz.height as f32)
     }
 
+    fn layout_text(&self, text: &str, font: &Font) -> TextLayout {
+        core_text_layout(text, font)
+    }
+
+    fn draw_text_layout(&mut self, layout: &TextLayout, origin: Point, color: Color) {
+        let Some(data) = layout.platform_data::<CoreTextLayout>() else {
+            self.draw_text_advance(layout.text(), origin, layout.font(), color);
+            return;
+        };
+        let Some(ns_context) = NSGraphicsContext::currentContext() else {
+            return;
+        };
+        let ns_cg = ns_context.CGContext();
+        let raw = Retained::as_ptr(&ns_cg).cast_mut().cast();
+        let cg = unsafe { CGContext::from_existing_context_ptr(raw) };
+        cg.save();
+        cg.set_rgb_fill_color(
+            color.r as f64,
+            color.g as f64,
+            color.b as f64,
+            color.a as f64,
+        );
+        cg.set_text_matrix(&CGAffineTransform::new(1.0, 0.0, 0.0, 1.0, 0.0, 0.0));
+        cg.translate(origin.x as f64, (origin.y + layout.ascent()) as f64);
+        cg.scale(1.0, -1.0);
+        cg.set_text_position(0.0, 0.0);
+        data.line.draw(&cg);
+        cg.restore();
+
+        if layout.font().underline {
+            self.fill_rect(
+                Rect::new(
+                    origin.x,
+                    origin.y + layout.ascent() + layout.descent() - 1.0,
+                    layout.width(),
+                    1.0,
+                ),
+                color,
+            );
+        }
+    }
+
     fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
         // 加载失败时静默跳过，避免影响其它绘制。
         let Some(img) = self.load_image(source, rect, &fit) else {
@@ -512,4 +642,27 @@ impl Canvas for CgCanvas {
 /// 度量文字时颜色不影响尺寸，用黑色占位。
 fn color_black() -> Color {
     Color::BLACK
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    #[test]
+    fn coretext追加字符不改变既有普通字符边界() {
+        let canvas = CgCanvas::new();
+        let font = Font::system(16.0);
+        let before = canvas.layout_text("Flex界面", &font);
+        let after = canvas.layout_text("Flex界面Z", &font);
+        assert_eq!(before.boundaries().len() + 1, after.boundaries().len());
+        for (a, b) in before.boundaries().iter().zip(after.boundaries()) {
+            assert!(
+                (a.x - b.x).abs() < 0.01,
+                "边界 {} 发生漂移: {} -> {}",
+                a.char_index,
+                a.x,
+                b.x
+            );
+        }
+    }
 }

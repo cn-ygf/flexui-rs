@@ -32,3 +32,9 @@ windows-sys = { version = "0.60", features = [
     "Win32_System_Ole",
     "Win32_System_Com",
 ] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Gdi",
+] }
+windows-core = "0.61"
