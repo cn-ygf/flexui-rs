@@ -3,12 +3,11 @@
 use std::cell::Cell;
 
 use flexui_geometry::{Color, Point, Rect, Size};
-use flexui_gfx::{Canvas, TextAlign};
+use flexui_gfx::Canvas;
 
 use crate::common_builders;
 use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
-use crate::paint::draw_aligned_text;
 use crate::style::{PlaceholderStyleSet, StyleSpec};
 use crate::theme::WidgetKind;
 use crate::widget::{
@@ -411,7 +410,9 @@ impl Edit {
                 .resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
             let line_rect = Rect::new(content.left(), content.top(), content.size.width, line_h);
-            draw_aligned_text(
+            cv.save();
+            cv.clip_rect(self.text_clip_rect(content));
+            Self::draw_input_text(
                 cv,
                 &self.config.placeholder,
                 line_rect,
@@ -420,13 +421,12 @@ impl Edit {
                     .fg_color
                     .or_else(|| self.base.resolved_style().placeholder_color)
                     .unwrap_or(PLACEHOLDER_COLOR),
-                TextAlign::Left,
-                false,
             );
             if self.base.focused && self.base.caret_on {
                 let y = content.top() + (line_h - caret_h) / 2.0;
                 cv.fill_rect(Rect::new(content.left(), y, 1.5, caret_h), color);
             }
+            cv.restore();
             return;
         }
         let sel = self.sel_range();
@@ -626,7 +626,9 @@ impl Widget for Edit {
                 .placeholder_style
                 .resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
-            draw_aligned_text(
+            cv.save();
+            cv.clip_rect(self.text_clip_rect(content));
+            Self::draw_input_text(
                 cv,
                 &self.config.placeholder,
                 content,
@@ -635,8 +637,6 @@ impl Widget for Edit {
                     .fg_color
                     .or_else(|| self.base.resolved_style().placeholder_color)
                     .unwrap_or(PLACEHOLDER_COLOR),
-                TextAlign::Left,
-                false,
             );
             if self.base.focused && self.base.caret_on {
                 cv.fill_rect(
@@ -644,6 +644,7 @@ impl Widget for Edit {
                     color,
                 );
             }
+            cv.restore();
             return;
         }
         let before: String = self.base.text.chars().take(self.state.cursor).collect();
@@ -963,6 +964,7 @@ mod tests {
         last_text: RefCell<String>,
         last_font: RefCell<Option<Font>>,
         last_color: RefCell<Option<Color>>,
+        advance_draws: usize,
     }
     impl Canvas for RecCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
@@ -973,6 +975,10 @@ mod tests {
             *self.last_text.borrow_mut() = t.to_string();
             *self.last_font.borrow_mut() = Some(f.clone());
             *self.last_color.borrow_mut() = Some(c);
+        }
+        fn draw_text_advance(&mut self, t: &str, o: Point, f: &Font, c: Color) {
+            self.advance_draws += 1;
+            self.draw_text(t, o, f, c);
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
@@ -990,12 +996,14 @@ mod tests {
             last_text: RefCell::new(String::new()),
             last_font: RefCell::new(None),
             last_color: RefCell::new(None),
+            advance_draws: 0,
         };
         let mut cv = cv;
         layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let style = StyleSpec::default();
         e.paint_content(&mut cv, &style);
         assert_eq!(*cv.last_text.borrow(), "abc");
+        assert_eq!(cv.advance_draws, 1);
         assert_eq!(e.base().text, "ac", "组合串不改动已提交文本");
     }
 
@@ -1004,6 +1012,7 @@ mod tests {
             last_text: RefCell::new(String::new()),
             last_font: RefCell::new(None),
             last_color: RefCell::new(None),
+            advance_draws: 0,
         }
     }
 
@@ -1026,6 +1035,7 @@ mod tests {
         layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         edit.paint_content(&mut cv, &StyleSpec::default());
         assert_eq!(*cv.last_text.borrow(), "请输入");
+        assert_eq!(cv.advance_draws, 1, "占位文本必须使用输入文本排版路径");
         assert!(edit.base().text.is_empty(), "占位文本不能成为输入内容");
         edit.on_event(&Event::Char { ch: 'A' });
         edit.paint_content(&mut cv, &StyleSpec::default());

@@ -30,8 +30,9 @@ use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::Ime::{
-    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT,
-    COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
+    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCandidateWindow,
+    ImmSetCompositionWindow, CANDIDATEFORM, CFS_EXCLUDE, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR,
+    GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_SHIFT,
@@ -705,6 +706,8 @@ unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
     }) {
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
+        // 候选窗位置依赖 paint_content 刷新的 caret_rect，必须先同步提交当前组合串。
+        UpdateWindow(hwnd);
     }
 }
 
@@ -728,6 +731,7 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
         return;
     };
+    let edit_rect = w.base().rect;
     let r = w.text_input_rect().unwrap_or(w.base().rect);
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
@@ -749,6 +753,18 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
         },
     };
     ImmSetCompositionWindow(himc, &form);
+    let candidate = CANDIDATEFORM {
+        dwIndex: 0,
+        dwStyle: CFS_EXCLUDE,
+        ptCurrentPos: form.ptCurrentPos,
+        rcArea: RECT {
+            left: (edit_rect.left() * scale).floor() as i32,
+            top: (edit_rect.top() * scale).floor() as i32,
+            right: (edit_rect.right() * scale).ceil() as i32,
+            bottom: (edit_rect.bottom() * scale).ceil() as i32,
+        },
+    };
+    ImmSetCandidateWindow(himc, &candidate);
     ImmReleaseContext(hwnd, himc);
 }
 
