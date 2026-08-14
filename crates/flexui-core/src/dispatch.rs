@@ -4,6 +4,7 @@
 //! 控件状态变化与点击回调；处理 Radio 分组互斥，并按 tabbar 绑定驱动 TabBox 翻页。
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use flexui_geometry::{Point, Rect, Size};
 use flexui_gfx::Canvas;
@@ -14,6 +15,9 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
 use crate::widget::{find_by_id, find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+
+/// 文本输入停止后保持光标常亮的时间；随后才恢复系统近似周期的闪烁。
+const CARET_BLINK_RESUME_DELAY: Duration = Duration::from_millis(500);
 
 /// 点击回调类型别名。
 pub type ClickHandler = Box<dyn FnMut(&mut EventCtx)>;
@@ -516,6 +520,8 @@ pub struct Dispatcher {
     hover: Option<WidgetId>,
     pressed: Option<WidgetId>,
     focus: Option<WidgetId>,
+    /// 最近一次 Edit 交互后恢复闪烁的最早时刻；此前光标保持常亮。
+    caret_blink_after: Option<Instant>,
     needs_redraw: bool,
     needs_layout: bool,
     /// 局部脏矩形（联合），后端据此只失效这块区域（脏区重绘）。
@@ -551,6 +557,7 @@ impl Dispatcher {
             hover: None,
             pressed: None,
             focus: None,
+            caret_blink_after: None,
             needs_redraw: false,
             needs_layout: false,
             dirty: None,
@@ -841,10 +848,49 @@ impl Dispatcher {
         });
     }
 
-    /// 光标闪烁：切换焦点控件 caret 相位，返回其矩形供局部失效（无焦点返回 None）。
-    pub fn blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+    /// 让当前 Edit 光标立即显示，并从最后一次输入重新计算恢复闪烁的时间。
+    pub fn reset_caret_blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        self.reset_caret_blink_at(root, Instant::now())
+    }
+
+    fn reset_caret_blink_at(&mut self, root: &mut dyn Widget, now: Instant) -> Option<Rect> {
         self.ensure_focus_valid(root);
-        let fid = self.focus?;
+        let Some(fid) = self.focus else {
+            self.caret_blink_after = None;
+            return None;
+        };
+        if role_of(root, fid) != Some(WidgetRole::Edit) {
+            self.caret_blink_after = None;
+            return None;
+        }
+        let mut rect = None;
+        visit_mut(root, fid, &mut |w| {
+            w.base_mut().caret_on = true;
+            rect = Some(w.base().rect);
+        });
+        self.caret_blink_after = Some(now + CARET_BLINK_RESUME_DELAY);
+        rect
+    }
+
+    /// 光标闪烁：静止期内保持常亮，之后切换相位并返回局部失效矩形。
+    pub fn blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        self.blink_at(root, Instant::now())
+    }
+
+    fn blink_at(&mut self, root: &mut dyn Widget, now: Instant) -> Option<Rect> {
+        self.ensure_focus_valid(root);
+        let Some(fid) = self.focus else {
+            self.caret_blink_after = None;
+            return None;
+        };
+        if role_of(root, fid) != Some(WidgetRole::Edit) {
+            self.caret_blink_after = None;
+            return None;
+        }
+        if self.caret_blink_after.is_some_and(|resume| now < resume) {
+            return None;
+        }
+        self.caret_blink_after = None;
         let mut rect = None;
         visit_mut(root, fid, &mut |w| {
             let b = w.base_mut();
@@ -1107,6 +1153,7 @@ impl Dispatcher {
             }
         });
         if deleted {
+            self.reset_caret_blink(root);
             if let Some(r) = rect_of(root, fid) {
                 self.mark_dirty(r);
             }
@@ -1125,6 +1172,7 @@ impl Dispatcher {
         let mut changed = false;
         visit_mut(root, fid, &mut |w| changed = w.replace_selection(s));
         if changed {
+            self.reset_caret_blink(root);
             if let Some(r) = rect_of(root, fid) {
                 self.mark_dirty(r);
             }
@@ -1139,6 +1187,7 @@ impl Dispatcher {
         self.ensure_focus_valid(root);
         let Some(fid) = self.focus else { return };
         visit_mut(root, fid, &mut |w| w.select_all());
+        self.reset_caret_blink(root);
         if let Some(r) = rect_of(root, fid) {
             self.mark_dirty(r);
         }
@@ -1152,6 +1201,9 @@ impl Dispatcher {
             consumed = w.on_event(ev) == EventFlow::Consumed;
         });
         if consumed {
+            if role_of(root, id) == Some(WidgetRole::Edit) {
+                self.reset_caret_blink(root);
+            }
             if let Some(r) = rect_of(root, id) {
                 self.mark_dirty(r);
             }
@@ -1283,6 +1335,7 @@ impl Dispatcher {
                 w.focus_gained();
             }
         });
+        self.reset_caret_blink(root);
         self.needs_redraw = true;
         if old != Some(next) {
             if let Some(id) = old {
@@ -1299,6 +1352,7 @@ impl Dispatcher {
             return;
         }
         self.focus = None;
+        self.caret_blink_after = None;
         for_each_mut(root, &mut |w| w.base_mut().focused = false);
         self.needs_redraw = true;
         self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
@@ -1408,6 +1462,7 @@ impl Dispatcher {
                 b.caret_on = true; // 获焦立即显示光标
             }
         });
+        self.reset_caret_blink(root);
         self.needs_redraw = true;
         if old_focus != focus_target {
             if let Some(id) = old_focus {
@@ -2111,6 +2166,49 @@ mod tests {
         );
         assert_eq!(root.selection(), Some((1, 3)));
         assert_eq!(root.selected_text().as_deref(), Some("el"));
+    }
+
+    #[test]
+    fn edit_连续输入时光标常亮并延后闪烁() {
+        let mut root = Edit::new().text("hello");
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(25.0, 20.0),
+                button: MouseButton::Left,
+            },
+        );
+
+        let started = Instant::now();
+        disp.reset_caret_blink_at(&mut root, started);
+        assert!(root.base().caret_on);
+        assert!(disp
+            .blink_at(
+                &mut root,
+                started + CARET_BLINK_RESUME_DELAY - Duration::from_millis(1)
+            )
+            .is_none());
+        assert!(root.base().caret_on);
+
+        let typed_again = started + Duration::from_millis(400);
+        disp.reset_caret_blink_at(&mut root, typed_again);
+        assert!(
+            disp.blink_at(
+                &mut root,
+                started + CARET_BLINK_RESUME_DELAY + Duration::from_millis(1),
+            )
+            .is_none(),
+            "后续输入必须重新开始静止期"
+        );
+        assert!(root.base().caret_on);
+
+        assert!(disp
+            .blink_at(&mut root, typed_again + CARET_BLINK_RESUME_DELAY)
+            .is_some());
+        assert!(!root.base().caret_on);
     }
 
     #[test]

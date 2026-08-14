@@ -704,6 +704,8 @@ unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
     if let Some(r) = with_focus_widget(state, move |w| {
         w.set_marked_text(owned);
     }) {
+        let st = &mut *state;
+        st.disp.reset_caret_blink(st.root.as_mut());
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
         // 候选窗位置依赖 paint_content 刷新的 caret_rect，必须先同步提交当前组合串。
@@ -716,6 +718,8 @@ unsafe fn clear_marked_on_focus(hwnd: HWND, state: *mut AppState) {
     if let Some(r) = with_focus_widget(state, |w| {
         w.clear_marked_text();
     }) {
+        let st = &mut *state;
+        st.disp.reset_caret_blink(st.root.as_mut());
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }

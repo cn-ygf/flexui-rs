@@ -18,6 +18,7 @@ use crate::widget::{
 /// 选区高亮色（半透明蓝）。
 const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
 const PLACEHOLDER_COLOR: Color = Color::rgba(0.50, 0.50, 0.50, 1.0);
+const CARET_WIDTH: f32 = 1.0;
 
 /// 逻辑行缓存；排版、绘制、光标与命中测试共用同一个平台文字布局。
 struct LineCache {
@@ -541,7 +542,7 @@ impl Edit {
             );
             if self.base.focused && self.base.caret_on {
                 let y = content.top() + (line_h - caret_h) / 2.0;
-                cv.fill_rect(Rect::new(content.left(), y, 1.5, caret_h), color);
+                cv.fill_rect(Rect::new(content.left(), y, CARET_WIDTH, caret_h), color);
             }
             cv.restore();
             return;
@@ -578,7 +579,7 @@ impl Edit {
             if self.base.focused && self.base.caret_on && i == cur_line {
                 let cx = content.left() + line.layout.x_for_char(cur_col) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
-                let caret = Rect::new(cx, cyc.max(y), 1.5, caret_h);
+                let caret = Rect::new(cx, cyc.max(y), CARET_WIDTH, caret_h);
                 self.caret_rect.set(Some(caret));
                 cv.fill_rect(caret, color);
             }
@@ -714,7 +715,7 @@ impl Widget for Edit {
             self.caret_rect.set(Some(Rect::new(
                 content.left() + x + 1.0,
                 content.top() + line as f32 * self.line_h,
-                1.5,
+                CARET_WIDTH,
                 self.base.font.size,
             )));
         } else {
@@ -739,7 +740,7 @@ impl Widget for Edit {
             self.caret_rect.set(Some(Rect::new(
                 content.left() - self.scroll_x.get() + display_x + 1.0,
                 y,
-                1.5,
+                CARET_WIDTH,
                 caret_h,
             )));
         }
@@ -772,7 +773,7 @@ impl Widget for Edit {
             let line_h = placeholder.height();
             let line_y = Self::layout_y(placeholder, content);
             self.caret_rect
-                .set(Some(Rect::new(content.left(), line_y, 1.5, line_h)));
+                .set(Some(Rect::new(content.left(), line_y, CARET_WIDTH, line_h)));
             cv.save();
             cv.clip_rect(self.text_clip_rect(content));
             Self::draw_input_layout(
@@ -785,7 +786,10 @@ impl Widget for Edit {
                     .unwrap_or(PLACEHOLDER_COLOR),
             );
             if self.base.focused && self.base.caret_on {
-                cv.fill_rect(Rect::new(content.left(), line_y, 1.5, line_h), color);
+                cv.fill_rect(
+                    Rect::new(content.left(), line_y, CARET_WIDTH, line_h),
+                    color,
+                );
             }
             cv.restore();
             return;
@@ -854,7 +858,7 @@ impl Widget for Edit {
             );
         }
         // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与排版行一致、垂直居中。
-        let caret = Rect::new(origin_x + marked_end_w + 1.0, line_y, 1.5, line_h);
+        let caret = Rect::new(origin_x + marked_end_w + 1.0, line_y, CARET_WIDTH, line_h);
         self.caret_rect.set(Some(caret));
         if self.base.focused && self.base.caret_on {
             cv.fill_rect(caret, color);
@@ -1234,6 +1238,7 @@ mod tests {
                 < 0.01
         );
         assert!((edit.text_input_rect().unwrap().size.height - layout.height()).abs() < 0.01);
+        assert_eq!(edit.text_input_rect().unwrap().size.width, CARET_WIDTH);
     }
 
     #[test]
