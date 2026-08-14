@@ -56,6 +56,7 @@ cargo run -p flexui-gallery -- --dark
 </p>
 <p align="center">
   <img src="docs/uu_macos_5.png" alt="按控件状态驱动的帧动画示例" width="49%">
+  <img src="docs/uu_win_1.png" alt="Windows" width="49%">
 </p>
 
 ```bash
