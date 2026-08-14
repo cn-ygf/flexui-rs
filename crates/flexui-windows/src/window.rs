@@ -34,7 +34,7 @@ use windows_sys::Win32::UI::Input::Ime::{
     COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetKeyState, VK_CONTROL, VK_SHIFT,
+    EnableWindow, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_SHIFT,
 };
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -893,6 +893,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_LBUTTONDOWN => {
+            SetFocus(hwnd);
+            SetCapture(hwnd);
             dispatch(
                 hwnd,
                 state,
@@ -912,11 +914,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     button: MouseButton::Left,
                 },
             );
+            ReleaseCapture();
             // 点击回调可能显示大面积弹层。同步提交本轮更新，避免 WM_PAINT 被后续鼠标消息推迟，
             // 造成用户需要再次点击才看到弹层的错觉。
             if invalidated {
                 UpdateWindow(hwnd);
             }
+            0
+        }
+        WM_CAPTURECHANGED | WM_CANCELMODE => {
+            // 系统抢走捕获（切窗、弹系统菜单等）时必须清掉框架内的 pressed/拖选状态。
+            dispatch(
+                hwnd,
+                state,
+                Event::MouseUp {
+                    pos: Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
+                    button: MouseButton::Left,
+                },
+            );
             0
         }
         // 方向/Home/End/Delete 等特殊键（不产生 WM_CHAR）→ 平台无关键码。

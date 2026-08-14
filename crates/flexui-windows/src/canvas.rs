@@ -685,7 +685,9 @@ impl Canvas for GdiCanvas<'_> {
                 gp::GdipGetStringFormatFlags(format, &mut flags);
                 gp::GdipSetStringFormatFlags(
                     format,
-                    flags | gp::StringFormatFlagsMeasureTrailingSpaces,
+                    flags
+                        | gp::StringFormatFlagsMeasureTrailingSpaces
+                        | gp::StringFormatFlagsNoWrap,
                 );
             }
             let wtext = wide(text);
@@ -746,9 +748,9 @@ impl Canvas for GdiCanvas<'_> {
         }
     }
 
-    fn measure_text_advance(&self, text: &str, font: &Font) -> f32 {
+    fn measure_text_advance_size(&self, text: &str, font: &Font) -> Size {
         if text.is_empty() {
-            return 0.0;
+            return Size::default();
         }
         unsafe {
             let (f, family) = self.make_font(font);
@@ -756,7 +758,7 @@ impl Canvas for GdiCanvas<'_> {
                 if !family.is_null() {
                     gp::GdipDeleteFontFamily(family);
                 }
-                return 0.0;
+                return Size::new(0.0, font.size * 1.2);
             }
             let layout = gp::RectF {
                 X: 0.0,
@@ -777,7 +779,9 @@ impl Canvas for GdiCanvas<'_> {
                 gp::GdipGetStringFormatFlags(format, &mut flags);
                 gp::GdipSetStringFormatFlags(
                     format,
-                    flags | gp::StringFormatFlagsMeasureTrailingSpaces,
+                    flags
+                        | gp::StringFormatFlagsMeasureTrailingSpaces
+                        | gp::StringFormatFlagsNoWrap,
                 );
             }
             let wtext = wide(text);
@@ -797,7 +801,7 @@ impl Canvas for GdiCanvas<'_> {
             }
             gp::GdipDeleteFont(f);
             gp::GdipDeleteFontFamily(family);
-            bbox.Width
+            Size::new(bbox.Width, bbox.Height)
         }
     }
 

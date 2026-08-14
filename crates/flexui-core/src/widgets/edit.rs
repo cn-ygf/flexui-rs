@@ -490,7 +490,7 @@ impl Edit {
         if text.is_empty() {
             return;
         }
-        let height = cv.measure_text(text, font).height;
+        let height = cv.measure_text_advance_size(text, font).height;
         let y = rect.top() + (rect.size.height - height) / 2.0;
         cv.draw_text_advance(
             text,
@@ -515,6 +515,16 @@ impl Edit {
         self.scroll_x
             .set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
     }
+
+    /// 横向严格裁到内容区；纵向保留控件 padding，避免字体抗锯齿下沿被切掉。
+    fn text_clip_rect(&self, content: Rect) -> Rect {
+        Rect::new(
+            content.left(),
+            self.base.rect.top(),
+            content.size.width,
+            self.base.rect.size.height,
+        )
+    }
 }
 
 impl Default for Edit {
@@ -531,7 +541,7 @@ impl Widget for Edit {
         &mut self.base
     }
     fn measure(&mut self, _avail: Size, cv: &dyn Canvas) -> Size {
-        let s = cv.measure_text("Ag", &self.base.font);
+        let s = cv.measure_text_advance_size("Ag", &self.base.font);
         if self.config.multiline {
             let rows = self.base.text.split('\n').count().max(1) as f32;
             layout::size_from_content(&self.base, 120.0, rows * s.height + 8.0)
@@ -560,7 +570,7 @@ impl Widget for Edit {
             start += n + 1; // +1 跳过换行符
         }
         self.lines = lines;
-        self.line_h = cv.measure_text("Ag", &self.base.font).height;
+        self.line_h = cv.measure_text_advance_size("Ag", &self.base.font).height;
         self.cache_dirty = false;
         let content = layout::content_rect(&self.base);
         let (line, col) = self.pos_of(self.state.cursor);
@@ -648,7 +658,7 @@ impl Widget for Edit {
         self.update_single_line_scroll(before_w + marked_w, total_w, content);
         let origin_x = content.left() - self.scroll_x.get();
         cv.save();
-        cv.clip_rect(content);
+        cv.clip_rect(self.text_clip_rect(content));
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
         if self.state.marked.is_empty() {
             if let Some((lo, hi)) = self.sel_range() {

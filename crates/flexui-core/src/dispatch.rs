@@ -1094,6 +1094,7 @@ impl Dispatcher {
     pub fn cut_selection(&mut self, root: &mut dyn Widget) -> Option<String> {
         self.ensure_focus_valid(root);
         let fid = self.focus?;
+        let before = control_snapshot(root, fid);
         let mut out = None;
         let mut deleted = false;
         visit_mut(root, fid, &mut |w| {
@@ -1109,6 +1110,9 @@ impl Dispatcher {
             if let Some(r) = rect_of(root, fid) {
                 self.mark_dirty(r);
             }
+            if let (Some(before), Some(after)) = (before, control_snapshot(root, fid)) {
+                self.emit_snapshot_changes(root, fid, before, after);
+            }
         }
         out
     }
@@ -1117,11 +1121,15 @@ impl Dispatcher {
     pub fn paste(&mut self, root: &mut dyn Widget, s: &str) {
         self.ensure_focus_valid(root);
         let Some(fid) = self.focus else { return };
+        let before = control_snapshot(root, fid);
         let mut changed = false;
         visit_mut(root, fid, &mut |w| changed = w.replace_selection(s));
         if changed {
             if let Some(r) = rect_of(root, fid) {
                 self.mark_dirty(r);
+            }
+            if let (Some(before), Some(after)) = (before, control_snapshot(root, fid)) {
+                self.emit_snapshot_changes(root, fid, before, after);
             }
         }
     }
@@ -1374,23 +1382,27 @@ impl Dispatcher {
     /// 处理按下：设置 pressed 与 focus。
     fn press(&mut self, root: &mut dyn Widget, hit: Option<WidgetId>) {
         let old_focus = self.focus;
-        self.pressed = hit;
 
-        // 判断命中控件是否可获得焦点。
+        // 禁用控件仍参与命中以阻挡下层控件，但不能进入 pressed、获得焦点或接收事件。
+        let mut pointer_target = None;
         let mut focus_target: Option<WidgetId> = None;
         if let Some(id) = hit {
             visit_mut(root, id, &mut |w| {
                 let b = w.base();
-                if b.focusable && b.enabled {
-                    focus_target = Some(b.id);
+                if b.enabled {
+                    pointer_target = Some(b.id);
+                    if b.focusable {
+                        focus_target = Some(b.id);
+                    }
                 }
             });
         }
+        self.pressed = pointer_target;
         self.focus = focus_target;
 
         for_each_mut(root, &mut |w| {
             let b = w.base_mut();
-            b.pressed = Some(b.id) == hit && b.enabled;
+            b.pressed = Some(b.id) == pointer_target;
             b.focused = Some(b.id) == focus_target;
             if b.focused {
                 b.caret_on = true; // 获焦立即显示光标
@@ -1405,7 +1417,7 @@ impl Dispatcher {
                 self.emit_control_event(root, id, ControlEvent::FocusChanged(true));
             }
         }
-        if let Some(id) = hit {
+        if let Some(id) = pointer_target {
             let pressed = find_by_id(root, id).is_some_and(|w| w.base().pressed);
             self.emit_control_event(root, id, ControlEvent::PressedChanged(pressed));
         }
@@ -1571,6 +1583,9 @@ impl Dispatcher {
         after: ControlSnapshot,
     ) {
         if before.text != after.text {
+            // 文本会影响控件测量和 Edit 的真实字符边界缓存。
+            self.needs_layout = true;
+            self.needs_redraw = true;
             self.emit_control_event(root, id, ControlEvent::TextChanged(after.text));
         }
         if before.selected != after.selected {
@@ -2099,6 +2114,34 @@ mod tests {
     }
 
     #[test]
+    fn 禁用的指针控件不接收鼠标事件() {
+        let mut root = Edit::new().text("hello");
+        root.base_mut().enabled = false;
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(0.0, 20.0),
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(8.0, 20.0),
+            },
+        );
+
+        assert_eq!(root.cursor(), 5);
+        assert_eq!(root.selection(), None);
+        assert!(!root.base().pressed);
+        assert!(!root.base().focused);
+    }
+
+    #[test]
     fn slider_按下拖动改变值() {
         let mut root = Slider::new().width(100.0).height(20.0);
         let cv = FakeCanvas;
@@ -2590,7 +2633,7 @@ mod tests {
 
     #[test]
     fn edit_剪贴板漏斗() {
-        let mut root = Edit::new().text("hello");
+        let mut root = Edit::new().name("edit").text("hello");
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let mut disp = Dispatcher::new();
@@ -2608,9 +2651,18 @@ mod tests {
         // 剪切 → 返回文本且清空。
         assert_eq!(disp.cut_selection(&mut root).as_deref(), Some("hello"));
         assert_eq!(root.base().text, "");
+        assert!(disp.take_layout(), "剪切后必须重建 Edit 字符边界缓存");
+        assert!(disp
+            .take_control_events()
+            .contains(&("edit".to_string(), ControlEvent::TextChanged(String::new()),)));
         // 粘贴。
         disp.paste(&mut root, "hi");
         assert_eq!(root.base().text, "hi");
+        assert!(disp.take_layout(), "粘贴后必须重建 Edit 字符边界缓存");
+        assert!(disp.take_control_events().contains(&(
+            "edit".to_string(),
+            ControlEvent::TextChanged("hi".to_string()),
+        )));
         // 无选区复制返回 None。
         assert_eq!(disp.copy_selection(&mut root), None);
     }
@@ -3007,6 +3059,7 @@ mod tests {
             "edit".to_string(),
             ControlEvent::TextChanged("A".to_string()),
         )));
+        assert!(disp.take_layout(), "输入后必须重建 Edit 字符边界缓存");
     }
 
     #[test]

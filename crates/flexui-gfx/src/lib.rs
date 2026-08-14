@@ -194,9 +194,14 @@ pub trait Canvas {
     /// 度量一行文字的尺寸（用于布局）。
     fn measure_text(&self, text: &str, font: &Font) -> Size;
 
+    /// 测量与 `draw_text_advance` 相同排版方式下的文字尺寸。
+    fn measure_text_advance_size(&self, text: &str, font: &Font) -> Size {
+        self.measure_text(text, font)
+    }
+
     /// 测量文本排版前进宽度，供插入光标和选区使用。
     fn measure_text_advance(&self, text: &str, font: &Font) -> f32 {
-        self.measure_text(text, font).width
+        self.measure_text_advance_size(text, font).width
     }
 
     /// 在矩形内绘制图片，支持换色 tint 与渲染方式 fit（缺省为空，后端覆写）。
