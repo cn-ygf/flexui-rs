@@ -27,23 +27,14 @@ void flex_set_click_callback(FlexClickCb cb, void *user);
  * 0 成功，负数为错误码。 */
 int flex_run_xml(const char *title, int width, int height, const char *xml);
 
-/* 窗口委托：各钩子为可空函数指针，ctx 为不透明 FlexCtx*（见下方 flex_ctx_*）。 */
-typedef struct FlexDelegate {
-  void (*on_init)(void *ctx, void *user);
-  void (*on_click)(const char *name, void *ctx, void *user);
-  void (*on_context)(const char *name, float x, float y, void *ctx, void *user);
-  int  (*on_close)(void *ctx, void *user); /* 返回非 0 允许关闭 */
-} FlexDelegate;
-
 enum {
   FLEX_WINDOW_MINIMIZED = 1,
   FLEX_WINDOW_MAXIMIZED = 2,
   FLEX_WINDOW_RESTORED = 3
 };
 
-/* 第二版委托补齐窗口生命周期和最小化/最大化/恢复事件。
- * 单独提供 V2，避免改变旧 FlexDelegate 的 ABI 布局。 */
-typedef struct FlexDelegateV2 {
+/* 窗口委托：各钩子为可空函数指针，ctx 仅在回调期间有效。 */
+typedef struct FlexDelegate {
   void (*on_before_init)(void *ctx, void *user);
   void (*on_init)(void *ctx, void *user);
   void (*on_initialized)(void *ctx, void *user);
@@ -52,13 +43,11 @@ typedef struct FlexDelegateV2 {
   void (*on_window_state)(int state, void *ctx, void *user);
   int  (*on_closing)(void *ctx, void *user); /* 返回非 0 允许关闭 */
   void (*on_closed)(void *user);
-} FlexDelegateV2;
+} FlexDelegate;
 
 /* 用 XML + 委托启动（阻塞）。delegate 可为 NULL。0 成功，负数错误码。 */
 int flex_run(const char *title, int width, int height, const char *xml,
              const FlexDelegate *delegate, void *user);
-int flex_run_v2(const char *title, int width, int height, const char *xml,
-                const FlexDelegateV2 *delegate, void *user);
 
 /* ===== 回调内的窗口上下文操作（FlexCtx*，仅回调期间有效）===== */
 

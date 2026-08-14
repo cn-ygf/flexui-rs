@@ -256,28 +256,15 @@ pub extern "C" fn flex_main_proxy_free(proxy: *mut FlexMainProxy) {
 
 // —— 窗口委托桥接：C 侧函数指针集 ——
 
-/// C 侧窗口委托：各钩子为可空函数指针，第一个参数为不透明 FlexCtx*。
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct FlexDelegate {
-    pub on_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
-    pub on_click: Option<extern "C" fn(name: *const c_char, ctx: *mut c_void, user: *mut c_void)>,
-    pub on_context: Option<
-        extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void),
-    >,
-    /// 返回非 0 允许关闭，0 阻止关闭。
-    pub on_close: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void) -> c_int>,
-}
-
 /// C 侧窗口状态事件编号。
 pub const FLEX_WINDOW_MINIMIZED: c_int = 1;
 pub const FLEX_WINDOW_MAXIMIZED: c_int = 2;
 pub const FLEX_WINDOW_RESTORED: c_int = 3;
 
-/// 第二版 C 窗口委托。旧版 `FlexDelegate` 布局保持不变，避免破坏已有 ABI。
+/// C 侧窗口委托：各钩子为可空函数指针，ctx 仅在回调期间有效。
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct FlexDelegateV2 {
+pub struct FlexDelegate {
     pub on_before_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
     pub on_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
     pub on_initialized: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
@@ -304,52 +291,6 @@ impl CDelegate {
 }
 
 impl WindowDelegate for CDelegate {
-    fn on_init(&mut self, ctx: &mut WindowCtx) {
-        if let Some(f) = self.d.on_init {
-            f(ctx as *mut _ as *mut c_void, self.user_ptr());
-        }
-    }
-    fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
-        if let Some(f) = self.d.on_click {
-            if let Ok(cn) = CString::new(name) {
-                f(cn.as_ptr(), ctx as *mut _ as *mut c_void, self.user_ptr());
-            }
-        }
-    }
-    fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
-        if let Some(f) = self.d.on_context {
-            if let Ok(cn) = CString::new(name) {
-                f(
-                    cn.as_ptr(),
-                    x,
-                    y,
-                    ctx as *mut _ as *mut c_void,
-                    self.user_ptr(),
-                );
-            }
-        }
-    }
-    fn on_close(&mut self, ctx: &mut WindowCtx) -> bool {
-        match self.d.on_close {
-            Some(f) => f(ctx as *mut _ as *mut c_void, self.user_ptr()) != 0,
-            None => true,
-        }
-    }
-}
-
-/// 把第二版 C 委托适配成 WindowDelegate。
-struct CDelegateV2 {
-    d: FlexDelegateV2,
-    user: usize,
-}
-
-impl CDelegateV2 {
-    fn user_ptr(&self) -> *mut c_void {
-        self.user as *mut c_void
-    }
-}
-
-impl WindowDelegate for CDelegateV2 {
     fn on_before_init(&mut self, ctx: &mut WindowCtx) {
         if let Some(callback) = self.d.on_before_init {
             callback(ctx as *mut _ as *mut c_void, self.user_ptr());
@@ -461,32 +402,6 @@ pub extern "C" fn flex_run(
             Box::new(flexui_core::NoopDelegate)
         } else {
             Box::new(CDelegate {
-                d: unsafe { *delegate },
-                user: user as usize,
-            })
-        };
-        run_with_delegate(title, width, height, xml, delegate)
-    }));
-    result.unwrap_or(-3)
-}
-
-/// 用 XML + 第二版 C 委托启动应用（阻塞）。
-/// 0 成功，负数错误码（-1 参数错、-2 XML 失败、-3 panic）。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-#[no_mangle]
-pub extern "C" fn flex_run_v2(
-    title: *const c_char,
-    width: c_int,
-    height: c_int,
-    xml: *const c_char,
-    delegate: *const FlexDelegateV2,
-    user: *mut c_void,
-) -> c_int {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let delegate: Box<dyn WindowDelegate> = if delegate.is_null() {
-            Box::new(flexui_core::NoopDelegate)
-        } else {
-            Box::new(CDelegateV2 {
                 d: unsafe { *delegate },
                 user: user as usize,
             })
@@ -774,10 +689,10 @@ mod tests {
     }
 
     #[test]
-    fn ffi_v2桥接生命周期和窗口状态() {
+    fn ffi桥接生命周期和窗口状态() {
         let calls = Mutex::new(Vec::new());
-        let mut delegate = CDelegateV2 {
-            d: FlexDelegateV2 {
+        let mut delegate = CDelegate {
+            d: FlexDelegate {
                 on_before_init: Some(before),
                 on_init: Some(init),
                 on_initialized: Some(initialized),
