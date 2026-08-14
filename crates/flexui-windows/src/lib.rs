@@ -12,6 +12,8 @@ mod clipboard;
 mod dialog;
 mod gdiplus;
 mod native_menu;
+#[cfg(windows)]
+mod text;
 mod window;
 
 pub use canvas::GdiCanvas;

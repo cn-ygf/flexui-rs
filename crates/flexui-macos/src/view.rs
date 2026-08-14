@@ -1104,6 +1104,13 @@ impl FlexView {
         Some(f(w))
     }
 
+    /// IME 直接修改控件状态时，同步延后光标闪烁。
+    fn reset_focused_caret_blink(&self) {
+        let mut st = self.ivars().state.borrow_mut();
+        let AppState { root, disp, .. } = &mut *st;
+        disp.reset_caret_blink(root.as_mut());
+    }
+
     /// IME 提交：清组合串并逐字符发 Char（回车转 ENTER）。
     fn ime_insert(&self, text: &str) {
         self.with_focused_widget(|w| {
@@ -1127,6 +1134,7 @@ impl FlexView {
             w.set_marked_text(text.to_string());
             w.base().rect
         }) {
+            self.reset_focused_caret_blink();
             self.setNeedsDisplayInRect(to_nsrect(r));
         }
     }
@@ -1137,6 +1145,7 @@ impl FlexView {
             w.clear_marked_text();
             w.base().rect
         }) {
+            self.reset_focused_caret_blink();
             self.setNeedsDisplayInRect(to_nsrect(r));
         }
     }

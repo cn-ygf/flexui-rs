@@ -30,11 +30,12 @@ use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::Ime::{
-    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT,
-    COMPOSITIONFORM, GCS_COMPSTR, GCS_RESULTSTR,
+    ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCandidateWindow,
+    ImmSetCompositionWindow, CANDIDATEFORM, CFS_EXCLUDE, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR,
+    GCS_RESULTSTR,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetKeyState, VK_CONTROL, VK_SHIFT,
+    EnableWindow, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_SHIFT,
 };
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -703,8 +704,12 @@ unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
     if let Some(r) = with_focus_widget(state, move |w| {
         w.set_marked_text(owned);
     }) {
+        let st = &mut *state;
+        st.disp.reset_caret_blink(st.root.as_mut());
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
+        // 候选窗位置依赖 paint_content 刷新的 caret_rect，必须先同步提交当前组合串。
+        UpdateWindow(hwnd);
     }
 }
 
@@ -713,6 +718,8 @@ unsafe fn clear_marked_on_focus(hwnd: HWND, state: *mut AppState) {
     if let Some(r) = with_focus_widget(state, |w| {
         w.clear_marked_text();
     }) {
+        let st = &mut *state;
+        st.disp.reset_caret_blink(st.root.as_mut());
         let rc = to_physical_rect(hwnd, r);
         InvalidateRect(hwnd, &rc, 0);
     }
@@ -728,6 +735,7 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
         return;
     };
+    let edit_rect = w.base().rect;
     let r = w.text_input_rect().unwrap_or(w.base().rect);
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
@@ -749,6 +757,18 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
         },
     };
     ImmSetCompositionWindow(himc, &form);
+    let candidate = CANDIDATEFORM {
+        dwIndex: 0,
+        dwStyle: CFS_EXCLUDE,
+        ptCurrentPos: form.ptCurrentPos,
+        rcArea: RECT {
+            left: (edit_rect.left() * scale).floor() as i32,
+            top: (edit_rect.top() * scale).floor() as i32,
+            right: (edit_rect.right() * scale).ceil() as i32,
+            bottom: (edit_rect.bottom() * scale).ceil() as i32,
+        },
+    };
+    ImmSetCandidateWindow(himc, &candidate);
     ImmReleaseContext(hwnd, himc);
 }
 
@@ -893,6 +913,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_LBUTTONDOWN => {
+            SetFocus(hwnd);
+            SetCapture(hwnd);
             dispatch(
                 hwnd,
                 state,
@@ -912,11 +934,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     button: MouseButton::Left,
                 },
             );
+            ReleaseCapture();
             // 点击回调可能显示大面积弹层。同步提交本轮更新，避免 WM_PAINT 被后续鼠标消息推迟，
             // 造成用户需要再次点击才看到弹层的错觉。
             if invalidated {
                 UpdateWindow(hwnd);
             }
+            0
+        }
+        WM_CAPTURECHANGED | WM_CANCELMODE => {
+            // 系统抢走捕获（切窗、弹系统菜单等）时必须清掉框架内的 pressed/拖选状态。
+            dispatch(
+                hwnd,
+                state,
+                Event::MouseUp {
+                    pos: Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
+                    button: MouseButton::Left,
+                },
+            );
             0
         }
         // 方向/Home/End/Delete 等特殊键（不产生 WM_CHAR）→ 平台无关键码。

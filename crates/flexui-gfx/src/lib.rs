@@ -3,6 +3,11 @@
 //! 只定义「画什么」的接口 `Canvas` 与字体描述 `Font`，不含任何平台实现。
 //! macOS / Windows 后端各自实现 `Canvas`，上层控件面向本接口自绘，彻底与平台解耦。
 
+use std::any::Any;
+use std::fmt;
+use std::ops::Range;
+use std::rc::Rc;
+
 use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
 
 /// 图片来源：磁盘文件路径 / 内存位图字节 / SVG 字节。
@@ -154,6 +159,162 @@ impl Default for Font {
     }
 }
 
+/// 一行文字经过 shaping 后的字符边界。
+///
+/// `char_index` 使用 Unicode scalar value 索引，以保持现有控件代码 API 兼容；平台
+/// 后端负责在 UTF-8、UTF-16 与平台文字引擎索引之间转换。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextBoundary {
+    pub char_index: usize,
+    pub x: f32,
+}
+
+/// 平台文字引擎产生的一行排版结果。
+///
+/// `platform_data` 保存 CoreText/DirectWrite 的原生排版对象，确保绘制与光标、选区、
+/// 命中测试消费同一次 shaping 的结果。
+#[derive(Clone)]
+pub struct TextLayout {
+    text: String,
+    font: Font,
+    size: Size,
+    ascent: f32,
+    descent: f32,
+    boundaries: Vec<TextBoundary>,
+    platform_data: Option<Rc<dyn Any>>,
+}
+
+impl fmt::Debug for TextLayout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TextLayout")
+            .field("text", &self.text)
+            .field("font", &self.font)
+            .field("size", &self.size)
+            .field("ascent", &self.ascent)
+            .field("descent", &self.descent)
+            .field("boundaries", &self.boundaries)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TextLayout {
+    pub fn new(
+        text: impl Into<String>,
+        font: Font,
+        size: Size,
+        ascent: f32,
+        descent: f32,
+        boundaries: Vec<TextBoundary>,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            font,
+            size,
+            ascent,
+            descent,
+            boundaries,
+            platform_data: None,
+        }
+    }
+
+    /// 附加平台原生排版对象；仅对应平台 Canvas 会读取它。
+    pub fn with_platform_data(mut self, data: Rc<dyn Any>) -> Self {
+        self.platform_data = Some(data);
+        self
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn font(&self) -> &Font {
+        &self.font
+    }
+
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
+    pub fn width(&self) -> f32 {
+        self.size.width
+    }
+
+    pub fn height(&self) -> f32 {
+        self.size.height
+    }
+
+    pub fn ascent(&self) -> f32 {
+        self.ascent
+    }
+
+    pub fn descent(&self) -> f32 {
+        self.descent
+    }
+
+    pub fn char_count(&self) -> usize {
+        self.boundaries.len().saturating_sub(1)
+    }
+
+    pub fn boundaries(&self) -> &[TextBoundary] {
+        &self.boundaries
+    }
+
+    pub fn platform_data<T: Any>(&self) -> Option<&T> {
+        self.platform_data.as_deref()?.downcast_ref::<T>()
+    }
+
+    /// 返回字符边界的视觉 x 坐标。
+    pub fn x_for_char(&self, char_index: usize) -> f32 {
+        self.boundaries
+            .get(char_index.min(self.char_count()))
+            .map_or(0.0, |boundary| boundary.x)
+    }
+
+    /// 返回离指定 x 最近的字符边界。按所有视觉边界比较，可兼容 RTL 与混排。
+    pub fn closest_char_for_x(&self, x: f32) -> usize {
+        self.boundaries
+            .iter()
+            .min_by(|a, b| {
+                (a.x - x)
+                    .abs()
+                    .total_cmp(&(b.x - x).abs())
+                    .then_with(|| a.char_index.cmp(&b.char_index))
+            })
+            .map_or(0, |boundary| boundary.char_index)
+    }
+
+    /// 把逻辑选区拆成视觉矩形。双向文字可能返回多个不连续矩形。
+    pub fn selection_rects(&self, range: Range<usize>, y: f32, height: f32) -> Vec<Rect> {
+        let start = range.start.min(self.char_count());
+        let end = range.end.min(self.char_count());
+        if start >= end {
+            return Vec::new();
+        }
+
+        let mut spans = (start..end)
+            .map(|index| {
+                let a = self.x_for_char(index);
+                let b = self.x_for_char(index + 1);
+                (a.min(b), a.max(b))
+            })
+            .collect::<Vec<_>>();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (left, right) in spans {
+            if let Some(last) = merged.last_mut().filter(|last| left <= last.1 + 0.5) {
+                last.1 = last.1.max(right);
+            } else {
+                merged.push((left, right));
+            }
+        }
+        merged
+            .into_iter()
+            .map(|(left, right)| Rect::new(left, y, (right - left).max(1.0), height))
+            .collect()
+    }
+}
+
 /// 画布抽象：控件自绘时唯一面向的接口。
 ///
 /// 坐标一律使用「逻辑像素、左上原点、y 向下」；缩放(HiDPI)由后端处理。
@@ -194,9 +355,42 @@ pub trait Canvas {
     /// 度量一行文字的尺寸（用于布局）。
     fn measure_text(&self, text: &str, font: &Font) -> Size;
 
+    /// 测量与 `draw_text_advance` 相同排版方式下的文字尺寸。
+    fn measure_text_advance_size(&self, text: &str, font: &Font) -> Size {
+        self.measure_text(text, font)
+    }
+
     /// 测量文本排版前进宽度，供插入光标和选区使用。
     fn measure_text_advance(&self, text: &str, font: &Font) -> f32 {
-        self.measure_text(text, font).width
+        self.measure_text_advance_size(text, font).width
+    }
+
+    /// 使用平台成熟文字引擎对一行文字进行 shaping。
+    ///
+    /// 缺省实现只用于测试画布和第三方旧后端兼容；macOS/Windows 后端必须覆写。
+    fn layout_text(&self, text: &str, font: &Font) -> TextLayout {
+        let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
+        for index in 0..=text.chars().count() {
+            let prefix: String = text.chars().take(index).collect();
+            boundaries.push(TextBoundary {
+                char_index: index,
+                x: self.measure_text_advance(&prefix, font),
+            });
+        }
+        let size = self.measure_text_advance_size(text, font);
+        TextLayout::new(
+            text,
+            font.clone(),
+            size,
+            font.size,
+            (size.height - font.size).max(0.0),
+            boundaries,
+        )
+    }
+
+    /// 绘制已有排版结果。平台后端覆写后必须直接消费其中的原生排版对象。
+    fn draw_text_layout(&mut self, layout: &TextLayout, origin: Point, color: Color) {
+        self.draw_text_advance(layout.text(), origin, layout.font(), color);
     }
 
     /// 在矩形内绘制图片，支持换色 tint 与渲染方式 fit（缺省为空，后端覆写）。
@@ -227,7 +421,8 @@ pub trait Canvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{image_density_from_path, Font, ImageSource};
+    use super::{image_density_from_path, Font, ImageSource, TextBoundary, TextLayout};
+    use flexui_geometry::Size;
 
     #[test]
     fn font_样式构建() {
@@ -251,5 +446,62 @@ mod tests {
         assert_eq!(image_density_from_path("icon.png"), 1.0);
         assert_eq!(image_density_from_path("icon@badx.png"), 1.0);
         assert_eq!(ImageSource::path("icon@2.00x.png").density(), 2.0);
+    }
+
+    #[test]
+    fn 文字布局按视觉边界命中并拆分选区() {
+        let layout = TextLayout::new(
+            "abc",
+            Font::system(14.0),
+            Size::new(30.0, 18.0),
+            14.0,
+            4.0,
+            vec![
+                TextBoundary {
+                    char_index: 0,
+                    x: 0.0,
+                },
+                TextBoundary {
+                    char_index: 1,
+                    x: 10.0,
+                },
+                TextBoundary {
+                    char_index: 2,
+                    x: 20.0,
+                },
+                TextBoundary {
+                    char_index: 3,
+                    x: 30.0,
+                },
+            ],
+        );
+        assert_eq!(layout.closest_char_for_x(16.0), 2);
+        let rects = layout.selection_rects(1..3, 2.0, 18.0);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].size.width, 20.0);
+
+        let rtl = TextLayout::new(
+            "אב",
+            Font::system(14.0),
+            Size::new(20.0, 18.0),
+            14.0,
+            4.0,
+            vec![
+                TextBoundary {
+                    char_index: 0,
+                    x: 20.0,
+                },
+                TextBoundary {
+                    char_index: 1,
+                    x: 10.0,
+                },
+                TextBoundary {
+                    char_index: 2,
+                    x: 0.0,
+                },
+            ],
+        );
+        assert_eq!(rtl.closest_char_for_x(2.0), 2);
+        assert_eq!(rtl.selection_rects(0..2, 0.0, 18.0).len(), 1);
     }
 }

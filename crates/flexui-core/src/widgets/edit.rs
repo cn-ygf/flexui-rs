@@ -3,12 +3,12 @@
 use std::cell::Cell;
 
 use flexui_geometry::{Color, Point, Rect, Size};
-use flexui_gfx::{Canvas, TextAlign};
+use flexui_gfx::{Canvas, TextLayout};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::common_builders;
 use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
-use crate::paint::draw_aligned_text;
 use crate::style::{PlaceholderStyleSet, StyleSpec};
 use crate::theme::WidgetKind;
 use crate::widget::{
@@ -18,12 +18,14 @@ use crate::widget::{
 /// 选区高亮色（半透明蓝）。
 const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
 const PLACEHOLDER_COLOR: Color = Color::rgba(0.50, 0.50, 0.50, 1.0);
+const CARET_WIDTH: f32 = 1.0;
 
-/// 单行的字符边界缓存：start 为该行首字符在整段文本中的索引，offsets 为行内每个
-/// 字符边界的 x 偏移（累积前缀宽度，长度=行内字符数+1）。
+/// 逻辑行缓存；排版、绘制、光标与命中测试共用同一个平台文字布局。
 struct LineCache {
     start: usize,
-    offsets: Vec<f32>,
+    char_len: usize,
+    grapheme_boundaries: Vec<usize>,
+    layout: TextLayout,
 }
 
 /// Edit 的持久配置，不污染所有控件共享的 Base。
@@ -70,6 +72,10 @@ pub struct Edit {
     /// 按行的字符边界缓存，在 arrange 用真实测量算出，供 on_event 做 x/y→字符索引映射
     /// （否则 on_event 拿不到 Canvas）。单行时只有一项。
     lines: Vec<LineCache>,
+    /// 单行显示布局，包含插入到光标处的 IME marked text。
+    display_layout: Option<TextLayout>,
+    /// 占位文本布局；字体随当前视觉状态解析。
+    placeholder_layout: Option<TextLayout>,
     /// 行高（measure("Ag").height），arrange 时算出，供多行光标/命中定位。
     line_h: f32,
     /// 缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
@@ -87,6 +93,8 @@ impl Edit {
             config: EditConfig::default(),
             state: EditState::default(),
             lines: Vec::new(),
+            display_layout: None,
+            placeholder_layout: None,
             line_h: 0.0,
             cache_dirty: true,
             scroll_x: Cell::new(0.0),
@@ -162,6 +170,71 @@ impl Edit {
 
     fn char_count(&self) -> usize {
         self.base.text.chars().count()
+    }
+
+    fn char_to_byte(text: &str, char_index: usize) -> usize {
+        text.char_indices()
+            .nth(char_index)
+            .map_or(text.len(), |(byte, _)| byte)
+    }
+
+    fn byte_to_char(text: &str, byte_index: usize) -> usize {
+        text[..byte_index.min(text.len())].chars().count()
+    }
+
+    fn previous_grapheme_boundary(&self, char_index: usize) -> usize {
+        let byte_index = Self::char_to_byte(&self.base.text, char_index);
+        self.base
+            .text
+            .grapheme_indices(true)
+            .rev()
+            .find_map(|(byte, _)| {
+                (byte < byte_index).then_some(Self::byte_to_char(&self.base.text, byte))
+            })
+            .unwrap_or(0)
+    }
+
+    fn next_grapheme_boundary(&self, char_index: usize) -> usize {
+        let byte_index = Self::char_to_byte(&self.base.text, char_index);
+        self.base
+            .text
+            .grapheme_indices(true)
+            .find_map(|(byte, _)| {
+                (byte > byte_index).then_some(Self::byte_to_char(&self.base.text, byte))
+            })
+            .unwrap_or_else(|| self.char_count())
+    }
+
+    fn grapheme_char_boundaries(text: &str) -> Vec<usize> {
+        let mut boundaries = text
+            .grapheme_indices(true)
+            .map(|(byte, _)| Self::byte_to_char(text, byte))
+            .collect::<Vec<_>>();
+        let end = text.chars().count();
+        if boundaries.last().copied() != Some(end) {
+            boundaries.push(end);
+        }
+        boundaries
+    }
+
+    fn snap_to_grapheme_boundary(
+        raw_index: usize,
+        target_x: f32,
+        boundaries: &[usize],
+        x_for_char: impl Fn(usize) -> f32,
+    ) -> usize {
+        match boundaries.binary_search(&raw_index) {
+            Ok(index) => boundaries[index],
+            Err(index) => {
+                let before = boundaries[index.saturating_sub(1)];
+                let after = boundaries.get(index).copied().unwrap_or(before);
+                if (x_for_char(before) - target_x).abs() <= (x_for_char(after) - target_x).abs() {
+                    before
+                } else {
+                    after
+                }
+            }
+        }
     }
 
     fn normalize_text(&mut self) {
@@ -275,8 +348,8 @@ impl Edit {
         if self.state.cursor == 0 {
             return;
         }
-        let idx = self.state.cursor - 1;
-        self.delete_range(idx, idx + 1);
+        let idx = self.previous_grapheme_boundary(self.state.cursor);
+        self.delete_range(idx, self.state.cursor);
     }
 
     /// Delete：有选区删选区，否则删光标处字符。
@@ -289,26 +362,20 @@ impl Edit {
             return;
         }
         let idx = self.state.cursor;
-        self.delete_range(idx, idx + 1);
+        self.delete_range(idx, self.next_grapheme_boundary(idx));
     }
 
-    /// 行内本地 x → 最近字符边界列号（0..=行长）。缓存过期回退等宽估算。
+    /// 行内本地 x → 最近 grapheme 边界列号（0..=行长）。
     fn col_at(&self, li: usize, local_x: f32) -> usize {
         let est = |x: f32| ((x / (self.base.font.size * 0.6).max(1.0)).round().max(0.0)) as usize;
         if self.cache_dirty || li >= self.lines.len() {
             return est(local_x);
         }
-        let offs = &self.lines[li].offsets;
-        let mut best = 0;
-        let mut best_d = f32::INFINITY;
-        for (i, &x) in offs.iter().enumerate() {
-            let d = (x - local_x).abs();
-            if d < best_d {
-                best_d = d;
-                best = i;
-            }
-        }
-        best
+        let line = &self.lines[li];
+        let raw = line.layout.closest_char_for_x(local_x);
+        Self::snap_to_grapheme_boundary(raw, local_x, &line.grapheme_boundaries, |index| {
+            line.layout.x_for_char(index)
+        })
     }
 
     /// 当前行高（未布局时回退字号）。
@@ -329,6 +396,42 @@ impl Edit {
             } else {
                 self.scroll_x.get()
             };
+        if !self.config.multiline && !self.cache_dirty {
+            if let Some(layout) = &self.display_layout {
+                let display_index = layout.closest_char_for_x(local_x);
+                let marked_len = self.state.marked.chars().count();
+                let raw_index = if display_index <= self.state.cursor {
+                    display_index
+                } else if display_index <= self.state.cursor + marked_len {
+                    self.state.cursor
+                } else {
+                    display_index.saturating_sub(marked_len)
+                };
+                let Some(line) = self.lines.first() else {
+                    return raw_index.min(self.char_count());
+                };
+                return Self::snap_to_grapheme_boundary(
+                    raw_index.min(self.char_count()),
+                    local_x,
+                    &line.grapheme_boundaries,
+                    |index| {
+                        if index < self.state.cursor {
+                            layout.x_for_char(index)
+                        } else if index > self.state.cursor {
+                            layout.x_for_char(index + marked_len)
+                        } else {
+                            let before = layout.x_for_char(index);
+                            let after = layout.x_for_char(index + marked_len);
+                            if (before - local_x).abs() <= (after - local_x).abs() {
+                                before
+                            } else {
+                                after
+                            }
+                        }
+                    },
+                );
+            }
+        }
         if self.lines.is_empty() {
             let cw = (self.base.font.size * 0.6).max(1.0);
             return ((local_x / cw).round().max(0.0) as usize).min(self.char_count());
@@ -339,22 +442,19 @@ impl Edit {
         } else {
             0
         };
-        let col = self
-            .col_at(li, local_x)
-            .min(self.lines[li].offsets.len().saturating_sub(1));
+        let col = self.col_at(li, local_x).min(self.lines[li].char_len);
         self.lines[li].start + col
     }
 
     /// 字符索引 → (行号, 列号)。缓存缺失时回退 (0, idx)。
     fn pos_of(&self, idx: usize) -> (usize, usize) {
         for (i, l) in self.lines.iter().enumerate() {
-            let len = l.offsets.len().saturating_sub(1);
-            if idx <= l.start + len {
+            if idx <= l.start + l.char_len {
                 return (i, idx - l.start);
             }
         }
         match self.lines.last() {
-            Some(l) => (self.lines.len() - 1, l.offsets.len().saturating_sub(1)),
+            Some(l) => (self.lines.len() - 1, l.char_len),
             None => (0, idx),
         }
     }
@@ -366,8 +466,16 @@ impl Edit {
         }
         let (line, col) = self.pos_of(self.state.cursor);
         let target = (line as i32 + dir).clamp(0, self.lines.len() as i32 - 1) as usize;
-        let tlen = self.lines[target].offsets.len().saturating_sub(1);
-        let nidx = self.lines[target].start + col.min(tlen);
+        let x = self.lines[line].layout.x_for_char(col);
+        let target_line = &self.lines[target];
+        let raw_target_col = target_line.layout.closest_char_for_x(x);
+        let target_col = Self::snap_to_grapheme_boundary(
+            raw_target_col,
+            x,
+            &target_line.grapheme_boundaries,
+            |index| target_line.layout.x_for_char(index),
+        );
+        let nidx = self.lines[target].start + target_col.min(self.lines[target].char_len);
         self.set_cursor(nidx, extend);
     }
 
@@ -403,73 +511,79 @@ impl Edit {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
         let line_h = self.line_height();
-        let caret_h = self.base.font.size;
+        let caret_h = line_h.max(self.base.font.size);
         if self.shows_placeholder() {
             let style = self
                 .config
                 .placeholder_style
                 .resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
-            let line_rect = Rect::new(content.left(), content.top(), content.size.width, line_h);
-            draw_aligned_text(
+            let generated;
+            let placeholder =
+                match self.placeholder_layout.as_ref().filter(|layout| {
+                    layout.text() == self.config.placeholder && layout.font() == &font
+                }) {
+                    Some(layout) => layout,
+                    None => {
+                        generated = cv.layout_text(&self.config.placeholder, &font);
+                        &generated
+                    }
+                };
+            cv.save();
+            cv.clip_rect(self.text_clip_rect(content));
+            Self::draw_input_layout(
                 cv,
-                &self.config.placeholder,
-                line_rect,
-                &font,
+                placeholder,
+                Rect::new(content.left(), content.top(), content.size.width, line_h),
                 style
                     .fg_color
                     .or_else(|| self.base.resolved_style().placeholder_color)
                     .unwrap_or(PLACEHOLDER_COLOR),
-                TextAlign::Left,
-                false,
             );
             if self.base.focused && self.base.caret_on {
                 let y = content.top() + (line_h - caret_h) / 2.0;
-                cv.fill_rect(Rect::new(content.left(), y, 1.5, caret_h), color);
+                cv.fill_rect(Rect::new(content.left(), y, CARET_WIDTH, caret_h), color);
             }
+            cv.restore();
             return;
         }
         let sel = self.sel_range();
         let (cur_line, cur_col) = self.pos_of(self.state.cursor);
 
         let mut y = content.top();
-        let mut base_idx = 0usize; // 行首字符索引
-        for (i, line) in self.base.text.split('\n').enumerate() {
-            let ll = line.chars().count();
-            // 选区在本行的交集 [s,e)。
+        for (i, line) in self.lines.iter().enumerate() {
             if let Some((lo, hi)) = sel {
-                let (ls, le) = (base_idx, base_idx + ll);
+                let (ls, le) = (line.start, line.start + line.char_len);
                 let s = lo.max(ls);
                 let e = hi.min(le);
                 if s < e {
-                    let pre = self.display_slice(&line.chars().take(s - ls).collect::<String>());
-                    let mid = self
-                        .display_slice(&line.chars().skip(s - ls).take(e - s).collect::<String>());
-                    let x0 = content.left() + cv.measure_text_advance(&pre, &self.base.font);
-                    let w = cv.measure_text_advance(&mid, &self.base.font);
-                    cv.fill_rect(Rect::new(x0, y, w.max(1.0), line_h), SEL_COLOR);
+                    for rect in line.layout.selection_rects(s - ls..e - ls, y, line_h) {
+                        cv.fill_rect(
+                            Rect::new(
+                                content.left() + rect.left(),
+                                rect.top(),
+                                rect.size.width,
+                                rect.size.height,
+                            ),
+                            SEL_COLOR,
+                        );
+                    }
                 }
             }
-            // 文字。
-            let line_rect = Rect::new(content.left(), y, content.size.width, line_h);
-            Self::draw_input_text(
+            Self::draw_input_layout(
                 cv,
-                &self.display_slice(line),
-                line_rect,
-                &self.base.font,
+                &line.layout,
+                Rect::new(content.left(), y, content.size.width, line_h),
                 color,
             );
-            // 光标（仅当前行）。
             if self.base.focused && self.base.caret_on && i == cur_line {
-                let pre = self.display_slice(&line.chars().take(cur_col).collect::<String>());
-                let cx = content.left() + cv.measure_text_advance(&pre, &self.base.font) + 1.0;
+                let cx = content.left() + line.layout.x_for_char(cur_col) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
-                let caret = Rect::new(cx, cyc.max(y), 1.5, caret_h);
+                let caret = Rect::new(cx, cyc.max(y), CARET_WIDTH, caret_h);
                 self.caret_rect.set(Some(caret));
                 cv.fill_rect(caret, color);
             }
             y += line_h;
-            base_idx += ll + 1;
         }
     }
 
@@ -479,25 +593,20 @@ impl Edit {
             && !self.config.placeholder.is_empty()
     }
 
-    /// 输入文本使用与字符前进宽度相同的排版方式，确保光标紧贴字符边界。
-    fn draw_input_text(
-        cv: &mut dyn Canvas,
-        text: &str,
-        rect: Rect,
-        font: &flexui_gfx::Font,
-        color: Color,
-    ) {
-        if text.is_empty() {
+    /// 输入文本直接绘制 shaping 结果，确保像素与交互边界来自同一次排版。
+    fn draw_input_layout(cv: &mut dyn Canvas, layout: &TextLayout, rect: Rect, color: Color) {
+        if layout.text().is_empty() {
             return;
         }
-        let height = cv.measure_text(text, font).height;
-        let y = rect.top() + (rect.size.height - height) / 2.0;
-        cv.draw_text_advance(
-            text,
-            Point::new(rect.left(), y.max(rect.top())),
-            font,
+        cv.draw_text_layout(
+            layout,
+            Point::new(rect.left(), Self::layout_y(layout, rect)),
             color,
         );
+    }
+
+    fn layout_y(layout: &TextLayout, rect: Rect) -> f32 {
+        (rect.top() + (rect.size.height - layout.height()) / 2.0).max(rect.top())
     }
 
     fn update_single_line_scroll(&self, caret: f32, total: f32, content: Rect) {
@@ -515,6 +624,16 @@ impl Edit {
         self.scroll_x
             .set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
     }
+
+    /// 横向严格裁到内容区；纵向保留控件 padding，避免字体抗锯齿下沿被切掉。
+    fn text_clip_rect(&self, content: Rect) -> Rect {
+        Rect::new(
+            content.left(),
+            self.base.rect.top(),
+            content.size.width,
+            self.base.rect.size.height,
+        )
+    }
 }
 
 impl Default for Edit {
@@ -531,7 +650,7 @@ impl Widget for Edit {
         &mut self.base
     }
     fn measure(&mut self, _avail: Size, cv: &dyn Canvas) -> Size {
-        let s = cv.measure_text("Ag", &self.base.font);
+        let s = cv.layout_text("Ag", &self.base.font).size();
         if self.config.multiline {
             let rows = self.base.text.split('\n').count().max(1) as f32;
             layout::size_from_content(&self.base, 120.0, rows * s.height + 8.0)
@@ -541,56 +660,88 @@ impl Widget for Edit {
     }
     fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
         layout::arrange_stack(&mut self.base, content, cv);
-        // 按行缓存字符边界 x 偏移（累积前缀 → CJK/kerning 正确），供 x/y→索引映射。
         let text = self.base.text.clone();
         let mut lines = Vec::new();
         let mut start = 0usize;
         for line in text.split('\n') {
             let n = line.chars().count();
             let display_line = self.display_slice(line);
-            let mut offs = Vec::with_capacity(n + 1);
-            for i in 0..=n {
-                let pre: String = display_line.chars().take(i).collect();
-                offs.push(cv.measure_text_advance(&pre, &self.base.font));
-            }
             lines.push(LineCache {
                 start,
-                offsets: offs,
+                char_len: n,
+                grapheme_boundaries: Self::grapheme_char_boundaries(line),
+                layout: cv.layout_text(&display_line, &self.base.font),
             });
             start += n + 1; // +1 跳过换行符
         }
         self.lines = lines;
-        self.line_h = cv.measure_text("Ag", &self.base.font).height;
+        self.line_h = cv.layout_text("Ag", &self.base.font).height();
+
+        let before = self
+            .base
+            .text
+            .chars()
+            .take(self.state.cursor)
+            .collect::<String>();
+        let after = self
+            .base
+            .text
+            .chars()
+            .skip(self.state.cursor)
+            .collect::<String>();
+        let display = format!(
+            "{}{}{}",
+            self.display_slice(&before),
+            self.display_slice(&self.state.marked),
+            self.display_slice(&after)
+        );
+        self.display_layout = Some(cv.layout_text(&display, &self.base.font));
+        let placeholder_style = self
+            .config
+            .placeholder_style
+            .resolve(self.base.visual_state());
+        let placeholder_font = placeholder_style.resolve_font(&self.base.font);
+        self.placeholder_layout = (!self.config.placeholder.is_empty())
+            .then(|| cv.layout_text(&self.config.placeholder, &placeholder_font));
         self.cache_dirty = false;
         let content = layout::content_rect(&self.base);
         let (line, col) = self.pos_of(self.state.cursor);
         let x = self
             .lines
             .get(line)
-            .and_then(|l| l.offsets.get(col))
-            .copied()
+            .map(|line| line.layout.x_for_char(col))
             .unwrap_or(0.0);
         if self.config.multiline {
             self.caret_rect.set(Some(Rect::new(
                 content.left() + x + 1.0,
                 content.top() + line as f32 * self.line_h,
-                1.5,
+                CARET_WIDTH,
                 self.base.font.size,
             )));
         } else {
             let total = self
-                .lines
-                .first()
-                .and_then(|l| l.offsets.last())
-                .copied()
+                .display_layout
+                .as_ref()
+                .map(TextLayout::width)
                 .unwrap_or(0.0);
-            self.update_single_line_scroll(x, total, content);
-            let y = content.top() + (content.size.height - self.base.font.size) / 2.0;
+            let display_cursor = self.state.cursor + self.state.marked.chars().count();
+            let display_x = self
+                .display_layout
+                .as_ref()
+                .map(|layout| layout.x_for_char(display_cursor))
+                .unwrap_or(x);
+            self.update_single_line_scroll(display_x, total, content);
+            let caret_h = self
+                .display_layout
+                .as_ref()
+                .map(TextLayout::height)
+                .unwrap_or(self.line_h.max(self.base.font.size));
+            let y = (content.top() + (content.size.height - caret_h) / 2.0).max(content.top());
             self.caret_rect.set(Some(Rect::new(
-                content.left() - self.scroll_x.get() + x + 1.0,
-                y.max(content.top()),
-                1.5,
-                self.base.font.size,
+                content.left() - self.scroll_x.get() + display_x + 1.0,
+                y,
+                CARET_WIDTH,
+                caret_h,
             )));
         }
     }
@@ -601,39 +752,46 @@ impl Widget for Edit {
         }
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
-        let caret_h = self.base.font.size;
-        let cy = content.top() + (content.size.height - caret_h) / 2.0;
         if self.shows_placeholder() {
             self.scroll_x.set(0.0);
-            self.caret_rect.set(Some(Rect::new(
-                content.left(),
-                cy.max(content.top()),
-                1.5,
-                caret_h,
-            )));
             let style = self
                 .config
                 .placeholder_style
                 .resolve(self.base.visual_state());
             let font = style.resolve_font(&self.base.font);
-            draw_aligned_text(
+            let generated;
+            let placeholder =
+                match self.placeholder_layout.as_ref().filter(|layout| {
+                    layout.text() == self.config.placeholder && layout.font() == &font
+                }) {
+                    Some(layout) => layout,
+                    None => {
+                        generated = cv.layout_text(&self.config.placeholder, &font);
+                        &generated
+                    }
+                };
+            let line_h = placeholder.height();
+            let line_y = Self::layout_y(placeholder, content);
+            self.caret_rect
+                .set(Some(Rect::new(content.left(), line_y, CARET_WIDTH, line_h)));
+            cv.save();
+            cv.clip_rect(self.text_clip_rect(content));
+            Self::draw_input_layout(
                 cv,
-                &self.config.placeholder,
+                placeholder,
                 content,
-                &font,
                 style
                     .fg_color
                     .or_else(|| self.base.resolved_style().placeholder_color)
                     .unwrap_or(PLACEHOLDER_COLOR),
-                TextAlign::Left,
-                false,
             );
             if self.base.focused && self.base.caret_on {
                 cv.fill_rect(
-                    Rect::new(content.left(), cy.max(content.top()), 1.5, caret_h),
+                    Rect::new(content.left(), line_y, CARET_WIDTH, line_h),
                     color,
                 );
             }
+            cv.restore();
             return;
         }
         let before: String = self.base.text.chars().take(self.state.cursor).collect();
@@ -642,32 +800,42 @@ impl Widget for Edit {
         let display_after = self.display_slice(&after);
         let display_marked = self.display_slice(&self.state.marked);
         let display = format!("{display_before}{display_marked}{display_after}");
-        let before_w = cv.measure_text_advance(&display_before, &self.base.font);
-        let marked_w = cv.measure_text_advance(&display_marked, &self.base.font);
-        let total_w = cv.measure_text_advance(&display, &self.base.font);
-        self.update_single_line_scroll(before_w + marked_w, total_w, content);
+        let generated;
+        let text_layout = match self
+            .display_layout
+            .as_ref()
+            .filter(|layout| layout.text() == display && layout.font() == &self.base.font)
+        {
+            Some(layout) => layout,
+            None => {
+                generated = cv.layout_text(&display, &self.base.font);
+                &generated
+            }
+        };
+        let marked_chars = display_marked.chars().count();
+        let before_w = text_layout.x_for_char(self.state.cursor);
+        let marked_end_w = text_layout.x_for_char(self.state.cursor + marked_chars);
+        let total_w = text_layout.width();
+        let line_h = text_layout.height();
+        let line_y = Self::layout_y(text_layout, content);
+        self.update_single_line_scroll(marked_end_w, total_w, content);
         let origin_x = content.left() - self.scroll_x.get();
         cv.save();
-        cv.clip_rect(content);
+        cv.clip_rect(self.text_clip_rect(content));
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
         if self.state.marked.is_empty() {
             if let Some((lo, hi)) = self.sel_range() {
-                let pre = self.display_slice(&self.base.text.chars().take(lo).collect::<String>());
-                let sel = self.display_slice(
-                    &self
-                        .base
-                        .text
-                        .chars()
-                        .skip(lo)
-                        .take(hi - lo)
-                        .collect::<String>(),
-                );
-                let x0 = origin_x + cv.measure_text_advance(&pre, &self.base.font);
-                let w = cv.measure_text_advance(&sel, &self.base.font);
-                cv.fill_rect(
-                    Rect::new(x0, cy.max(content.top()), w.max(1.0), caret_h),
-                    SEL_COLOR,
-                );
+                for rect in text_layout.selection_rects(lo..hi, line_y, line_h) {
+                    cv.fill_rect(
+                        Rect::new(
+                            origin_x + rect.left(),
+                            rect.top(),
+                            rect.size.width,
+                            rect.size.height,
+                        ),
+                        SEL_COLOR,
+                    );
+                }
             }
         }
         // 显示串 = 光标前文本 + IME 组合串 + 光标后文本；组合串加下划线以示未提交。
@@ -677,23 +845,20 @@ impl Widget for Edit {
             total_w.max(content.size.width),
             content.size.height,
         );
-        Self::draw_input_text(cv, &display, text_rect, &self.base.font, color);
+        Self::draw_input_layout(cv, text_layout, text_rect, color);
 
         // 组合串下划线。
         if !self.state.marked.is_empty() {
-            let uy = (cy + caret_h - 1.0).min(content.bottom() - 1.0);
+            let uy = (line_y + line_h - 1.0).min(content.bottom() - 1.0);
+            let left = before_w.min(marked_end_w);
+            let right = before_w.max(marked_end_w);
             cv.fill_rect(
-                Rect::new(origin_x + before_w, uy, marked_w.max(1.0), 1.0),
+                Rect::new(origin_x + left, uy, (right - left).max(1.0), 1.0),
                 color,
             );
         }
-        // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与字号一致、垂直居中。
-        let caret = Rect::new(
-            origin_x + before_w + marked_w + 1.0,
-            cy.max(content.top()),
-            1.5,
-            caret_h,
-        );
+        // 仅在获得焦点且闪烁相位为亮时画光标；光标落在组合串之后；高度与排版行一致、垂直居中。
+        let caret = Rect::new(origin_x + marked_end_w + 1.0, line_y, CARET_WIDTH, line_h);
         self.caret_rect.set(Some(caret));
         if self.base.focused && self.base.caret_on {
             cv.fill_rect(caret, color);
@@ -754,10 +919,13 @@ impl Widget for Edit {
                             self.state.cursor = lo;
                             self.state.sel_anchor = None;
                         } else {
-                            self.set_cursor(self.state.cursor.saturating_sub(1), false);
+                            self.set_cursor(
+                                self.previous_grapheme_boundary(self.state.cursor),
+                                false,
+                            );
                         }
                     } else {
-                        self.set_cursor(self.state.cursor.saturating_sub(1), true);
+                        self.set_cursor(self.previous_grapheme_boundary(self.state.cursor), true);
                     }
                     EventFlow::Consumed
                 }
@@ -767,10 +935,10 @@ impl Widget for Edit {
                             self.state.cursor = hi;
                             self.state.sel_anchor = None;
                         } else {
-                            self.set_cursor(self.state.cursor + 1, false);
+                            self.set_cursor(self.next_grapheme_boundary(self.state.cursor), false);
                         }
                     } else {
-                        self.set_cursor(self.state.cursor + 1, true);
+                        self.set_cursor(self.next_grapheme_boundary(self.state.cursor), true);
                     }
                     EventFlow::Consumed
                 }
@@ -788,8 +956,7 @@ impl Widget for Edit {
                 keys::END => {
                     let target = if self.config.multiline && !self.lines.is_empty() {
                         let (line, _) = self.pos_of(self.state.cursor);
-                        let len = self.lines[line].offsets.len().saturating_sub(1);
-                        self.lines[line].start + len
+                        self.lines[line].start + self.lines[line].char_len
                     } else {
                         self.char_count()
                     };
@@ -845,9 +1012,18 @@ impl Widget for Edit {
 
     fn apply_property(&mut self, property: WidgetProperty) -> bool {
         match property {
-            WidgetProperty::Placeholder(v) => self.config.placeholder = v,
-            WidgetProperty::PlaceholderStyle(v) => self.config.placeholder_style = v,
-            WidgetProperty::Multiline(v) => self.config.multiline = v,
+            WidgetProperty::Placeholder(v) => {
+                self.config.placeholder = v;
+                self.cache_dirty = true;
+            }
+            WidgetProperty::PlaceholderStyle(v) => {
+                self.config.placeholder_style = v;
+                self.cache_dirty = true;
+            }
+            WidgetProperty::Multiline(v) => {
+                self.config.multiline = v;
+                self.cache_dirty = true;
+            }
             WidgetProperty::ReadOnly(v) => self.config.read_only = v,
             WidgetProperty::NumberOnly(v) => {
                 self.config.number_only = v;
@@ -924,6 +1100,7 @@ impl Widget for Edit {
             return false;
         }
         self.state.marked = text;
+        self.cache_dirty = true;
         true
     }
     fn clear_marked_text(&mut self) -> bool {
@@ -931,6 +1108,7 @@ impl Widget for Edit {
             false
         } else {
             self.state.marked.clear();
+            self.cache_dirty = true;
             true
         }
     }
@@ -953,9 +1131,13 @@ mod tests {
         last_text: RefCell<String>,
         last_font: RefCell<Option<Font>>,
         last_color: RefCell<Option<Color>>,
+        fills: Vec<(Rect, Color)>,
+        advance_draws: usize,
     }
     impl Canvas for RecCanvas {
-        fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+        fn fill_rect(&mut self, r: Rect, c: Color) {
+            self.fills.push((r, c));
+        }
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
         fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
@@ -963,6 +1145,10 @@ mod tests {
             *self.last_text.borrow_mut() = t.to_string();
             *self.last_font.borrow_mut() = Some(f.clone());
             *self.last_color.borrow_mut() = Some(c);
+        }
+        fn draw_text_advance(&mut self, t: &str, o: Point, f: &Font, c: Color) {
+            self.advance_draws += 1;
+            self.draw_text(t, o, f, c);
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
@@ -980,12 +1166,15 @@ mod tests {
             last_text: RefCell::new(String::new()),
             last_font: RefCell::new(None),
             last_color: RefCell::new(None),
+            fills: Vec::new(),
+            advance_draws: 0,
         };
         let mut cv = cv;
         layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let style = StyleSpec::default();
         e.paint_content(&mut cv, &style);
         assert_eq!(*cv.last_text.borrow(), "abc");
+        assert_eq!(cv.advance_draws, 1);
         assert_eq!(e.base().text, "ac", "组合串不改动已提交文本");
     }
 
@@ -994,6 +1183,8 @@ mod tests {
             last_text: RefCell::new(String::new()),
             last_font: RefCell::new(None),
             last_color: RefCell::new(None),
+            fills: Vec::new(),
+            advance_draws: 0,
         }
     }
 
@@ -1016,6 +1207,7 @@ mod tests {
         layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         edit.paint_content(&mut cv, &StyleSpec::default());
         assert_eq!(*cv.last_text.borrow(), "请输入");
+        assert_eq!(cv.advance_draws, 1, "占位文本必须使用输入文本排版路径");
         assert!(edit.base().text.is_empty(), "占位文本不能成为输入内容");
         edit.on_event(&Event::Char { ch: 'A' });
         edit.paint_content(&mut cv, &StyleSpec::default());
@@ -1023,6 +1215,30 @@ mod tests {
         edit.on_event(&kd(keys::BACKSPACE, false));
         edit.paint_content(&mut cv, &StyleSpec::default());
         assert_eq!(*cv.last_text.borrow(), "请输入");
+    }
+
+    #[test]
+    fn 单行选区和光标覆盖实际排版行高() {
+        let mut edit = Edit::new().text("fjord你好");
+        edit.select_all();
+        edit.base_mut().focused = true;
+        let mut cv = rec_canvas();
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        edit.paint_content(&mut cv, &StyleSpec::default());
+
+        let layout = edit.display_layout.as_ref().unwrap();
+        let selection = cv
+            .fills
+            .iter()
+            .find_map(|(rect, color)| (*color == SEL_COLOR).then_some(*rect))
+            .expect("必须绘制选区背景");
+        assert!((selection.size.height - layout.height()).abs() < 0.01);
+        assert!(
+            (selection.top() - Edit::layout_y(layout, layout::content_rect(edit.base()))).abs()
+                < 0.01
+        );
+        assert!((edit.text_input_rect().unwrap().size.height - layout.height()).abs() < 0.01);
+        assert_eq!(edit.text_input_rect().unwrap().size.width, CARET_WIDTH);
     }
 
     #[test]
@@ -1185,5 +1401,46 @@ mod tests {
         let caret = e.text_input_rect().unwrap();
         assert!(caret.left() >= content.left() && caret.right() <= content.right() + 2.0);
         assert!(e.hit_index(Point::new(content.right() - 1.0, content.top() + 2.0)) >= 8);
+    }
+
+    #[test]
+    fn 光标移动和删除遵守grapheme边界() {
+        let mut combining = Edit::new().text("a\u{301}b");
+        combining.on_event(&kd(keys::HOME, false));
+        combining.on_event(&kd(keys::RIGHT, false));
+        assert_eq!(combining.cursor(), 2, "组合音标必须与基础字符一起移动");
+        combining.on_event(&kd(keys::BACKSPACE, false));
+        assert_eq!(combining.base().text, "b");
+
+        let family = "👨‍👩‍👧‍👦";
+        let mut emoji = Edit::new().text(format!("{family}x"));
+        emoji.on_event(&kd(keys::HOME, false));
+        emoji.on_event(&kd(keys::RIGHT, false));
+        assert_eq!(
+            emoji.cursor(),
+            family.chars().count(),
+            "ZWJ emoji 必须整体移动"
+        );
+        emoji.on_event(&kd(keys::DELETE, false));
+        assert_eq!(emoji.base().text, family, "Delete 只删除下一个 grapheme");
+    }
+
+    #[test]
+    fn 鼠标命中不会停在grapheme内部() {
+        let boundaries = Edit::grapheme_char_boundaries("a\u{301}b");
+        assert_eq!(boundaries, vec![0, 2, 3]);
+        assert_eq!(
+            Edit::snap_to_grapheme_boundary(1, 16.0, &boundaries, |index| index as f32 * 10.0),
+            2
+        );
+
+        let family = "👨‍👩‍👧‍👦";
+        let boundaries = Edit::grapheme_char_boundaries(&format!("{family}x"));
+        let family_end = family.chars().count();
+        assert_eq!(boundaries, vec![0, family_end, family_end + 1]);
+        assert_eq!(
+            Edit::snap_to_grapheme_boundary(3, 65.0, &boundaries, |index| index as f32 * 10.0),
+            family_end
+        );
     }
 }

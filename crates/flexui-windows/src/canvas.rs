@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use flexui_geometry::{Color, Corners, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
+use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextLayout};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;
 
@@ -24,6 +24,8 @@ const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
 pub struct GdiCanvas<'a> {
     g: *mut gp::GpGraphics,
     saved: Vec<u32>,
+    saved_clips: Vec<Option<Rect>>,
+    clip: Option<Rect>,
     dpi_scale: f32,
     image_cache: Option<&'a mut ImageCache>,
 }
@@ -40,6 +42,8 @@ impl GdiCanvas<'_> {
         Self {
             g,
             saved: Vec::new(),
+            saved_clips: Vec::new(),
+            clip: None,
             dpi_scale: 1.0,
             image_cache: None,
         }
@@ -74,6 +78,31 @@ impl GdiCanvas<'_> {
                 )
             };
         }
+    }
+
+    /// 让圆角描边的外沿保持原半径，中心路径半径随向内收缩量同步减小。
+    fn aligned_stroke(
+        &self,
+        rect: Rect,
+        radius: Corners,
+        line_width: f32,
+    ) -> Option<(Rect, Corners, f32)> {
+        let (path, aligned_width) = pixel_aligned_stroke(rect, line_width, self.dpi_scale)?;
+        let physical_width = aligned_width * self.dpi_scale;
+        let align_radius = |value: f32| {
+            ((value.max(0.0) * self.dpi_scale).round() - physical_width / 2.0).max(0.0)
+                / self.dpi_scale
+        };
+        Some((
+            path,
+            Corners {
+                tl: align_radius(radius.tl),
+                tr: align_radius(radius.tr),
+                br: align_radius(radius.br),
+                bl: align_radius(radius.bl),
+            },
+            aligned_width,
+        ))
     }
 }
 
@@ -502,16 +531,20 @@ impl Canvas for GdiCanvas<'_> {
     }
 
     fn stroke_rect(&mut self, rect: Rect, color: Color, line_width: f32) {
+        let Some((path, _, line_width)) = self.aligned_stroke(rect, Corners::default(), line_width)
+        else {
+            return;
+        };
         unsafe {
             let mut pen: *mut gp::GpPen = std::ptr::null_mut();
             gp::GdipCreatePen1(argb(color), line_width, UNIT_PIXEL, &mut pen);
-            gp::GdipDrawRectangleI(
+            gp::GdipDrawRectangle(
                 self.g,
                 pen,
-                ri(rect.left()),
-                ri(rect.top()),
-                ri(rect.size.width),
-                ri(rect.size.height),
+                path.left(),
+                path.top(),
+                path.size.width,
+                path.size.height,
             );
             gp::GdipDeletePen(pen);
         }
@@ -578,8 +611,13 @@ impl Canvas for GdiCanvas<'_> {
     }
 
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
+        let Some((path_rect, path_radius, line_width)) =
+            self.aligned_stroke(rect, radius, line_width)
+        else {
+            return;
+        };
         unsafe {
-            let path = self.build_round_path(rect, radius);
+            let path = self.build_round_path(path_rect, path_radius);
             let mut pen: *mut gp::GpPen = std::ptr::null_mut();
             gp::GdipCreatePen1(argb(color), line_width, UNIT_PIXEL, &mut pen);
             gp::GdipDrawPath(self.g, pen, path);
@@ -651,7 +689,9 @@ impl Canvas for GdiCanvas<'_> {
                 gp::GdipGetStringFormatFlags(format, &mut flags);
                 gp::GdipSetStringFormatFlags(
                     format,
-                    flags | gp::StringFormatFlagsMeasureTrailingSpaces,
+                    flags
+                        | gp::StringFormatFlagsMeasureTrailingSpaces
+                        | gp::StringFormatFlagsNoWrap,
                 );
             }
             let wtext = wide(text);
@@ -712,9 +752,9 @@ impl Canvas for GdiCanvas<'_> {
         }
     }
 
-    fn measure_text_advance(&self, text: &str, font: &Font) -> f32 {
+    fn measure_text_advance_size(&self, text: &str, font: &Font) -> Size {
         if text.is_empty() {
-            return 0.0;
+            return Size::default();
         }
         unsafe {
             let (f, family) = self.make_font(font);
@@ -722,7 +762,7 @@ impl Canvas for GdiCanvas<'_> {
                 if !family.is_null() {
                     gp::GdipDeleteFontFamily(family);
                 }
-                return 0.0;
+                return Size::new(0.0, font.size * 1.2);
             }
             let layout = gp::RectF {
                 X: 0.0,
@@ -743,7 +783,9 @@ impl Canvas for GdiCanvas<'_> {
                 gp::GdipGetStringFormatFlags(format, &mut flags);
                 gp::GdipSetStringFormatFlags(
                     format,
-                    flags | gp::StringFormatFlagsMeasureTrailingSpaces,
+                    flags
+                        | gp::StringFormatFlagsMeasureTrailingSpaces
+                        | gp::StringFormatFlagsNoWrap,
                 );
             }
             let wtext = wide(text);
@@ -763,8 +805,50 @@ impl Canvas for GdiCanvas<'_> {
             }
             gp::GdipDeleteFont(f);
             gp::GdipDeleteFontFamily(family);
-            bbox.Width
+            Size::new(bbox.Width, bbox.Height)
         }
+    }
+
+    fn layout_text(&self, text: &str, font: &Font) -> TextLayout {
+        crate::text::layout_text(text, font).unwrap_or_else(|| {
+            let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
+            for index in 0..=text.chars().count() {
+                let prefix = text.chars().take(index).collect::<String>();
+                boundaries.push(flexui_gfx::TextBoundary {
+                    char_index: index,
+                    x: self.measure_text_advance(&prefix, font),
+                });
+            }
+            let size = self.measure_text_advance_size(text, font);
+            TextLayout::new(
+                text,
+                font.clone(),
+                size,
+                font.size,
+                (size.height - font.size).max(0.0),
+                boundaries,
+            )
+        })
+    }
+
+    fn draw_text_layout(&mut self, layout: &TextLayout, origin: Point, color: Color) {
+        if unsafe {
+            crate::text::draw_text_layout(self.g, self.dpi_scale, self.clip, layout, origin, color)
+        } {
+            if layout.font().underline {
+                self.fill_rect(
+                    Rect::new(
+                        origin.x,
+                        origin.y + layout.ascent() + layout.descent() - 1.0,
+                        layout.width(),
+                        1.0,
+                    ),
+                    color,
+                );
+            }
+            return;
+        }
+        self.draw_text_advance(layout.text(), origin, layout.font(), color);
     }
 
     fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
@@ -785,15 +869,21 @@ impl Canvas for GdiCanvas<'_> {
         let mut state: u32 = 0;
         unsafe { gp::GdipSaveGraphics(self.g, &mut state) };
         self.saved.push(state);
+        self.saved_clips.push(self.clip);
     }
 
     fn restore(&mut self) {
         if let Some(state) = self.saved.pop() {
             unsafe { gp::GdipRestoreGraphics(self.g, state) };
+            self.clip = self.saved_clips.pop().flatten();
         }
     }
 
     fn clip_rect(&mut self, rect: Rect) {
+        self.clip = Some(match self.clip {
+            Some(current) => intersect_rect(current, rect),
+            None => rect,
+        });
         unsafe {
             gp::GdipSetClipRect(
                 self.g,
@@ -807,10 +897,110 @@ impl Canvas for GdiCanvas<'_> {
     }
 
     fn clip_round_rect(&mut self, rect: Rect, radius: Corners) {
+        self.clip = Some(match self.clip {
+            Some(current) => intersect_rect(current, rect),
+            None => rect,
+        });
         unsafe {
             let path = self.build_round_path(rect, radius);
             gp::GdipSetClipPath(self.g, path, COMBINE_INTERSECT);
             gp::GdipDeletePath(path);
         }
+    }
+}
+
+fn intersect_rect(a: Rect, b: Rect) -> Rect {
+    let left = a.left().max(b.left());
+    let top = a.top().max(b.top());
+    let right = a.right().min(b.right()).max(left);
+    let bottom = a.bottom().min(b.bottom()).max(top);
+    Rect::new(left, top, right - left, bottom - top)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Gdiplus, OffscreenBitmap};
+
+    #[test]
+    fn 嵌套裁剪取矩形交集() {
+        assert_eq!(
+            intersect_rect(
+                Rect::new(10.0, 10.0, 40.0, 30.0),
+                Rect::new(20.0, 5.0, 40.0, 20.0),
+            ),
+            Rect::new(20.0, 10.0, 30.0, 15.0)
+        );
+        assert_eq!(
+            intersect_rect(
+                Rect::new(0.0, 0.0, 10.0, 10.0),
+                Rect::new(20.0, 20.0, 5.0, 5.0),
+            ),
+            Rect::new(20.0, 20.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn directwrite文字写回后保持不透明() {
+        let _gdiplus = Gdiplus::startup().expect("GDI+ 初始化失败");
+        let bitmap = OffscreenBitmap::new(120, 48).expect("创建离屏位图失败");
+        let mut canvas = GdiCanvas::new(bitmap.graphics());
+        canvas.clear(Color::WHITE);
+        let layout = canvas.layout_text("FlexUI 你好", &Font::system(18.0));
+        canvas.draw_text_layout(&layout, Point::new(6.0, 6.0), Color::BLACK);
+        drop(canvas);
+
+        let mut pixels = Vec::new();
+        for y in 0..48 {
+            for x in 0..120 {
+                let pixel = bitmap.get_pixel(x, y);
+                if pixel != 0xffff_ffff {
+                    pixels.push(pixel);
+                }
+            }
+        }
+        assert!(!pixels.is_empty(), "DirectWrite 必须产生可见文字像素");
+        assert!(
+            pixels.iter().all(|pixel| pixel >> 24 == 0xff),
+            "写回 GDI+ 后备位图时不能丢失 alpha"
+        );
+    }
+
+    #[test]
+    fn directwrite带裁剪写回时保留文字外背景() {
+        let _gdiplus = Gdiplus::startup().expect("GDI+ 初始化失败");
+        let bitmap = OffscreenBitmap::new(240, 96).expect("创建离屏位图失败");
+        let mut canvas = GdiCanvas::new(bitmap.graphics());
+        canvas.set_dpi_scale(1.5);
+        canvas.save();
+        canvas.clip_rect(Rect::new(0.0, 0.0, 160.0, 64.0));
+        canvas.fill_rect(Rect::new(0.0, 0.0, 160.0, 64.0), Color::WHITE);
+        canvas.save();
+        canvas.clip_rect(Rect::new(8.0, 4.0, 108.0, 40.0));
+        let layout = canvas.layout_text("FlexUI", &Font::system(18.0));
+        let sample_right = ((8.0 + layout.width()) * 1.5).ceil() as i32 + 2;
+        let sample_bottom = ((8.0 + layout.height()) * 1.5).ceil() as i32 + 2;
+        canvas.draw_text_layout(&layout, Point::new(8.0, 8.0), Color::BLACK);
+        canvas.restore();
+        canvas.restore();
+        drop(canvas);
+
+        assert_eq!(
+            bitmap.get_pixel(12, 10),
+            0xffff_ffff,
+            "字形外区域必须保留原背景，不能写成黑块"
+        );
+        let mut changed = 0;
+        let mut sampled = 0;
+        for y in 10..sample_bottom {
+            for x in 12..sample_right {
+                sampled += 1;
+                changed += i32::from(bitmap.get_pixel(x, y) != 0xffff_ffff);
+            }
+        }
+        assert!(
+            changed * 2 < sampled,
+            "文字像素不能占满写回矩形：changed={changed}, sampled={sampled}"
+        );
     }
 }

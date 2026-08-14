@@ -4,6 +4,7 @@
 //! 控件状态变化与点击回调；处理 Radio 分组互斥，并按 tabbar 绑定驱动 TabBox 翻页。
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use flexui_geometry::{Point, Rect, Size};
 use flexui_gfx::Canvas;
@@ -14,6 +15,9 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
 use crate::widget::{find_by_id, find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+
+/// 文本输入停止后保持光标常亮的时间；随后才恢复系统近似周期的闪烁。
+const CARET_BLINK_RESUME_DELAY: Duration = Duration::from_millis(500);
 
 /// 点击回调类型别名。
 pub type ClickHandler = Box<dyn FnMut(&mut EventCtx)>;
@@ -516,6 +520,8 @@ pub struct Dispatcher {
     hover: Option<WidgetId>,
     pressed: Option<WidgetId>,
     focus: Option<WidgetId>,
+    /// 最近一次 Edit 交互后恢复闪烁的最早时刻；此前光标保持常亮。
+    caret_blink_after: Option<Instant>,
     needs_redraw: bool,
     needs_layout: bool,
     /// 局部脏矩形（联合），后端据此只失效这块区域（脏区重绘）。
@@ -551,6 +557,7 @@ impl Dispatcher {
             hover: None,
             pressed: None,
             focus: None,
+            caret_blink_after: None,
             needs_redraw: false,
             needs_layout: false,
             dirty: None,
@@ -841,10 +848,49 @@ impl Dispatcher {
         });
     }
 
-    /// 光标闪烁：切换焦点控件 caret 相位，返回其矩形供局部失效（无焦点返回 None）。
-    pub fn blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+    /// 让当前 Edit 光标立即显示，并从最后一次输入重新计算恢复闪烁的时间。
+    pub fn reset_caret_blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        self.reset_caret_blink_at(root, Instant::now())
+    }
+
+    fn reset_caret_blink_at(&mut self, root: &mut dyn Widget, now: Instant) -> Option<Rect> {
         self.ensure_focus_valid(root);
-        let fid = self.focus?;
+        let Some(fid) = self.focus else {
+            self.caret_blink_after = None;
+            return None;
+        };
+        if role_of(root, fid) != Some(WidgetRole::Edit) {
+            self.caret_blink_after = None;
+            return None;
+        }
+        let mut rect = None;
+        visit_mut(root, fid, &mut |w| {
+            w.base_mut().caret_on = true;
+            rect = Some(w.base().rect);
+        });
+        self.caret_blink_after = Some(now + CARET_BLINK_RESUME_DELAY);
+        rect
+    }
+
+    /// 光标闪烁：静止期内保持常亮，之后切换相位并返回局部失效矩形。
+    pub fn blink(&mut self, root: &mut dyn Widget) -> Option<Rect> {
+        self.blink_at(root, Instant::now())
+    }
+
+    fn blink_at(&mut self, root: &mut dyn Widget, now: Instant) -> Option<Rect> {
+        self.ensure_focus_valid(root);
+        let Some(fid) = self.focus else {
+            self.caret_blink_after = None;
+            return None;
+        };
+        if role_of(root, fid) != Some(WidgetRole::Edit) {
+            self.caret_blink_after = None;
+            return None;
+        }
+        if self.caret_blink_after.is_some_and(|resume| now < resume) {
+            return None;
+        }
+        self.caret_blink_after = None;
         let mut rect = None;
         visit_mut(root, fid, &mut |w| {
             let b = w.base_mut();
@@ -1094,6 +1140,7 @@ impl Dispatcher {
     pub fn cut_selection(&mut self, root: &mut dyn Widget) -> Option<String> {
         self.ensure_focus_valid(root);
         let fid = self.focus?;
+        let before = control_snapshot(root, fid);
         let mut out = None;
         let mut deleted = false;
         visit_mut(root, fid, &mut |w| {
@@ -1106,8 +1153,12 @@ impl Dispatcher {
             }
         });
         if deleted {
+            self.reset_caret_blink(root);
             if let Some(r) = rect_of(root, fid) {
                 self.mark_dirty(r);
+            }
+            if let (Some(before), Some(after)) = (before, control_snapshot(root, fid)) {
+                self.emit_snapshot_changes(root, fid, before, after);
             }
         }
         out
@@ -1117,11 +1168,16 @@ impl Dispatcher {
     pub fn paste(&mut self, root: &mut dyn Widget, s: &str) {
         self.ensure_focus_valid(root);
         let Some(fid) = self.focus else { return };
+        let before = control_snapshot(root, fid);
         let mut changed = false;
         visit_mut(root, fid, &mut |w| changed = w.replace_selection(s));
         if changed {
+            self.reset_caret_blink(root);
             if let Some(r) = rect_of(root, fid) {
                 self.mark_dirty(r);
+            }
+            if let (Some(before), Some(after)) = (before, control_snapshot(root, fid)) {
+                self.emit_snapshot_changes(root, fid, before, after);
             }
         }
     }
@@ -1131,6 +1187,7 @@ impl Dispatcher {
         self.ensure_focus_valid(root);
         let Some(fid) = self.focus else { return };
         visit_mut(root, fid, &mut |w| w.select_all());
+        self.reset_caret_blink(root);
         if let Some(r) = rect_of(root, fid) {
             self.mark_dirty(r);
         }
@@ -1144,6 +1201,9 @@ impl Dispatcher {
             consumed = w.on_event(ev) == EventFlow::Consumed;
         });
         if consumed {
+            if role_of(root, id) == Some(WidgetRole::Edit) {
+                self.reset_caret_blink(root);
+            }
             if let Some(r) = rect_of(root, id) {
                 self.mark_dirty(r);
             }
@@ -1275,6 +1335,7 @@ impl Dispatcher {
                 w.focus_gained();
             }
         });
+        self.reset_caret_blink(root);
         self.needs_redraw = true;
         if old != Some(next) {
             if let Some(id) = old {
@@ -1291,6 +1352,7 @@ impl Dispatcher {
             return;
         }
         self.focus = None;
+        self.caret_blink_after = None;
         for_each_mut(root, &mut |w| w.base_mut().focused = false);
         self.needs_redraw = true;
         self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
@@ -1374,28 +1436,33 @@ impl Dispatcher {
     /// 处理按下：设置 pressed 与 focus。
     fn press(&mut self, root: &mut dyn Widget, hit: Option<WidgetId>) {
         let old_focus = self.focus;
-        self.pressed = hit;
 
-        // 判断命中控件是否可获得焦点。
+        // 禁用控件仍参与命中以阻挡下层控件，但不能进入 pressed、获得焦点或接收事件。
+        let mut pointer_target = None;
         let mut focus_target: Option<WidgetId> = None;
         if let Some(id) = hit {
             visit_mut(root, id, &mut |w| {
                 let b = w.base();
-                if b.focusable && b.enabled {
-                    focus_target = Some(b.id);
+                if b.enabled {
+                    pointer_target = Some(b.id);
+                    if b.focusable {
+                        focus_target = Some(b.id);
+                    }
                 }
             });
         }
+        self.pressed = pointer_target;
         self.focus = focus_target;
 
         for_each_mut(root, &mut |w| {
             let b = w.base_mut();
-            b.pressed = Some(b.id) == hit && b.enabled;
+            b.pressed = Some(b.id) == pointer_target;
             b.focused = Some(b.id) == focus_target;
             if b.focused {
                 b.caret_on = true; // 获焦立即显示光标
             }
         });
+        self.reset_caret_blink(root);
         self.needs_redraw = true;
         if old_focus != focus_target {
             if let Some(id) = old_focus {
@@ -1405,7 +1472,7 @@ impl Dispatcher {
                 self.emit_control_event(root, id, ControlEvent::FocusChanged(true));
             }
         }
-        if let Some(id) = hit {
+        if let Some(id) = pointer_target {
             let pressed = find_by_id(root, id).is_some_and(|w| w.base().pressed);
             self.emit_control_event(root, id, ControlEvent::PressedChanged(pressed));
         }
@@ -1571,6 +1638,9 @@ impl Dispatcher {
         after: ControlSnapshot,
     ) {
         if before.text != after.text {
+            // 文本会影响控件测量和 Edit 的真实字符边界缓存。
+            self.needs_layout = true;
+            self.needs_redraw = true;
             self.emit_control_event(root, id, ControlEvent::TextChanged(after.text));
         }
         if before.selected != after.selected {
@@ -2099,6 +2169,77 @@ mod tests {
     }
 
     #[test]
+    fn edit_连续输入时光标常亮并延后闪烁() {
+        let mut root = Edit::new().text("hello");
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(25.0, 20.0),
+                button: MouseButton::Left,
+            },
+        );
+
+        let started = Instant::now();
+        disp.reset_caret_blink_at(&mut root, started);
+        assert!(root.base().caret_on);
+        assert!(disp
+            .blink_at(
+                &mut root,
+                started + CARET_BLINK_RESUME_DELAY - Duration::from_millis(1)
+            )
+            .is_none());
+        assert!(root.base().caret_on);
+
+        let typed_again = started + Duration::from_millis(400);
+        disp.reset_caret_blink_at(&mut root, typed_again);
+        assert!(
+            disp.blink_at(
+                &mut root,
+                started + CARET_BLINK_RESUME_DELAY + Duration::from_millis(1),
+            )
+            .is_none(),
+            "后续输入必须重新开始静止期"
+        );
+        assert!(root.base().caret_on);
+
+        assert!(disp
+            .blink_at(&mut root, typed_again + CARET_BLINK_RESUME_DELAY)
+            .is_some());
+        assert!(!root.base().caret_on);
+    }
+
+    #[test]
+    fn 禁用的指针控件不接收鼠标事件() {
+        let mut root = Edit::new().text("hello");
+        root.base_mut().enabled = false;
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
+        let mut disp = Dispatcher::new();
+
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(0.0, 20.0),
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(
+            &mut root,
+            &Event::MouseMove {
+                pos: Point::new(8.0, 20.0),
+            },
+        );
+
+        assert_eq!(root.cursor(), 5);
+        assert_eq!(root.selection(), None);
+        assert!(!root.base().pressed);
+        assert!(!root.base().focused);
+    }
+
+    #[test]
     fn slider_按下拖动改变值() {
         let mut root = Slider::new().width(100.0).height(20.0);
         let cv = FakeCanvas;
@@ -2590,7 +2731,7 @@ mod tests {
 
     #[test]
     fn edit_剪贴板漏斗() {
-        let mut root = Edit::new().text("hello");
+        let mut root = Edit::new().name("edit").text("hello");
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 40.0), &cv);
         let mut disp = Dispatcher::new();
@@ -2608,9 +2749,18 @@ mod tests {
         // 剪切 → 返回文本且清空。
         assert_eq!(disp.cut_selection(&mut root).as_deref(), Some("hello"));
         assert_eq!(root.base().text, "");
+        assert!(disp.take_layout(), "剪切后必须重建 Edit 字符边界缓存");
+        assert!(disp
+            .take_control_events()
+            .contains(&("edit".to_string(), ControlEvent::TextChanged(String::new()),)));
         // 粘贴。
         disp.paste(&mut root, "hi");
         assert_eq!(root.base().text, "hi");
+        assert!(disp.take_layout(), "粘贴后必须重建 Edit 字符边界缓存");
+        assert!(disp.take_control_events().contains(&(
+            "edit".to_string(),
+            ControlEvent::TextChanged("hi".to_string()),
+        )));
         // 无选区复制返回 None。
         assert_eq!(disp.copy_selection(&mut root), None);
     }
@@ -3007,6 +3157,7 @@ mod tests {
             "edit".to_string(),
             ControlEvent::TextChanged("A".to_string()),
         )));
+        assert!(disp.take_layout(), "输入后必须重建 Edit 字符边界缓存");
     }
 
     #[test]

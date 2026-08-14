@@ -56,6 +56,7 @@ cargo run -p flexui-gallery -- --dark
 </p>
 <p align="center">
   <img src="docs/uu_macos_5.png" alt="State-driven frame animation examples" width="49%">
+  <img src="docs/uu_win_1.png" alt="Windows" width="49%">
 </p>
 
 ```bash
