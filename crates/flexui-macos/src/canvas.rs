@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
+use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextBoundary, TextLayout};
 
 use core_foundation::attributed_string::CFMutableAttributedString;
@@ -80,6 +80,31 @@ impl CgCanvas {
             backing_scale: valid_scale(backing_scale),
             image_cache,
         }
+    }
+
+    /// 将描边中心路径收进原矩形，并对齐到物理像素网格。
+    fn aligned_stroke(
+        &self,
+        rect: Rect,
+        radius: Corners,
+        line_width: f32,
+    ) -> Option<(Rect, Corners, f32)> {
+        let (path, aligned_width) = pixel_aligned_stroke(rect, line_width, self.backing_scale)?;
+        let physical_width = aligned_width * self.backing_scale;
+        let align_radius = |value: f32| {
+            ((value.max(0.0) * self.backing_scale).round() - physical_width / 2.0).max(0.0)
+                / self.backing_scale
+        };
+        Some((
+            path,
+            Corners {
+                tl: align_radius(radius.tl),
+                tr: align_radius(radius.tr),
+                br: align_radius(radius.br),
+                bl: align_radius(radius.bl),
+            },
+            aligned_width,
+        ))
     }
 
     fn load_image(
@@ -499,7 +524,12 @@ impl Canvas for CgCanvas {
     }
 
     fn stroke_rect(&mut self, rect: Rect, color: Color, line_width: f32) {
-        let path = NSBezierPath::bezierPathWithRect(to_nsrect(rect));
+        let Some((path_rect, _, line_width)) =
+            self.aligned_stroke(rect, Corners::default(), line_width)
+        else {
+            return;
+        };
+        let path = NSBezierPath::bezierPathWithRect(to_nsrect(path_rect));
         path.setLineWidth(line_width as f64);
         to_nscolor(color).set();
         path.stroke();
@@ -536,7 +566,12 @@ impl Canvas for CgCanvas {
     }
 
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
-        let path = round_rect_path(rect, radius);
+        let Some((path_rect, path_radius, line_width)) =
+            self.aligned_stroke(rect, radius, line_width)
+        else {
+            return;
+        };
+        let path = round_rect_path(path_rect, path_radius);
         path.setLineWidth(line_width as f64);
         to_nscolor(color).set();
         path.stroke();
@@ -647,6 +682,23 @@ fn color_black() -> Color {
 #[cfg(test)]
 mod text_tests {
     use super::*;
+
+    #[test]
+    fn retina圆角描边完整落在原矩形内() {
+        let canvas = CgCanvas {
+            backing_scale: 2.0,
+            image_cache: Rc::new(RefCell::new(ImageCache::default())),
+        };
+        let (path, radius, width) = canvas
+            .aligned_stroke(Rect::new(10.0, 20.0, 16.0, 16.0), Corners::all(8.0), 1.5)
+            .unwrap();
+
+        assert_eq!(path, Rect::new(10.75, 20.75, 14.5, 14.5));
+        assert_eq!(radius, Corners::all(7.25));
+        assert_eq!(width, 1.5);
+        assert_eq!(path.left() - width / 2.0, 10.0);
+        assert_eq!(path.right() + width / 2.0, 26.0);
+    }
 
     #[test]
     fn coretext追加字符不改变既有普通字符边界() {

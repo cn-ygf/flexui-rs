@@ -10,9 +10,6 @@ use crate::style::StyleSpec;
 use crate::theme::WidgetKind;
 use crate::widget::{Base, Container, Node, Widget, WidgetRole};
 
-// 给字形抗锯齿、描边和轻量阴影保留少量视口外绘制空间。
-const CHILD_VISUAL_OVERFLOW: f32 = 2.0;
-
 /// 纵向滚动容器。子控件纵向堆叠；超出视口的部分被裁剪，可用滚轮滚动。
 pub struct ScrollView {
     base: Base,
@@ -90,8 +87,8 @@ impl ScrollView {
 
     fn clip_viewport(&self) -> Rect {
         let content = self.content_viewport();
-        let left = (content.left() - CHILD_VISUAL_OVERFLOW).max(self.base.rect.left());
-        let right = (content.right() + CHILD_VISUAL_OVERFLOW).min(self.viewport().right());
+        let left = (content.left() - 1.0).max(self.base.rect.left());
+        let right = (content.right() + 1.0).min(self.viewport().right());
         Rect::new(left, content.top(), right - left, content.size.height)
     }
 
@@ -272,7 +269,7 @@ mod tests {
         layout_node(&mut view, Rect::new(0.0, 0.0, 294.0, 228.0), &FakeCanvas);
         assert_eq!(
             view.children_viewport(),
-            Rect::new(22.0, 16.0, 245.0, 188.0)
+            Rect::new(23.0, 16.0, 243.0, 188.0)
         );
         assert_eq!(view.base.children[0].base().rect.left(), 24.0);
         assert_eq!(view.base.children[0].base().rect.size.width, 241.0);
