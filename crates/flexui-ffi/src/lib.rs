@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use flexui_core::{visit_all_mut, WidgetRole, WindowCtx, WindowDelegate};
+use flexui_core::{visit_all_mut, MainProxy, WidgetRole, WindowCtx, WindowDelegate, WindowEvent};
 use flexui_xml::{load_str, Context};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -185,6 +185,75 @@ pub extern "C" fn flex_ctx_close(ctx: *mut c_void) {
     }));
 }
 
+// —— UI 线程投递：句柄可由初始化回调取得，再移动到工作线程使用 ——
+
+/// C 侧持有的不透明 UI 线程投递句柄。
+pub struct FlexMainProxy {
+    proxy: MainProxy,
+}
+
+/// UI 线程任务回调；ctx 仅在本次回调期间有效。
+pub type FlexUiTaskFn = extern "C" fn(ctx: *mut c_void, user: *mut c_void);
+
+/// 从窗口回调取得 UI 线程投递句柄；调用方负责用 `flex_main_proxy_free` 释放。
+#[no_mangle]
+pub extern "C" fn flex_ctx_main_proxy(ctx: *mut c_void) -> *mut FlexMainProxy {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let Some(proxy) = ctx_from(ctx).and_then(|ctx| ctx.main_proxy()) else {
+            return std::ptr::null_mut();
+        };
+        Box::into_raw(Box::new(FlexMainProxy { proxy }))
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+/// 克隆投递句柄，便于多个工作线程分别持有；返回值需要单独释放。
+#[no_mangle]
+pub extern "C" fn flex_main_proxy_clone(proxy: *const FlexMainProxy) -> *mut FlexMainProxy {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let Some(proxy) = proxy.as_ref() else {
+            return std::ptr::null_mut();
+        };
+        Box::into_raw(Box::new(FlexMainProxy {
+            proxy: proxy.proxy.clone(),
+        }))
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+/// 投递 C 回调到所属窗口的 UI 线程；1 表示已接受，0 表示窗口已关闭或参数无效。
+#[no_mangle]
+pub extern "C" fn flex_main_proxy_post(
+    proxy: *const FlexMainProxy,
+    task: Option<FlexUiTaskFn>,
+    user: *mut c_void,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(proxy), Some(task)) = (proxy.as_ref(), task) else {
+            return 0;
+        };
+        let user = user as usize;
+        if proxy.proxy.post(move |ctx| {
+            task(ctx as *mut _ as *mut c_void, user as *mut c_void);
+        }) {
+            1
+        } else {
+            0
+        }
+    }))
+    .unwrap_or(0)
+}
+
+/// 释放一个投递句柄。传 NULL 无操作。
+#[no_mangle]
+pub extern "C" fn flex_main_proxy_free(proxy: *mut FlexMainProxy) {
+    if !proxy.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+            drop(Box::from_raw(proxy));
+        }));
+    }
+}
+
 // —— 窗口委托桥接：C 侧函数指针集 ——
 
 /// C 侧窗口委托：各钩子为可空函数指针，第一个参数为不透明 FlexCtx*。
@@ -198,6 +267,28 @@ pub struct FlexDelegate {
     >,
     /// 返回非 0 允许关闭，0 阻止关闭。
     pub on_close: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void) -> c_int>,
+}
+
+/// C 侧窗口状态事件编号。
+pub const FLEX_WINDOW_MINIMIZED: c_int = 1;
+pub const FLEX_WINDOW_MAXIMIZED: c_int = 2;
+pub const FLEX_WINDOW_RESTORED: c_int = 3;
+
+/// 第二版 C 窗口委托。旧版 `FlexDelegate` 布局保持不变，避免破坏已有 ABI。
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FlexDelegateV2 {
+    pub on_before_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
+    pub on_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
+    pub on_initialized: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
+    pub on_click: Option<extern "C" fn(name: *const c_char, ctx: *mut c_void, user: *mut c_void)>,
+    pub on_context: Option<
+        extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void),
+    >,
+    pub on_window_state: Option<extern "C" fn(state: c_int, ctx: *mut c_void, user: *mut c_void)>,
+    /// 返回非 0 允许关闭，0 阻止关闭。
+    pub on_closing: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void) -> c_int>,
+    pub on_closed: Option<extern "C" fn(user: *mut c_void)>,
 }
 
 /// 把 C 委托适配成 WindowDelegate。
@@ -246,6 +337,113 @@ impl WindowDelegate for CDelegate {
     }
 }
 
+/// 把第二版 C 委托适配成 WindowDelegate。
+struct CDelegateV2 {
+    d: FlexDelegateV2,
+    user: usize,
+}
+
+impl CDelegateV2 {
+    fn user_ptr(&self) -> *mut c_void {
+        self.user as *mut c_void
+    }
+}
+
+impl WindowDelegate for CDelegateV2 {
+    fn on_before_init(&mut self, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_before_init {
+            callback(ctx as *mut _ as *mut c_void, self.user_ptr());
+        }
+    }
+
+    fn on_init(&mut self, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_init {
+            callback(ctx as *mut _ as *mut c_void, self.user_ptr());
+        }
+    }
+
+    fn on_initialized(&mut self, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_initialized {
+            callback(ctx as *mut _ as *mut c_void, self.user_ptr());
+        }
+    }
+
+    fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_click {
+            if let Ok(name) = CString::new(name) {
+                callback(name.as_ptr(), ctx as *mut _ as *mut c_void, self.user_ptr());
+            }
+        }
+    }
+
+    fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_context {
+            if let Ok(name) = CString::new(name) {
+                callback(
+                    name.as_ptr(),
+                    x,
+                    y,
+                    ctx as *mut _ as *mut c_void,
+                    self.user_ptr(),
+                );
+            }
+        }
+    }
+
+    fn on_window_event(&mut self, event: &WindowEvent, ctx: &mut WindowCtx) {
+        let state = match event {
+            WindowEvent::Minimized => FLEX_WINDOW_MINIMIZED,
+            WindowEvent::Maximized => FLEX_WINDOW_MAXIMIZED,
+            WindowEvent::Restored => FLEX_WINDOW_RESTORED,
+            _ => return,
+        };
+        if let Some(callback) = self.d.on_window_state {
+            callback(state, ctx as *mut _ as *mut c_void, self.user_ptr());
+        }
+    }
+
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.d
+            .on_closing
+            .is_none_or(|callback| callback(ctx as *mut _ as *mut c_void, self.user_ptr()) != 0)
+    }
+
+    fn on_closed(&mut self) {
+        if let Some(callback) = self.d.on_closed {
+            callback(self.user_ptr());
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_with_delegate(
+    title: *const c_char,
+    width: c_int,
+    height: c_int,
+    xml: *const c_char,
+    delegate: Box<dyn WindowDelegate>,
+) -> c_int {
+    let (Some(title), Some(xml)) = (unsafe { cstr(title) }, unsafe { cstr(xml) }) else {
+        return -1;
+    };
+    let ctx = Context::new();
+    let result = match load_str(xml, &ctx) {
+        Ok(result) => result,
+        Err(_) => return -2,
+    };
+    let mut disp = flexui_core::Dispatcher::new();
+    for (group, tabbox) in result.bindings {
+        disp.bind_tab(group, tabbox);
+    }
+    backend::run(
+        flexui_core::WindowConfig::new(title, width as f32, height as f32),
+        result.root,
+        disp,
+        delegate,
+    );
+    0
+}
+
 /// 用 XML + C 委托启动应用（阻塞）。delegate 为 NULL 时等价于 flex_run_xml。
 /// 0 成功，负数错误码（-1 参数错、-2 XML 失败、-3 panic、-100 无后端）。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -259,19 +457,7 @@ pub extern "C" fn flex_run(
     user: *mut c_void,
 ) -> c_int {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let (Some(title), Some(xml)) = (unsafe { cstr(title) }, unsafe { cstr(xml) }) else {
-            return -1;
-        };
-        let ctx = Context::new();
-        let res = match load_str(xml, &ctx) {
-            Ok(r) => r,
-            Err(_) => return -2,
-        };
-        let mut disp = flexui_core::Dispatcher::new();
-        for (group, tabbox) in res.bindings {
-            disp.bind_tab(group, tabbox);
-        }
-        let deleg: Box<dyn WindowDelegate> = if delegate.is_null() {
+        let delegate: Box<dyn WindowDelegate> = if delegate.is_null() {
             Box::new(flexui_core::NoopDelegate)
         } else {
             Box::new(CDelegate {
@@ -279,13 +465,33 @@ pub extern "C" fn flex_run(
                 user: user as usize,
             })
         };
-        backend::run(
-            flexui_core::WindowConfig::new(title, width as f32, height as f32),
-            res.root,
-            disp,
-            deleg,
-        );
-        0
+        run_with_delegate(title, width, height, xml, delegate)
+    }));
+    result.unwrap_or(-3)
+}
+
+/// 用 XML + 第二版 C 委托启动应用（阻塞）。
+/// 0 成功，负数错误码（-1 参数错、-2 XML 失败、-3 panic）。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[no_mangle]
+pub extern "C" fn flex_run_v2(
+    title: *const c_char,
+    width: c_int,
+    height: c_int,
+    xml: *const c_char,
+    delegate: *const FlexDelegateV2,
+    user: *mut c_void,
+) -> c_int {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let delegate: Box<dyn WindowDelegate> = if delegate.is_null() {
+            Box::new(flexui_core::NoopDelegate)
+        } else {
+            Box::new(CDelegateV2 {
+                d: unsafe { *delegate },
+                user: user as usize,
+            })
+        };
+        run_with_delegate(title, width, height, xml, delegate)
     }));
     result.unwrap_or(-3)
 }
@@ -477,4 +683,126 @@ pub extern "C" fn flex_run_xml(
     _xml: *const c_char,
 ) -> c_int {
     -100 // 该平台后端未实现
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flexui_core::{Dispatcher, Label, Widget, WindowHandle};
+    use std::sync::{atomic::AtomicUsize, atomic::Ordering, Mutex};
+
+    struct TestWindow;
+
+    impl WindowHandle for TestWindow {
+        fn set_title(&mut self, _title: &str) {}
+        fn close(&mut self) {}
+        fn minimize(&mut self) {}
+        fn maximize(&mut self) {}
+        fn restore(&mut self) {}
+    }
+
+    extern "C" fn ui_task(ctx: *mut c_void, user: *mut c_void) {
+        const NAME: &[u8] = b"status\0";
+        const TEXT: &[u8] = b"loaded\0";
+        let calls = unsafe { &*(user as *const AtomicUsize) };
+        calls.fetch_add(1, Ordering::SeqCst);
+        flex_ctx_set_text(ctx, NAME.as_ptr().cast(), TEXT.as_ptr().cast());
+    }
+
+    #[test]
+    fn ffi代理可从工作线程投递并修改控件() {
+        let disp = Dispatcher::new();
+        let mut root = Label::new("waiting").name("status");
+        let mut window = TestWindow;
+        let mut ctx = WindowCtx::with_proxy(&mut root, &mut window, disp.proxy());
+        let proxy = flex_ctx_main_proxy(&mut ctx as *mut _ as *mut c_void);
+        assert!(!proxy.is_null());
+        drop(ctx);
+
+        let calls = AtomicUsize::new(0);
+        let proxy_addr = proxy as usize;
+        let calls_addr = &calls as *const AtomicUsize as usize;
+        let accepted = std::thread::spawn(move || {
+            flex_main_proxy_post(
+                proxy_addr as *const FlexMainProxy,
+                Some(ui_task),
+                calls_addr as *mut c_void,
+            )
+        })
+        .join()
+        .unwrap();
+        assert_eq!(accepted, 1);
+
+        let mut ctx = WindowCtx::new(&mut root, &mut window);
+        for task in disp.drain_ui_tasks() {
+            task(&mut ctx);
+        }
+        drop(ctx);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(root.base().text, "loaded");
+        flex_main_proxy_free(proxy);
+    }
+
+    fn record(user: *mut c_void, value: c_int) {
+        let calls = unsafe { &*(user as *const Mutex<Vec<c_int>>) };
+        calls.lock().unwrap().push(value);
+    }
+
+    extern "C" fn before(_ctx: *mut c_void, user: *mut c_void) {
+        record(user, 1);
+    }
+
+    extern "C" fn init(_ctx: *mut c_void, user: *mut c_void) {
+        record(user, 2);
+    }
+
+    extern "C" fn initialized(_ctx: *mut c_void, user: *mut c_void) {
+        record(user, 3);
+    }
+
+    extern "C" fn window_state(state: c_int, _ctx: *mut c_void, user: *mut c_void) {
+        record(user, state + 10);
+    }
+
+    extern "C" fn closing(_ctx: *mut c_void, user: *mut c_void) -> c_int {
+        record(user, 20);
+        0
+    }
+
+    extern "C" fn closed(user: *mut c_void) {
+        record(user, 21);
+    }
+
+    #[test]
+    fn ffi_v2桥接生命周期和窗口状态() {
+        let calls = Mutex::new(Vec::new());
+        let mut delegate = CDelegateV2 {
+            d: FlexDelegateV2 {
+                on_before_init: Some(before),
+                on_init: Some(init),
+                on_initialized: Some(initialized),
+                on_click: None,
+                on_context: None,
+                on_window_state: Some(window_state),
+                on_closing: Some(closing),
+                on_closed: Some(closed),
+            },
+            user: &calls as *const Mutex<Vec<c_int>> as usize,
+        };
+        let mut root = Label::new("test");
+        let mut window = TestWindow;
+        let mut ctx = WindowCtx::new(&mut root, &mut window);
+
+        delegate.on_before_init(&mut ctx);
+        delegate.on_init(&mut ctx);
+        delegate.on_initialized(&mut ctx);
+        delegate.on_window_event(&WindowEvent::Maximized, &mut ctx);
+        assert!(!delegate.on_closing(&mut ctx));
+        delegate.on_closed();
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![1, 2, 3, FLEX_WINDOW_MAXIMIZED + 10, 20, 21]
+        );
+    }
 }

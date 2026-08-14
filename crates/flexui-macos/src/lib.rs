@@ -240,10 +240,10 @@ pub(crate) fn make_window(
     view.registerForDraggedTypes(&NSArray::from_slice(&[view::filenames_pboard_type()]));
     window.setContentView(Some(&view));
     window.makeFirstResponder(Some(&view));
-    // 视图兼任窗口委托（处理 on_close）。
+    // 视图兼任窗口委托（处理关闭生命周期）。
     window.setDelegate(Some(ProtocolObject::from_ref(&*view)));
 
-    // 窗口/控件就绪后触发 on_init（≈ InitWindow）。
+    // 窗口/控件就绪后触发初始化生命周期。
     let close_requested = view.fire_init(&window);
 
     view.resume_timers();

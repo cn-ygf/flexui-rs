@@ -22,7 +22,7 @@ pub mod window;
 // 常用类型再导出，方便上层与后端使用。
 pub use anim::{AnimProp, Easing};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
-pub use dispatch::{hit_test, Dispatcher, EventCtx, Invalidation, MainProxy};
+pub use dispatch::{hit_test, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask};
 pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
 pub use layout::{layout_node, Axis};

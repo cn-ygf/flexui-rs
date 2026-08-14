@@ -329,7 +329,7 @@ impl<'a> WindowCtx<'a> {
         });
     }
 
-    /// 取主线程投递句柄（在 on_init 里获取，clone 给工作线程后 `send`）。
+    /// 取 UI 线程投递句柄；可 clone 给线程或 async 任务后调用 `post` 修改属性。
     pub fn main_proxy(&self) -> Option<crate::dispatch::MainProxy> {
         self.proxy.clone()
     }
@@ -555,8 +555,12 @@ impl<'a> WindowCtx<'a> {
 /// 窗口运行期委托（由 facade 的 WindowImpl 适配后传给后端）。
 /// 所有钩子有默认空实现，≈ WindowImplBase 的虚方法。
 pub trait WindowDelegate {
-    /// 窗口与控件创建完成（≈ InitWindow）。
+    /// 平台窗口和控件树已建立、应用初始化逻辑尚未执行。
+    fn on_before_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// 窗口初始化（≈ InitWindow）；适合设置初始属性和注册后台任务。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// `on_init` 已执行完成，窗口即将显示首帧。
+    fn on_initialized(&mut self, _ctx: &mut WindowCtx) {}
     /// 某个具名控件被点击（≈ Notify 的 click）。
     fn on_activate(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
     /// 具名控件的 hover、focus、文本、选择和值等语义变化。
@@ -575,10 +579,16 @@ pub trait WindowDelegate {
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 文件拖放到窗口（paths 为被拖入的文件/目录绝对路径）。
     fn on_drop_files(&mut self, _paths: &[String], _ctx: &mut WindowCtx) {}
-    /// 关闭请求；返回 false 可阻止关闭。
+    /// 即将关闭；返回 false 可阻止关闭。默认转发旧版 `on_close` 钩子。
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.on_close(ctx)
+    }
+    /// 兼容旧版关闭钩子；新代码优先实现 `on_closing`。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true
     }
+    /// 原生窗口已经关闭；此时窗口与控件上下文不再可用，只适合释放业务资源。
+    fn on_closed(&mut self) {}
 }
 
 /// 空委托：所有钩子用默认实现。供不需要窗口钩子的底层调用方（FFI/示例）使用。

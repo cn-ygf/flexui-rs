@@ -15,6 +15,7 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
 use crate::widget::{find_by_id, find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+use crate::window::WindowCtx;
 
 /// 文本输入停止后保持光标常亮的时间；随后才恢复系统近似周期的闪烁。
 const CARET_BLINK_RESUME_DELAY: Duration = Duration::from_millis(500);
@@ -48,20 +49,63 @@ impl Invalidation {
     }
 }
 
-/// 后台线程 → 主线程投递句柄（Clone + Send + Sync）。
-///
-/// 工作线程持有其克隆，`send` 把字符串消息投递到主线程邮箱；主线程（帧定时回调）
-/// 取走并交窗口委托 `on_message`。
+/// 在窗口 UI 线程执行的任务。
+pub type UiTask = Box<dyn for<'a> FnOnce(&mut WindowCtx<'a>) + Send + 'static>;
+
+#[derive(Default)]
+struct MainMailbox {
+    messages: Vec<String>,
+    tasks: Vec<UiTask>,
+    closed: bool,
+}
+
+/// 后台线程或异步任务 → 窗口 UI 线程投递句柄（Clone + Send + Sync）。
 #[derive(Clone)]
 pub struct MainProxy {
-    queue: Arc<Mutex<Vec<String>>>,
+    mailbox: Arc<Mutex<MainMailbox>>,
 }
 
 impl MainProxy {
-    /// 投递一条消息到主线程（跨线程安全）。
-    pub fn send(&self, msg: impl Into<String>) {
-        if let Ok(mut q) = self.queue.lock() {
-            q.push(msg.into());
+    /// 投递一条消息；窗口 UI 线程会转交 `WindowDelegate::on_message`。
+    /// 窗口已关闭或邮箱不可用时返回 false。
+    pub fn send(&self, msg: impl Into<String>) -> bool {
+        if let Ok(mut mailbox) = self.mailbox.lock() {
+            if mailbox.closed {
+                return false;
+            }
+            mailbox.messages.push(msg.into());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 从线程或 async 任务投递闭包，在所属窗口的 UI 线程修改控件或窗口。
+    ///
+    /// ```ignore
+    /// let ui = ctx.main_proxy().unwrap();
+    /// std::thread::spawn(move || {
+    ///     let result = load_data();
+    ///     ui.post(move |ctx| {
+    ///         ctx.set_text("status", result);
+    ///         ctx.set_enabled("retry", true);
+    ///     });
+    /// });
+    /// ```
+    ///
+    /// 窗口已关闭或邮箱不可用时返回 false。
+    pub fn post<F>(&self, task: F) -> bool
+    where
+        F: for<'a> FnOnce(&mut WindowCtx<'a>) + Send + 'static,
+    {
+        if let Ok(mut mailbox) = self.mailbox.lock() {
+            if mailbox.closed {
+                return false;
+            }
+            mailbox.tasks.push(Box::new(task));
+            true
+        } else {
+            false
         }
     }
 }
@@ -547,8 +591,8 @@ pub struct Dispatcher {
     tip_ticks: u32,
     /// 进行中的补间动画。
     anims: Vec<Anim>,
-    /// 后台线程投递的消息邮箱（主线程帧回调取走）。
-    mailbox: Arc<Mutex<Vec<String>>>,
+    /// 后台线程投递的消息与 UI 任务邮箱（主线程帧回调取走）。
+    mailbox: Arc<Mutex<MainMailbox>>,
 }
 
 impl Dispatcher {
@@ -572,14 +616,14 @@ impl Dispatcher {
             tooltip: None,
             tip_ticks: 0,
             anims: Vec::new(),
-            mailbox: Arc::new(Mutex::new(Vec::new())),
+            mailbox: Arc::new(Mutex::new(MainMailbox::default())),
         }
     }
 
-    /// 取一个可跨线程投递消息的句柄（发给工作线程）。
+    /// 取一个可跨线程投递消息或 UI 任务的句柄。
     pub fn proxy(&self) -> MainProxy {
         MainProxy {
-            queue: Arc::clone(&self.mailbox),
+            mailbox: Arc::clone(&self.mailbox),
         }
     }
 
@@ -587,8 +631,31 @@ impl Dispatcher {
     pub fn drain_messages(&self) -> Vec<String> {
         self.mailbox
             .lock()
-            .map(|mut q| std::mem::take(&mut *q))
+            .map(|mut mailbox| std::mem::take(&mut mailbox.messages))
             .unwrap_or_default()
+    }
+
+    /// 取走后台线程投递的 UI 任务；平台后端必须在所属窗口 UI 线程执行。
+    pub fn drain_ui_tasks(&self) -> Vec<UiTask> {
+        self.mailbox
+            .lock()
+            .map(|mut mailbox| std::mem::take(&mut mailbox.tasks))
+            .unwrap_or_default()
+    }
+
+    /// 窗口销毁时关闭投递入口，并丢弃尚未执行的消息与任务。
+    pub fn close_main_proxy(&self) {
+        let pending = if let Ok(mut mailbox) = self.mailbox.lock() {
+            mailbox.closed = true;
+            Some((
+                std::mem::take(&mut mailbox.messages),
+                std::mem::take(&mut mailbox.tasks),
+            ))
+        } else {
+            None
+        };
+        // 在锁外析构任务捕获的数据，避免其 Drop 实现再次投递时重入邮箱锁。
+        drop(pending);
     }
 
     /// 是否有进行中的动画（后端据此决定是否驱动帧定时器）。
@@ -1711,6 +1778,12 @@ fn collect_bound_tabboxes(node: &dyn Widget, group: u32, targets: &mut Vec<Widge
     }
 }
 
+impl Drop for Dispatcher {
+    fn drop(&mut self) {
+        self.close_main_proxy();
+    }
+}
+
 impl Default for Dispatcher {
     fn default() -> Self {
         Self::new()
@@ -2560,13 +2633,58 @@ mod tests {
     fn 主线程邮箱_跨线程投递与取走() {
         let disp = Dispatcher::new();
         let p = disp.proxy();
-        p.send("a");
+        assert!(p.send("a"));
         let p2 = p.clone();
-        std::thread::spawn(move || p2.send("b")).join().unwrap();
+        assert!(std::thread::spawn(move || p2.send("b")).join().unwrap());
         let mut msgs = disp.drain_messages();
         msgs.sort();
         assert_eq!(msgs, vec!["a".to_string(), "b".to_string()]);
         assert!(disp.drain_messages().is_empty(), "取走后清空");
+    }
+
+    #[test]
+    fn 主线程任务_可从工作线程投递并通过窗口上下文修改属性() {
+        struct TestWindow;
+        impl crate::window::WindowHandle for TestWindow {
+            fn set_title(&mut self, _title: &str) {}
+            fn close(&mut self) {}
+            fn minimize(&mut self) {}
+            fn maximize(&mut self) {}
+            fn restore(&mut self) {}
+        }
+
+        let disp = Dispatcher::new();
+        let proxy = disp.proxy();
+        assert!(std::thread::spawn(move || {
+            proxy.post(|ctx| {
+                ctx.set_text("status", "loaded");
+                ctx.set_enabled("status", false);
+            })
+        })
+        .join()
+        .unwrap());
+
+        let mut root = Label::new("waiting").name("status");
+        let mut window = TestWindow;
+        let mut ctx = crate::window::WindowCtx::new(&mut root, &mut window);
+        for task in disp.drain_ui_tasks() {
+            task(&mut ctx);
+        }
+        let invalidation = ctx.take_invalidation();
+        drop(ctx);
+        assert_eq!(root.base().text, "loaded");
+        assert!(!root.base().enabled);
+        assert_eq!(invalidation, Invalidation::Layout);
+        assert!(disp.drain_ui_tasks().is_empty(), "任务只能执行一次");
+    }
+
+    #[test]
+    fn 主线程代理_窗口销毁后拒绝新任务() {
+        let disp = Dispatcher::new();
+        let proxy = disp.proxy();
+        drop(disp);
+        assert!(!proxy.send("late"));
+        assert!(!proxy.post(|ctx| ctx.request_redraw()));
     }
 
     #[test]

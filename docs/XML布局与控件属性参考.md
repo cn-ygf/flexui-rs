@@ -325,10 +325,12 @@ XML 只描述界面；事件在代码里按 `name` 处理（实现 `WindowImpl`�
 
 | 钩子 | 触发 |
 | --- | --- |
-| `on_init(ctx)` | 窗口与控件创建完成 |
+| `on_before_init(ctx)` / `on_init(ctx)` / `on_initialized(ctx)` | 控件树建立后依次执行的初始化前、初始化、初始化完成事件 |
 | `on_click(name, ctx)` | 具名 Button/CheckBox/Radio 点击、ComboBox 选中（上报下拉框 name）、ListView 选中行（上报列表 name）、右键菜单项选中 |
 | `on_context(name, x, y, ctx)` | 右键具名控件（可在此 `ctx.open_menu(...)` 弹上下文菜单） |
-| `on_key(key, ctx)` / `on_size(w,h,ctx)` / `on_close(ctx)` | 键盘/尺寸/关闭 |
+| `on_window_event(event, ctx)` | 窗口移动、缩放、焦点、最小化、最大化、恢复及键盘事件 |
+| `on_key(key, ctx)` / `on_size(w,h,ctx)` | 兼容用的键盘和尺寸事件 |
+| `on_closing(ctx)` / `on_closed()` | 即将关闭（返回 `false` 可取消）和原生窗口关闭后；旧 `on_close(ctx)` 仍兼容 |
 | `on_message(msg, ctx)` | 后台线程经 `MainProxy` 投递的消息 |
 
 `ctx`（`WindowCtx`）常用能力：
@@ -340,6 +342,17 @@ ctx.set_enabled("btnPrimary", false);       // 启用/禁用
 ctx.with("cb", |w| w.base().text.clone());  // 任意读写控件
 ctx.animate("prog", AnimProp::Value, 1.0, 0.8, Easing::EaseInOut); // 属性动画
 ctx.open_menu(Rect::new(x, y, 0.0, 0.0), vec![("刷新".into(), "ctxRefresh".into())]); // 上下文菜单
+```
+
+工作线程或任意 async runtime 完成任务后，通过初始化阶段取得的 `MainProxy` 投递回 UI
+线程。闭包中的 setter 会自动触发布局或重绘：
+
+```rust
+let ui = ctx.main_proxy().expect("window proxy");
+std::thread::spawn(move || {
+    let result = load_data();
+    ui.post(move |ctx| ctx.set_text("status", result));
+});
 ```
 
 ---

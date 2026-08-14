@@ -184,8 +184,12 @@ pub trait WindowImpl: 'static {
         application_localizer()
     }
 
-    /// 窗口与控件创建完成（≈ InitWindow）：绑事件、预设文本等。
+    /// 平台窗口和控件树已建立、应用初始化逻辑尚未执行。
+    fn on_before_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// 窗口初始化（≈ InitWindow）：绑事件、预设文本或取得 `MainProxy`。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// `on_init` 已执行完成，窗口即将显示首帧。
+    fn on_initialized(&mut self, _ctx: &mut WindowCtx) {}
     /// 某具名控件被点击（≈ Notify）。
     fn on_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
     /// 具名控件的 hover、focus、文本、选择和值等语义变化。
@@ -204,10 +208,16 @@ pub trait WindowImpl: 'static {
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 文件拖放到窗口（绝对路径）。
     fn on_drop_files(&mut self, _paths: &[String], _ctx: &mut WindowCtx) {}
-    /// 关闭请求；返回 false 阻止关闭。
+    /// 即将关闭；返回 false 阻止关闭。默认转发旧版 `on_close`。
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.on_close(ctx)
+    }
+    /// 兼容旧版关闭钩子；新代码优先实现 `on_closing`。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true
     }
+    /// 原生窗口已经关闭；此时不能再访问 `WindowCtx`。
+    fn on_closed(&mut self) {}
 }
 
 /// 把 WindowImpl 适配成后端可调用的 WindowDelegate。
@@ -216,8 +226,14 @@ struct ImplDelegate<W: WindowImpl> {
 }
 
 impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
+    fn on_before_init(&mut self, ctx: &mut WindowCtx) {
+        self.imp.on_before_init(ctx);
+    }
     fn on_init(&mut self, ctx: &mut WindowCtx) {
         self.imp.on_init(ctx);
+    }
+    fn on_initialized(&mut self, ctx: &mut WindowCtx) {
+        self.imp.on_initialized(ctx);
     }
     fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
         self.imp.on_click(name, ctx);
@@ -246,8 +262,14 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     fn on_drop_files(&mut self, paths: &[String], ctx: &mut WindowCtx) {
         self.imp.on_drop_files(paths, ctx);
     }
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.imp.on_closing(ctx)
+    }
     fn on_close(&mut self, ctx: &mut WindowCtx) -> bool {
         self.imp.on_close(ctx)
+    }
+    fn on_closed(&mut self) {
+        self.imp.on_closed();
     }
 }
 
@@ -322,7 +344,7 @@ impl<W: WindowImpl> Window<W> {
         self
     }
 
-    /// 启动：加载皮肤 → 建窗 → on_init → 进主事件循环（阻塞）。
+    /// 启动：加载皮肤 → 建窗 → 初始化生命周期 → 进主事件循环（阻塞）。
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn run(self) {
         let spec = match build_window(self.imp) {
@@ -334,5 +356,82 @@ impl<W: WindowImpl> Window<W> {
         };
         // 保留完整 NewWindow，确保主窗口与后续窗口共享本地化环境及其修订号。
         backend_run_multi(vec![spec]);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct TestWindowHandle;
+    impl WindowHandle for TestWindowHandle {
+        fn set_title(&mut self, _title: &str) {}
+        fn close(&mut self) {}
+        fn minimize(&mut self) {}
+        fn maximize(&mut self) {}
+        fn restore(&mut self) {}
+    }
+
+    struct LifecycleWindow {
+        calls: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl WindowImpl for LifecycleWindow {
+        fn skin(&self) -> Skin {
+            Skin::tree(Box::new(Label::new("test")))
+        }
+
+        fn on_before_init(&mut self, _ctx: &mut WindowCtx) {
+            self.calls.borrow_mut().push("before_init");
+        }
+
+        fn on_init(&mut self, _ctx: &mut WindowCtx) {
+            self.calls.borrow_mut().push("init");
+        }
+
+        fn on_initialized(&mut self, _ctx: &mut WindowCtx) {
+            self.calls.borrow_mut().push("initialized");
+        }
+
+        fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
+            self.calls.borrow_mut().push("close_compat");
+            false
+        }
+
+        fn on_closed(&mut self) {
+            self.calls.borrow_mut().push("closed");
+        }
+    }
+
+    #[test]
+    fn 生命周期适配顺序完整且兼容旧关闭钩子() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut delegate = ImplDelegate {
+            imp: LifecycleWindow {
+                calls: calls.clone(),
+            },
+        };
+        let mut root = Label::new("test");
+        let mut window = TestWindowHandle;
+        let mut ctx = WindowCtx::new(&mut root, &mut window);
+
+        delegate.on_before_init(&mut ctx);
+        delegate.on_init(&mut ctx);
+        delegate.on_initialized(&mut ctx);
+        assert!(!delegate.on_closing(&mut ctx));
+        delegate.on_closed();
+
+        assert_eq!(
+            *calls.borrow(),
+            vec![
+                "before_init",
+                "init",
+                "initialized",
+                "close_compat",
+                "closed"
+            ]
+        );
     }
 }

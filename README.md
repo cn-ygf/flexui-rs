@@ -115,6 +115,32 @@ fn main() {
 }
 ```
 
+### UI-Thread Dispatch and Window Lifecycle
+
+`MainProxy` is runtime-independent. Clone it during initialization, then call `post` after a
+thread or async task finishes. The closure runs on the owning window's UI thread, and normal
+`WindowCtx` setters automatically request paint or layout invalidation.
+
+```rust
+fn on_init(&mut self, ctx: &mut WindowCtx) {
+    let ui = ctx.main_proxy().expect("window proxy");
+    std::thread::spawn(move || {
+        let result = load_data();
+        ui.post(move |ctx| {
+            ctx.set_text("status", result);
+            ctx.set_enabled("retry", true);
+        });
+    });
+}
+```
+
+The same `post` call can be made after `.await` inside Tokio, async-std, or another executor;
+FlexUI does not require a particular async runtime. Window hooks are ordered as
+`on_before_init` → `on_init` → `on_initialized` → `on_closing` → `on_closed`.
+`on_closing` can return `false` to cancel closing. `on_closed` has no `WindowCtx`, because the
+native window has already been destroyed. Minimize, maximize, and restore notifications arrive
+through `on_window_event` as `WindowEvent::Minimized`, `Maximized`, and `Restored`.
+
 Inside this workspace, depend on the facade crate with:
 
 ```toml

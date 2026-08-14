@@ -35,9 +35,30 @@ typedef struct FlexDelegate {
   int  (*on_close)(void *ctx, void *user); /* 返回非 0 允许关闭 */
 } FlexDelegate;
 
+enum {
+  FLEX_WINDOW_MINIMIZED = 1,
+  FLEX_WINDOW_MAXIMIZED = 2,
+  FLEX_WINDOW_RESTORED = 3
+};
+
+/* 第二版委托补齐窗口生命周期和最小化/最大化/恢复事件。
+ * 单独提供 V2，避免改变旧 FlexDelegate 的 ABI 布局。 */
+typedef struct FlexDelegateV2 {
+  void (*on_before_init)(void *ctx, void *user);
+  void (*on_init)(void *ctx, void *user);
+  void (*on_initialized)(void *ctx, void *user);
+  void (*on_click)(const char *name, void *ctx, void *user);
+  void (*on_context)(const char *name, float x, float y, void *ctx, void *user);
+  void (*on_window_state)(int state, void *ctx, void *user);
+  int  (*on_closing)(void *ctx, void *user); /* 返回非 0 允许关闭 */
+  void (*on_closed)(void *user);
+} FlexDelegateV2;
+
 /* 用 XML + 委托启动（阻塞）。delegate 可为 NULL。0 成功，负数错误码。 */
 int flex_run(const char *title, int width, int height, const char *xml,
              const FlexDelegate *delegate, void *user);
+int flex_run_v2(const char *title, int width, int height, const char *xml,
+                const FlexDelegateV2 *delegate, void *user);
 
 /* ===== 回调内的窗口上下文操作（FlexCtx*，仅回调期间有效）===== */
 
@@ -49,6 +70,18 @@ int  flex_ctx_is_selected(void *ctx, const char *name);
 void flex_ctx_set_enabled(void *ctx, const char *name, int enabled);
 void flex_ctx_set_title(void *ctx, const char *title);
 void flex_ctx_close(void *ctx);
+
+/* ===== 工作线程/异步任务投递到 UI 线程 ===== */
+
+typedef struct FlexMainProxy FlexMainProxy;
+typedef void (*FlexUiTaskFn)(void *ctx, void *user);
+
+/* 在初始化回调中取得句柄；每个返回值都必须调用 flex_main_proxy_free。 */
+FlexMainProxy *flex_ctx_main_proxy(void *ctx);
+FlexMainProxy *flex_main_proxy_clone(const FlexMainProxy *proxy);
+/* 1 表示任务已接受，0 表示窗口已关闭或参数无效。 */
+int flex_main_proxy_post(const FlexMainProxy *proxy, FlexUiTaskFn task, void *user);
+void flex_main_proxy_free(FlexMainProxy *proxy);
 
 /* ===== 系统剪贴板 ===== */
 
