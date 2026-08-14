@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 flexui = { path = "../flexui" }
+minreq = { version = "2.14", features = ["https-rustls"] }
 
 [build-dependencies]
 zip = { version = "2", default-features = false, features = ["deflate"] }

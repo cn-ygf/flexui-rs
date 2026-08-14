@@ -1,12 +1,15 @@
 use flexui::{
-    load_native_menu_res, ControlEvent, ImageSource, MenuEntry, MenuStyle, NativeMenu,
+    load_native_menu_res, ControlEvent, ImageSource, MainProxy, MenuEntry, MenuStyle, NativeMenu,
     NativeMenuAnchor, NativeMenuItem, NativeSubmenu, Point, ResourceManager, Skin, Theme,
     ThemeMode, WindowCtx, WindowImpl,
 };
 
-use crate::{resources, themes};
+use crate::{http_demo, resources, themes};
 
-pub(crate) struct GalleryWindow;
+#[derive(Default)]
+pub(crate) struct GalleryWindow {
+    ui: Option<MainProxy>,
+}
 
 impl WindowImpl for GalleryWindow {
     fn skin(&self) -> Skin {
@@ -18,6 +21,7 @@ impl WindowImpl for GalleryWindow {
     }
 
     fn on_init(&mut self, ctx: &mut WindowCtx) {
+        self.ui = ctx.main_proxy();
         if ctx
             .theme()
             .is_some_and(|theme| theme.mode == ThemeMode::Dark)
@@ -41,6 +45,13 @@ impl WindowImpl for GalleryWindow {
             "restore_default_theme" => {
                 ctx.set_selected("theme_switch", false);
                 ctx.set_theme(Theme::light());
+            }
+            "http_go" => {
+                if let Some(ui) = self.ui.clone() {
+                    http_demo::start_request(ctx, ui);
+                } else {
+                    ctx.set_text("http_status", "UI thread proxy is unavailable");
+                }
             }
             "open_drawn_menu" => show_drawn_menu(ctx, name),
             "open_xml_native_menu" => {
