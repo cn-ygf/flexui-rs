@@ -969,20 +969,38 @@ mod tests {
     #[test]
     fn directwrite带裁剪写回时保留文字外背景() {
         let _gdiplus = Gdiplus::startup().expect("GDI+ 初始化失败");
-        let bitmap = OffscreenBitmap::new(120, 48).expect("创建离屏位图失败");
+        let bitmap = OffscreenBitmap::new(240, 96).expect("创建离屏位图失败");
         let mut canvas = GdiCanvas::new(bitmap.graphics());
-        canvas.clear(Color::WHITE);
+        canvas.set_dpi_scale(1.5);
+        canvas.save();
+        canvas.clip_rect(Rect::new(0.0, 0.0, 160.0, 64.0));
+        canvas.fill_rect(Rect::new(0.0, 0.0, 160.0, 64.0), Color::WHITE);
         canvas.save();
         canvas.clip_rect(Rect::new(8.0, 4.0, 108.0, 40.0));
         let layout = canvas.layout_text("FlexUI", &Font::system(18.0));
+        let sample_right = ((8.0 + layout.width()) * 1.5).ceil() as i32 + 2;
+        let sample_bottom = ((8.0 + layout.height()) * 1.5).ceil() as i32 + 2;
         canvas.draw_text_layout(&layout, Point::new(8.0, 8.0), Color::BLACK);
+        canvas.restore();
         canvas.restore();
         drop(canvas);
 
         assert_eq!(
-            bitmap.get_pixel(8, 7),
+            bitmap.get_pixel(12, 10),
             0xffff_ffff,
-            "文字外的捕获区域必须保留原背景，不能写成黑块"
+            "字形外区域必须保留原背景，不能写成黑块"
+        );
+        let mut changed = 0;
+        let mut sampled = 0;
+        for y in 10..sample_bottom {
+            for x in 12..sample_right {
+                sampled += 1;
+                changed += i32::from(bitmap.get_pixel(x, y) != 0xffff_ffff);
+            }
+        }
+        assert!(
+            changed * 2 < sampled,
+            "文字像素不能占满写回矩形：changed={changed}, sampled={sampled}"
         );
     }
 }

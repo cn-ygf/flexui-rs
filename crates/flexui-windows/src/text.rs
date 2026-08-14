@@ -1,5 +1,6 @@
 //! DirectWrite 单行排版与绘制。
 
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -7,105 +8,37 @@ use std::sync::OnceLock;
 use flexui_geometry::{Color, Point, Rect, Size};
 use flexui_gfx::{Font, TextBoundary, TextLayout};
 use windows::core::{implement, Ref, Result as WinResult, BOOL, HSTRING};
-use windows::Win32::Foundation::{COLORREF, E_FAIL, E_NOTIMPL};
+use windows::Win32::Foundation::{E_FAIL, E_NOTIMPL, RECT};
 use windows::Win32::Graphics::DirectWrite::{
-    DWriteCreateFactory, IDWriteBitmapRenderTarget, IDWriteFactory, IDWriteGdiInterop,
-    IDWriteInlineObject, IDWritePixelSnapping_Impl, IDWriteRenderingParams, IDWriteTextLayout,
-    IDWriteTextRenderer, IDWriteTextRenderer_Impl, DWRITE_FACTORY_TYPE_SHARED,
-    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_GLYPH_RUN,
+    DWRITE_TEXTURE_CLEARTYPE_3x1, DWriteCreateFactory, IDWriteFactory, IDWriteInlineObject,
+    IDWritePixelSnapping_Impl, IDWriteTextLayout, IDWriteTextRenderer, IDWriteTextRenderer_Impl,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC,
+    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_GLYPH_RUN,
     DWRITE_GLYPH_RUN_DESCRIPTION, DWRITE_HIT_TEST_METRICS, DWRITE_LINE_METRICS, DWRITE_MATRIX,
-    DWRITE_MEASURING_MODE, DWRITE_STRIKETHROUGH, DWRITE_TEXT_METRICS, DWRITE_UNDERLINE,
-    DWRITE_WORD_WRAPPING_NO_WRAP,
+    DWRITE_MEASURING_MODE, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, DWRITE_STRIKETHROUGH,
+    DWRITE_TEXT_METRICS, DWRITE_UNDERLINE, DWRITE_WORD_WRAPPING_NO_WRAP,
 };
-use windows::Win32::Graphics::Gdi::{BitBlt, GetCurrentObject, HDC, OBJ_BITMAP, SRCCOPY};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
+
+use crate::gdiplus::PIXEL_FORMAT_32BPP_PARGB;
 
 const DEFAULT_FONT_FAMILY: &str = "Microsoft YaHei";
 
 #[derive(Clone)]
 pub(crate) struct DirectWriteLayout {
     layout: IDWriteTextLayout,
-    size: Size,
-}
-
-struct RenderedTextBitmap {
-    _target: IDWriteBitmapRenderTarget,
-    bitmap: *mut gp::GpBitmap,
-    scale: f32,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-}
-
-impl Drop for RenderedTextBitmap {
-    fn drop(&mut self) {
-        if !self.bitmap.is_null() {
-            unsafe { gp::GdipDisposeImage(self.bitmap as *mut gp::GpImage) };
-        }
-    }
-}
-
-struct UnclippedGraphicsDc {
-    graphics: *mut gp::GpGraphics,
-    raw_hdc: *mut c_void,
-    state: u32,
-}
-
-impl UnclippedGraphicsDc {
-    unsafe fn acquire(graphics: *mut gp::GpGraphics) -> WinResult<Self> {
-        let mut state = 0;
-        if gp::GdipSaveGraphics(graphics, &mut state) != 0 {
-            return Err(E_FAIL.into());
-        }
-        if gp::GdipResetClip(graphics) != 0 {
-            gp::GdipRestoreGraphics(graphics, state);
-            return Err(E_FAIL.into());
-        }
-
-        let mut raw_hdc = std::ptr::null_mut();
-        if gp::GdipGetDC(graphics, &mut raw_hdc) != 0 || raw_hdc.is_null() {
-            gp::GdipRestoreGraphics(graphics, state);
-            return Err(E_FAIL.into());
-        }
-        Ok(Self {
-            graphics,
-            raw_hdc,
-            state,
-        })
-    }
-
-    fn hdc(&self) -> HDC {
-        HDC(self.raw_hdc.cast())
-    }
-}
-
-impl Drop for UnclippedGraphicsDc {
-    fn drop(&mut self) {
-        unsafe {
-            gp::GdipReleaseDC(self.graphics, self.raw_hdc);
-            gp::GdipRestoreGraphics(self.graphics, self.state);
-        }
-    }
 }
 
 struct DirectWriteSystem {
     factory: IDWriteFactory,
-    gdi: IDWriteGdiInterop,
     renderer: IDWriteTextRenderer,
 }
 
 impl DirectWriteSystem {
     fn new() -> WinResult<Self> {
         let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)? };
-        let gdi = unsafe { factory.GetGdiInterop()? };
-        let renderer: IDWriteTextRenderer = BitmapTextRenderer.into();
-        Ok(Self {
-            factory,
-            gdi,
-            renderer,
-        })
+        let renderer: IDWriteTextRenderer = AlphaMaskTextRenderer.into();
+        Ok(Self { factory, renderer })
     }
 
     fn layout(&self, text: &str, font: &Font) -> WinResult<TextLayout> {
@@ -167,7 +100,7 @@ impl DirectWriteSystem {
         let size = Size::new(width, height.max(ascent + descent));
         Ok(
             TextLayout::new(text, font.clone(), size, ascent, descent, boundaries)
-                .with_platform_data(Rc::new(DirectWriteLayout { layout, size })),
+                .with_platform_data(Rc::new(DirectWriteLayout { layout })),
         )
     }
 
@@ -180,141 +113,64 @@ impl DirectWriteSystem {
         origin: Point,
         color: Color,
     ) -> WinResult<()> {
-        let alpha = alpha_byte(color);
-        if alpha == 0 {
+        if color.a <= 0.0 {
             return Ok(());
         }
-        // GdipGetDC 会继承当前裁剪区。Edit 在绘制文字前设置了裁剪，直接按窗口坐标
-        // 从该 HDC 读取背景会命中黑色临时表面，因此捕获背景时临时清除裁剪。
-        let dc = unsafe { UnclippedGraphicsDc::acquire(graphics)? };
-        let result: WinResult<Option<RenderedTextBitmap>> = (|| {
-            let scale = scale.max(0.1);
-            let padding = 2i32;
-            let full_x = (origin.x * scale).floor() as i32 - padding;
-            let full_y = (origin.y * scale).floor() as i32 - padding;
-            let full_right = ((origin.x + layout.size.width) * scale).ceil() as i32 + padding;
-            let full_bottom = ((origin.y + layout.size.height) * scale).ceil() as i32 + padding;
-            let full_width = full_right.saturating_sub(full_x).max(1) as u32;
-            let full_height = full_bottom.saturating_sub(full_y).max(1) as u32;
-            let (blit_x, blit_y, blit_width, blit_height) =
-                clipped_blit(full_x, full_y, full_width, full_height, clip, scale);
-            if blit_width <= 0 || blit_height <= 0 {
-                return Ok(None);
-            }
-            let source = dc.hdc();
-            let target = unsafe {
-                self.gdi.CreateBitmapRenderTarget(
-                    Some(source),
-                    blit_width as u32,
-                    blit_height as u32,
-                )?
-            };
-            unsafe { target.SetPixelsPerDip(scale)? };
-            let identity = DWRITE_MATRIX {
-                m11: 1.0,
-                m12: 0.0,
-                m21: 0.0,
-                m22: 1.0,
-                dx: 0.0,
-                dy: 0.0,
-            };
-            unsafe { target.SetCurrentTransform(Some(&identity))? };
-            let memory = unsafe { target.GetMemoryDC() };
-            unsafe {
-                BitBlt(
-                    memory,
-                    0,
-                    0,
-                    blit_width,
-                    blit_height,
-                    Some(source),
-                    blit_x,
-                    blit_y,
-                    SRCCOPY,
-                )?;
-            }
-            let context = DrawContext {
-                target: &target,
-                color: colorref(color),
-                scale,
-            };
-            unsafe {
-                layout.layout.Draw(
-                    Some((&context as *const DrawContext).cast::<c_void>()),
-                    &self.renderer,
-                    origin.x - blit_x as f32 / scale,
-                    origin.y - blit_y as f32 / scale,
-                )?;
-                let hbitmap = GetCurrentObject(memory, OBJ_BITMAP);
-                if hbitmap.0.is_null() {
-                    return Err(E_FAIL.into());
-                }
-                let mut bitmap: *mut gp::GpBitmap = std::ptr::null_mut();
-                if gp::GdipCreateBitmapFromHBITMAP(hbitmap.0, std::ptr::null_mut(), &mut bitmap)
-                    != 0
-                    || bitmap.is_null()
-                {
-                    return Err(E_FAIL.into());
-                }
-                Ok(Some(RenderedTextBitmap {
-                    _target: target,
-                    bitmap,
-                    scale,
-                    x: blit_x,
-                    y: blit_y,
-                    width: blit_width,
-                    height: blit_height,
-                }))
-            }
-        })();
-        drop(dc);
-        let Some(rendered) = result? else {
-            return Ok(());
+        let scale = scale.max(0.1);
+        let context = DrawContext {
+            factory: &self.factory,
+            scale,
+            clip: clip.map(|rect| physical_rect(rect, scale)),
+            color: color_bytes(color),
+            glyphs: RefCell::new(Vec::new()),
         };
+        unsafe {
+            layout.layout.Draw(
+                Some((&context as *const DrawContext).cast::<c_void>()),
+                &self.renderer,
+                origin.x,
+                origin.y,
+            )?;
+        }
 
-        let mut attributes: *mut gp::GpImageAttributes = std::ptr::null_mut();
-        if alpha < u8::MAX {
-            if gp::GdipCreateImageAttributes(&mut attributes) != 0 || attributes.is_null() {
-                return Err(E_FAIL.into());
-            }
-            let matrix = opacity_matrix(alpha as f32 / 255.0);
-            if gp::GdipSetImageAttributesColorMatrix(
-                attributes,
-                gp::ColorAdjustTypeDefault,
-                1,
-                &matrix,
-                std::ptr::null(),
-                gp::ColorMatrixFlagsDefault,
+        for glyph in context.glyphs.into_inner() {
+            let width = glyph.bounds.right - glyph.bounds.left;
+            let height = glyph.bounds.bottom - glyph.bounds.top;
+            let mut bitmap: *mut gp::GpBitmap = std::ptr::null_mut();
+            if gp::GdipCreateBitmapFromScan0(
+                width,
+                height,
+                width * 4,
+                PIXEL_FORMAT_32BPP_PARGB,
+                glyph.pixels.as_ptr(),
+                &mut bitmap,
             ) != 0
+                || bitmap.is_null()
             {
-                gp::GdipDisposeImageAttributes(attributes);
+                return Err(E_FAIL.into());
+            }
+            let status = gp::GdipDrawImageRectRect(
+                graphics,
+                bitmap as *mut gp::GpImage,
+                glyph.bounds.left as f32 / scale,
+                glyph.bounds.top as f32 / scale,
+                width as f32 / scale,
+                height as f32 / scale,
+                0.0,
+                0.0,
+                width as f32,
+                height as f32,
+                gp::UnitPixel,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+            );
+            gp::GdipDisposeImage(bitmap as *mut gp::GpImage);
+            if status != 0 {
                 return Err(E_FAIL.into());
             }
         }
-        let status = gp::GdipDrawImageRectRect(
-            graphics,
-            rendered.bitmap as *mut gp::GpImage,
-            rendered.x as f32 / rendered.scale,
-            rendered.y as f32 / rendered.scale,
-            rendered.width as f32 / rendered.scale,
-            rendered.height as f32 / rendered.scale,
-            0.0,
-            0.0,
-            rendered.width as f32,
-            rendered.height as f32,
-            gp::UnitPixel,
-            attributes,
-            0,
-            std::ptr::null_mut(),
-        );
-        if !attributes.is_null() {
-            gp::GdipDisposeImageAttributes(attributes);
-        }
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(E_FAIL.into())
-        }
+        Ok(())
     }
 }
 
@@ -355,59 +211,66 @@ pub(crate) unsafe fn draw_text_layout(
     })
 }
 
-fn clipped_blit(
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-    clip: Option<Rect>,
-    scale: f32,
-) -> (i32, i32, i32, i32) {
-    let right = x.saturating_add(width as i32);
-    let bottom = y.saturating_add(height as i32);
-    let Some(clip) = clip else {
-        return (x, y, width as i32, height as i32);
-    };
-    let clip_left = (clip.left() * scale).floor() as i32;
-    let clip_top = (clip.top() * scale).floor() as i32;
-    let clip_right = (clip.right() * scale).ceil() as i32;
-    let clip_bottom = (clip.bottom() * scale).ceil() as i32;
-    let blit_x = x.max(clip_left);
-    let blit_y = y.max(clip_top);
-    let blit_right = right.min(clip_right).max(blit_x);
-    let blit_bottom = bottom.min(clip_bottom).max(blit_y);
-    (blit_x, blit_y, blit_right - blit_x, blit_bottom - blit_y)
+fn physical_rect(rect: Rect, scale: f32) -> RECT {
+    RECT {
+        left: (rect.left() * scale).floor() as i32,
+        top: (rect.top() * scale).floor() as i32,
+        right: (rect.right() * scale).ceil() as i32,
+        bottom: (rect.bottom() * scale).ceil() as i32,
+    }
 }
 
-fn colorref(color: Color) -> COLORREF {
-    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
-    COLORREF(channel(color.r) | (channel(color.g) << 8) | (channel(color.b) << 16))
+fn intersect_rect(a: RECT, b: RECT) -> RECT {
+    let left = a.left.max(b.left);
+    let top = a.top.max(b.top);
+    RECT {
+        left,
+        top,
+        right: a.right.min(b.right).max(left),
+        bottom: a.bottom.min(b.bottom).max(top),
+    }
 }
 
-fn alpha_byte(color: Color) -> u8 {
-    (color.a.clamp(0.0, 1.0) * 255.0).round() as u8
+fn color_bytes(color: Color) -> [u8; 4] {
+    let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [byte(color.r), byte(color.g), byte(color.b), byte(color.a)]
 }
 
-fn opacity_matrix(alpha: f32) -> gp::ColorMatrix {
-    let mut matrix = [0.0; 25];
-    matrix[0] = 1.0;
-    matrix[6] = 1.0;
-    matrix[12] = 1.0;
-    matrix[18] = alpha.clamp(0.0, 1.0);
-    matrix[24] = 1.0;
-    gp::ColorMatrix { m: matrix }
+fn alpha_texture_to_pargb(texture: &[u8], color: [u8; 4]) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(texture.len() / 3 * 4);
+    for coverage in texture.chunks_exact(3) {
+        // GDI+ 只支持单 alpha，取 ClearType 三通道均值生成灰度抗锯齿蒙版。
+        let coverage =
+            (u16::from(coverage[0]) + u16::from(coverage[1]) + u16::from(coverage[2]) + 1) / 3;
+        let alpha = (coverage * u16::from(color[3]) + 127) / 255;
+        let premultiply = |channel: u8| ((u16::from(channel) * alpha + 127) / 255) as u8;
+        pixels.extend_from_slice(&[
+            premultiply(color[2]),
+            premultiply(color[1]),
+            premultiply(color[0]),
+            alpha as u8,
+        ]);
+    }
+    pixels
+}
+
+struct GlyphBitmap {
+    bounds: RECT,
+    pixels: Vec<u8>,
 }
 
 struct DrawContext<'a> {
-    target: &'a IDWriteBitmapRenderTarget,
-    color: COLORREF,
+    factory: &'a IDWriteFactory,
     scale: f32,
+    clip: Option<RECT>,
+    color: [u8; 4],
+    glyphs: RefCell<Vec<GlyphBitmap>>,
 }
 
 #[implement(IDWriteTextRenderer)]
-struct BitmapTextRenderer;
+struct AlphaMaskTextRenderer;
 
-impl IDWritePixelSnapping_Impl for BitmapTextRenderer_Impl {
+impl IDWritePixelSnapping_Impl for AlphaMaskTextRenderer_Impl {
     fn IsPixelSnappingDisabled(&self, _context: *const c_void) -> WinResult<BOOL> {
         Ok(false.into())
     }
@@ -441,7 +304,7 @@ impl IDWritePixelSnapping_Impl for BitmapTextRenderer_Impl {
     }
 }
 
-impl IDWriteTextRenderer_Impl for BitmapTextRenderer_Impl {
+impl IDWriteTextRenderer_Impl for AlphaMaskTextRenderer_Impl {
     fn DrawGlyphRun(
         &self,
         context: *const c_void,
@@ -456,17 +319,35 @@ impl IDWriteTextRenderer_Impl for BitmapTextRenderer_Impl {
             return Ok(());
         }
         let context = unsafe { &*(context.cast::<DrawContext>()) };
-        unsafe {
-            context.target.DrawGlyphRun(
+        let analysis = unsafe {
+            context.factory.CreateGlyphRunAnalysis(
+                glyph_run,
+                context.scale,
+                None,
+                DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+                measuring_mode,
                 baseline_x,
                 baseline_y,
-                measuring_mode,
-                glyph_run,
-                None::<&IDWriteRenderingParams>,
-                context.color,
-                None,
-            )
+            )?
+        };
+        let mut bounds = unsafe { analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1)? };
+        if let Some(clip) = context.clip {
+            bounds = intersect_rect(bounds, clip);
         }
+        let width = bounds.right - bounds.left;
+        let height = bounds.bottom - bounds.top;
+        if width <= 0 || height <= 0 {
+            return Ok(());
+        }
+        let mut texture = vec![0; width as usize * height as usize * 3];
+        unsafe {
+            analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut texture)?;
+        }
+        context.glyphs.borrow_mut().push(GlyphBitmap {
+            bounds,
+            pixels: alpha_texture_to_pargb(&texture, context.color),
+        });
+        Ok(())
     }
 
     fn DrawUnderline(
@@ -510,44 +391,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blit裁剪支持负偏移() {
+    fn 逻辑裁剪按dpi转换为物理像素() {
+        let rect = physical_rect(Rect::new(10.25, 4.25, 20.0, 10.0), 2.0);
         assert_eq!(
-            clipped_blit(-12, 8, 40, 20, Some(Rect::new(0.0, 10.0, 20.0, 10.0)), 1.0,),
-            (0, 10, 20, 10)
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (20, 8, 61, 29)
         );
     }
 
     #[test]
-    fn blit裁剪按dpi转换为物理像素() {
-        assert_eq!(
-            clipped_blit(0, 0, 100, 50, Some(Rect::new(10.25, 4.25, 20.0, 10.0)), 2.0,),
-            (20, 8, 41, 21)
+    fn 物理裁剪无交集时返回空区域() {
+        let rect = intersect_rect(
+            RECT {
+                left: 30,
+                top: 30,
+                right: 40,
+                bottom: 40,
+            },
+            RECT {
+                left: 0,
+                top: 0,
+                right: 10,
+                bottom: 10,
+            },
         );
-    }
-
-    #[test]
-    fn blit裁剪在无交集时返回空区域() {
         assert_eq!(
-            clipped_blit(30, 30, 10, 10, Some(Rect::new(0.0, 0.0, 10.0, 10.0)), 1.0,),
-            (30, 30, 0, 0)
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (30, 30, 30, 30)
         );
     }
 
     #[test]
     fn 文字透明度转换覆盖边界值() {
-        assert_eq!(alpha_byte(Color::rgba(0.0, 0.0, 0.0, -1.0)), 0);
-        assert_eq!(alpha_byte(Color::rgba(0.0, 0.0, 0.0, 0.5)), 128);
-        assert_eq!(alpha_byte(Color::rgba(0.0, 0.0, 0.0, 2.0)), 255);
+        assert_eq!(color_bytes(Color::rgba(0.0, 0.0, 0.0, -1.0))[3], 0);
+        assert_eq!(color_bytes(Color::rgba(0.0, 0.0, 0.0, 0.5))[3], 128);
+        assert_eq!(color_bytes(Color::rgba(0.0, 0.0, 0.0, 2.0))[3], 255);
     }
 
     #[test]
-    fn 透明度矩阵只改变alpha通道() {
-        let matrix = opacity_matrix(0.5);
-        assert_eq!(matrix.m[0], 1.0);
-        assert_eq!(matrix.m[6], 1.0);
-        assert_eq!(matrix.m[12], 1.0);
-        assert_eq!(matrix.m[18], 0.5);
-        assert_eq!(matrix.m[24], 1.0);
-        assert_eq!(matrix.m.iter().filter(|&&value| value != 0.0).count(), 5);
+    fn 字形覆盖率转换为预乘argb() {
+        assert_eq!(
+            alpha_texture_to_pargb(&[255, 255, 255], [128, 64, 32, 128]),
+            [16, 32, 64, 128]
+        );
+        assert_eq!(
+            alpha_texture_to_pargb(&[0, 0, 0], [128, 64, 32, 128]),
+            [0, 0, 0, 0]
+        );
     }
 }
