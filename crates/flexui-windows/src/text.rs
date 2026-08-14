@@ -47,6 +47,49 @@ impl Drop for RenderedTextBitmap {
     }
 }
 
+struct UnclippedGraphicsDc {
+    graphics: *mut gp::GpGraphics,
+    raw_hdc: *mut c_void,
+    state: u32,
+}
+
+impl UnclippedGraphicsDc {
+    unsafe fn acquire(graphics: *mut gp::GpGraphics) -> WinResult<Self> {
+        let mut state = 0;
+        if gp::GdipSaveGraphics(graphics, &mut state) != 0 {
+            return Err(E_FAIL.into());
+        }
+        if gp::GdipResetClip(graphics) != 0 {
+            gp::GdipRestoreGraphics(graphics, state);
+            return Err(E_FAIL.into());
+        }
+
+        let mut raw_hdc = std::ptr::null_mut();
+        if gp::GdipGetDC(graphics, &mut raw_hdc) != 0 || raw_hdc.is_null() {
+            gp::GdipRestoreGraphics(graphics, state);
+            return Err(E_FAIL.into());
+        }
+        Ok(Self {
+            graphics,
+            raw_hdc,
+            state,
+        })
+    }
+
+    fn hdc(&self) -> HDC {
+        HDC(self.raw_hdc.cast())
+    }
+}
+
+impl Drop for UnclippedGraphicsDc {
+    fn drop(&mut self) {
+        unsafe {
+            gp::GdipReleaseDC(self.graphics, self.raw_hdc);
+            gp::GdipRestoreGraphics(self.graphics, self.state);
+        }
+    }
+}
+
 struct DirectWriteSystem {
     factory: IDWriteFactory,
     gdi: IDWriteGdiInterop,
@@ -141,10 +184,9 @@ impl DirectWriteSystem {
         if alpha == 0 {
             return Ok(());
         }
-        let mut raw_hdc = std::ptr::null_mut();
-        if gp::GdipGetDC(graphics, &mut raw_hdc) != 0 || raw_hdc.is_null() {
-            return Err(E_FAIL.into());
-        }
+        // GdipGetDC 会继承当前裁剪区。Edit 在绘制文字前设置了裁剪，直接按窗口坐标
+        // 从该 HDC 读取背景会命中黑色临时表面，因此捕获背景时临时清除裁剪。
+        let dc = unsafe { UnclippedGraphicsDc::acquire(graphics)? };
         let result: WinResult<Option<RenderedTextBitmap>> = (|| {
             let scale = scale.max(0.1);
             let padding = 2i32;
@@ -159,7 +201,7 @@ impl DirectWriteSystem {
             if blit_width <= 0 || blit_height <= 0 {
                 return Ok(None);
             }
-            let source = HDC(raw_hdc.cast());
+            let source = dc.hdc();
             let target = unsafe {
                 self.gdi.CreateBitmapRenderTarget(
                     Some(source),
@@ -225,7 +267,7 @@ impl DirectWriteSystem {
                 }))
             }
         })();
-        gp::GdipReleaseDC(graphics, raw_hdc);
+        drop(dc);
         let Some(rendered) = result? else {
             return Ok(());
         };

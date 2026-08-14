@@ -965,4 +965,24 @@ mod tests {
             "写回 GDI+ 后备位图时不能丢失 alpha"
         );
     }
+
+    #[test]
+    fn directwrite带裁剪写回时保留文字外背景() {
+        let _gdiplus = Gdiplus::startup().expect("GDI+ 初始化失败");
+        let bitmap = OffscreenBitmap::new(120, 48).expect("创建离屏位图失败");
+        let mut canvas = GdiCanvas::new(bitmap.graphics());
+        canvas.clear(Color::WHITE);
+        canvas.save();
+        canvas.clip_rect(Rect::new(8.0, 4.0, 108.0, 40.0));
+        let layout = canvas.layout_text("FlexUI", &Font::system(18.0));
+        canvas.draw_text_layout(&layout, Point::new(8.0, 8.0), Color::BLACK);
+        canvas.restore();
+        drop(canvas);
+
+        assert_eq!(
+            bitmap.get_pixel(8, 7),
+            0xffff_ffff,
+            "文字外的捕获区域必须保留原背景，不能写成黑块"
+        );
+    }
 }
