@@ -80,6 +80,50 @@ impl Rect {
     }
 }
 
+/// 把居中描边转换为整数物理像素宽度，并返回位于原矩形内部的中心路径。
+///
+/// 返回的线宽仍使用逻辑像素；调用方施加相同的 DPI 缩放后，边框外沿会落在
+/// 物理像素边界上，避免细线跨像素产生灰色颗粒。矩形过小或参数无效时返回 None。
+pub fn pixel_aligned_stroke(rect: Rect, line_width: f32, scale: f32) -> Option<(Rect, f32)> {
+    if !line_width.is_finite()
+        || line_width <= 0.0
+        || !scale.is_finite()
+        || scale <= 0.0
+        || !rect.origin.x.is_finite()
+        || !rect.origin.y.is_finite()
+        || !rect.size.width.is_finite()
+        || !rect.size.height.is_finite()
+        || rect.size.width <= 0.0
+        || rect.size.height <= 0.0
+    {
+        return None;
+    }
+
+    let physical_width = (line_width * scale).round().max(1.0);
+    let left = (rect.left() * scale).ceil();
+    let top = (rect.top() * scale).ceil();
+    let right = (rect.right() * scale).floor();
+    let bottom = (rect.bottom() * scale).floor();
+    let inset = physical_width / 2.0;
+    if right - left < physical_width || bottom - top < physical_width {
+        return None;
+    }
+
+    let path_left = left + inset;
+    let path_top = top + inset;
+    let path_right = right - inset;
+    let path_bottom = bottom - inset;
+    Some((
+        Rect::new(
+            path_left / scale,
+            path_top / scale,
+            (path_right - path_left) / scale,
+            (path_bottom - path_top) / scale,
+        ),
+        physical_width / scale,
+    ))
+}
+
 /// 四边内边距/外框厚度。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Insets {
@@ -162,5 +206,59 @@ impl Corners {
             br: r,
             bl: r,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(actual: f32, expected: f32) {
+        assert!((actual - expected).abs() < 0.0001, "{actual} != {expected}");
+    }
+
+    #[test]
+    fn 单像素描边中心落在半像素位置() {
+        let (path, width) =
+            pixel_aligned_stroke(Rect::new(0.0, 0.0, 100.0, 40.0), 1.0, 1.0).unwrap();
+        assert_eq!(path, Rect::new(0.5, 0.5, 99.0, 39.0));
+        assert_eq!(width, 1.0);
+    }
+
+    #[test]
+    fn 分数_dpi_将线宽吸附到整数物理像素() {
+        let (path_125, width_125) =
+            pixel_aligned_stroke(Rect::new(0.0, 0.0, 100.0, 40.0), 1.0, 1.25).unwrap();
+        close(width_125 * 1.25, 1.0);
+        close(path_125.left() * 1.25, 0.5);
+        close(path_125.right() * 1.25, 124.5);
+
+        let (path_150, width_150) =
+            pixel_aligned_stroke(Rect::new(0.0, 0.0, 100.0, 40.0), 1.0, 1.5).unwrap();
+        close(width_150 * 1.5, 2.0);
+        close(path_150.left() * 1.5, 1.0);
+        close(path_150.right() * 1.5, 149.0);
+
+        let (_, width_200) =
+            pixel_aligned_stroke(Rect::new(0.0, 0.0, 100.0, 40.0), 1.0, 2.0).unwrap();
+        close(width_200 * 2.0, 2.0);
+    }
+
+    #[test]
+    fn 对齐后的描边不会超出原矩形() {
+        let rect = Rect::new(0.2, 0.2, 10.4, 8.4);
+        let (path, width) = pixel_aligned_stroke(rect, 1.0, 1.25).unwrap();
+        let half = width / 2.0;
+        assert!(path.left() - half >= rect.left());
+        assert!(path.top() - half >= rect.top());
+        assert!(path.right() + half <= rect.right());
+        assert!(path.bottom() + half <= rect.bottom());
+    }
+
+    #[test]
+    fn 无效或过小的描边区域被拒绝() {
+        assert!(pixel_aligned_stroke(Rect::new(0.0, 0.0, 0.5, 0.5), 1.0, 1.0).is_none());
+        assert!(pixel_aligned_stroke(Rect::new(0.0, 0.0, 10.0, 10.0), 0.0, 1.0).is_none());
+        assert!(pixel_aligned_stroke(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0, 0.0).is_none());
     }
 }

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use flexui_geometry::{Color, Corners, Point, Rect, Size};
+use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;
@@ -74,6 +74,31 @@ impl GdiCanvas<'_> {
                 )
             };
         }
+    }
+
+    /// 让圆角描边的外沿保持原半径，中心路径半径随向内收缩量同步减小。
+    fn aligned_stroke(
+        &self,
+        rect: Rect,
+        radius: Corners,
+        line_width: f32,
+    ) -> Option<(Rect, Corners, f32)> {
+        let (path, aligned_width) = pixel_aligned_stroke(rect, line_width, self.dpi_scale)?;
+        let physical_width = aligned_width * self.dpi_scale;
+        let align_radius = |value: f32| {
+            ((value.max(0.0) * self.dpi_scale).round() - physical_width / 2.0).max(0.0)
+                / self.dpi_scale
+        };
+        Some((
+            path,
+            Corners {
+                tl: align_radius(radius.tl),
+                tr: align_radius(radius.tr),
+                br: align_radius(radius.br),
+                bl: align_radius(radius.bl),
+            },
+            aligned_width,
+        ))
     }
 }
 
@@ -502,16 +527,20 @@ impl Canvas for GdiCanvas<'_> {
     }
 
     fn stroke_rect(&mut self, rect: Rect, color: Color, line_width: f32) {
+        let Some((path, _, line_width)) = self.aligned_stroke(rect, Corners::default(), line_width)
+        else {
+            return;
+        };
         unsafe {
             let mut pen: *mut gp::GpPen = std::ptr::null_mut();
             gp::GdipCreatePen1(argb(color), line_width, UNIT_PIXEL, &mut pen);
-            gp::GdipDrawRectangleI(
+            gp::GdipDrawRectangle(
                 self.g,
                 pen,
-                ri(rect.left()),
-                ri(rect.top()),
-                ri(rect.size.width),
-                ri(rect.size.height),
+                path.left(),
+                path.top(),
+                path.size.width,
+                path.size.height,
             );
             gp::GdipDeletePen(pen);
         }
@@ -578,8 +607,13 @@ impl Canvas for GdiCanvas<'_> {
     }
 
     fn stroke_round_rect(&mut self, rect: Rect, radius: Corners, color: Color, line_width: f32) {
+        let Some((path_rect, path_radius, line_width)) =
+            self.aligned_stroke(rect, radius, line_width)
+        else {
+            return;
+        };
         unsafe {
-            let path = self.build_round_path(rect, radius);
+            let path = self.build_round_path(path_rect, path_radius);
             let mut pen: *mut gp::GpPen = std::ptr::null_mut();
             gp::GdipCreatePen1(argb(color), line_width, UNIT_PIXEL, &mut pen);
             gp::GdipDrawPath(self.g, pen, path);
