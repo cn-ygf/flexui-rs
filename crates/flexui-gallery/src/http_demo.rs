@@ -1,6 +1,6 @@
 use flexui::{MainProxy, WindowCtx};
 
-const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 
 pub(crate) fn start_request(ctx: &mut WindowCtx, ui: MainProxy) {
     let url = ctx.text("http_url").unwrap_or_default().trim().to_owned();
@@ -82,9 +82,12 @@ fn fetch(url: &str) -> Result<HttpResponse, String> {
     }
     let body = String::from_utf8_lossy(&bytes);
     let suffix = if truncated {
-        "\n\n[Response truncated at 256 KiB]"
+        format!(
+            "\n\n[Response truncated at {} KiB]",
+            MAX_RESPONSE_BYTES / 1024
+        )
     } else {
-        ""
+        String::new()
     };
     let content = format!(
         "HTTP {} {}\nContent-Type: {}\nReceived: {} bytes\n\n{}{}",
@@ -106,7 +109,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
-    use super::{fetch, validate_url};
+    use super::{fetch, validate_url, MAX_RESPONSE_BYTES};
 
     #[test]
     fn 只接受_http_和_https_url() {
@@ -138,5 +141,35 @@ mod tests {
         assert_eq!(response.summary, "HTTP 200 · 12 bytes");
         assert!(response.content.contains("Content-Type: text/plain"));
         assert!(response.content.ends_with("hello flexui"));
+    }
+
+    #[test]
+    fn 后台请求限制响应正文大小() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            stream.read(&mut request).unwrap();
+            let body = vec![b'x'; MAX_RESPONSE_BYTES + 1];
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let response = fetch(&format!("http://{address}/large")).unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            response.summary,
+            format!("HTTP 200 · {MAX_RESPONSE_BYTES} bytes")
+        );
+        assert!(response.content.ends_with(&format!(
+            "[Response truncated at {} KiB]",
+            MAX_RESPONSE_BYTES / 1024
+        )));
     }
 }

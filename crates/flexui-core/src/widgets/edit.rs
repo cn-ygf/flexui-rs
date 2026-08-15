@@ -206,13 +206,11 @@ impl Edit {
     }
 
     fn grapheme_char_boundaries(text: &str) -> Vec<usize> {
-        let mut boundaries = text
-            .grapheme_indices(true)
-            .map(|(byte, _)| Self::byte_to_char(text, byte))
-            .collect::<Vec<_>>();
-        let end = text.chars().count();
-        if boundaries.last().copied() != Some(end) {
-            boundaries.push(end);
+        let mut boundaries = vec![0];
+        let mut char_index = 0;
+        for grapheme in text.graphemes(true) {
+            char_index += grapheme.chars().count();
+            boundaries.push(char_index);
         }
         boundaries
     }
@@ -677,25 +675,29 @@ impl Widget for Edit {
         self.lines = lines;
         self.line_h = cv.layout_text("Ag", &self.base.font).height();
 
-        let before = self
-            .base
-            .text
-            .chars()
-            .take(self.state.cursor)
-            .collect::<String>();
-        let after = self
-            .base
-            .text
-            .chars()
-            .skip(self.state.cursor)
-            .collect::<String>();
-        let display = format!(
-            "{}{}{}",
-            self.display_slice(&before),
-            self.display_slice(&self.state.marked),
-            self.display_slice(&after)
-        );
-        self.display_layout = Some(cv.layout_text(&display, &self.base.font));
+        self.display_layout = if self.config.multiline {
+            None
+        } else {
+            let before = self
+                .base
+                .text
+                .chars()
+                .take(self.state.cursor)
+                .collect::<String>();
+            let after = self
+                .base
+                .text
+                .chars()
+                .skip(self.state.cursor)
+                .collect::<String>();
+            let display = format!(
+                "{}{}{}",
+                self.display_slice(&before),
+                self.display_slice(&self.state.marked),
+                self.display_slice(&after)
+            );
+            Some(cv.layout_text(&display, &self.base.font))
+        };
         let placeholder_style = self
             .config
             .placeholder_style
@@ -1345,6 +1347,17 @@ mod tests {
         let h1 = one.measure(Size::new(200.0, 200.0), &cv).height;
         let h3 = three.measure(Size::new(200.0, 200.0), &cv).height;
         assert!(h3 > h1, "三行应比一行高: {h3} vs {h1}");
+    }
+
+    #[test]
+    fn 多行不创建整段单行排版缓存() {
+        let cv = FakeCanvas;
+        let mut edit = Edit::new().multiline(true).text("first\nsecond");
+
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 80.0), &cv);
+
+        assert!(edit.display_layout.is_none());
+        assert_eq!(edit.lines.len(), 2);
     }
 
     struct FakeCanvas;
