@@ -26,6 +26,11 @@ const DEFAULT_HEADER_HEIGHT: f32 = 40.0;
 const CELL_PADDING: f32 = 10.0;
 const RESIZE_HIT_WIDTH: f32 = 5.0;
 const CELL_CACHE_CAPACITY: usize = 4096;
+const MARQUEE_DRAG_THRESHOLD: f32 = 4.0;
+const MARQUEE_EDGE_SCROLL_ZONE: f32 = 24.0;
+const MARQUEE_EDGE_SCROLL_STEP: f32 = 18.0;
+const MARQUEE_DASH_LENGTH: f32 = 4.0;
+const MARQUEE_DASH_GAP: f32 = 3.0;
 
 mod model;
 
@@ -39,6 +44,17 @@ struct ColumnResize {
     index: usize,
     start_x: f32,
     start_width: f32,
+}
+
+#[derive(Debug, Clone)]
+struct MarqueeSelection {
+    start: Point,
+    current: Point,
+    origin_content: Point,
+    base_selection: BTreeSet<u64>,
+    extend: bool,
+    toggle: bool,
+    active: bool,
 }
 
 #[derive(Clone, Eq)]
@@ -105,6 +121,7 @@ pub struct VirtualList {
     scroll: ScrollState,
     scrollbar: ScrollBarStyle,
     resize: Option<ColumnResize>,
+    marquee: Option<MarqueeSelection>,
     source_revision: Cell<u64>,
     cache_font: Option<Font>,
     cell_cache: RefCell<CellLayoutCache>,
@@ -133,6 +150,7 @@ impl VirtualList {
             scroll: ScrollState::new(ScrollAxes::both()),
             scrollbar: ScrollBarStyle::default(),
             resize: None,
+            marquee: None,
             source_revision: Cell::new(0),
             cache_font: None,
             cell_cache: RefCell::new(CellLayoutCache::default()),
@@ -377,6 +395,126 @@ impl VirtualList {
         let local = y - body.top() + self.scroll.offset().y;
         let row = (local / self.row_height).floor().max(0.0) as usize;
         (row < self.source.row_count()).then_some(row)
+    }
+
+    fn begin_marquee(&mut self, pos: Point, extend: bool, toggle: bool) {
+        let body = self.body_rect();
+        let offset = self.scroll.offset();
+        self.marquee = Some(MarqueeSelection {
+            start: pos,
+            current: pos,
+            origin_content: Point::new(
+                pos.x - body.left() + offset.x,
+                pos.y - body.top() + offset.y,
+            ),
+            base_selection: self.selected_rows.clone(),
+            extend,
+            toggle,
+            active: false,
+        });
+    }
+
+    fn update_marquee(&mut self, pos: Point) {
+        let Some(mut marquee) = self.marquee.take() else {
+            return;
+        };
+        marquee.current = pos;
+        if !marquee.active {
+            let dx = pos.x - marquee.start.x;
+            let dy = pos.y - marquee.start.y;
+            marquee.active = dx * dx + dy * dy >= MARQUEE_DRAG_THRESHOLD.powi(2);
+        }
+        if !marquee.active {
+            self.marquee = Some(marquee);
+            return;
+        }
+
+        let body = self.body_rect();
+        let offset = self.scroll.offset();
+        let scroll_delta = if pos.y < body.top() + MARQUEE_EDGE_SCROLL_ZONE {
+            -((body.top() + MARQUEE_EDGE_SCROLL_ZONE - pos.y) / MARQUEE_EDGE_SCROLL_ZONE)
+                .clamp(0.0, 2.0)
+                * MARQUEE_EDGE_SCROLL_STEP
+        } else if pos.y > body.bottom() - MARQUEE_EDGE_SCROLL_ZONE {
+            ((pos.y - (body.bottom() - MARQUEE_EDGE_SCROLL_ZONE)) / MARQUEE_EDGE_SCROLL_ZONE)
+                .clamp(0.0, 2.0)
+                * MARQUEE_EDGE_SCROLL_STEP
+        } else {
+            0.0
+        };
+        if scroll_delta != 0.0 {
+            self.scroll.set_offset(offset.x, offset.y + scroll_delta);
+        }
+
+        marquee.current = Point::new(
+            pos.x.clamp(body.left(), body.right()),
+            pos.y.clamp(body.top(), body.bottom()),
+        );
+        let current_content_y = marquee.current.y - body.top() + self.scroll.offset().y;
+        let top = marquee.origin_content.y.min(current_content_y).max(0.0);
+        let bottom = marquee
+            .origin_content
+            .y
+            .max(current_content_y)
+            .max(top + 0.001);
+        let count = self.source.row_count();
+        let first = ((top / self.row_height).floor() as usize).min(count);
+        let end = (((bottom - 0.001) / self.row_height).floor() as usize)
+            .saturating_add(1)
+            .min(count);
+        let hits = (first..end)
+            .map(|row| self.source.row_id(row))
+            .collect::<BTreeSet<_>>();
+
+        self.selected_rows = if marquee.toggle {
+            let mut selected = marquee.base_selection.clone();
+            for id in hits {
+                if !selected.remove(&id) {
+                    selected.insert(id);
+                }
+            }
+            selected
+        } else if marquee.extend {
+            marquee.base_selection.union(&hits).copied().collect()
+        } else {
+            hits
+        };
+        if first < end {
+            let current_row = ((current_content_y.max(0.0) / self.row_height).floor() as usize)
+                .clamp(first, end - 1);
+            self.active_index = Some(current_row);
+            self.selection_anchor = Some(first);
+        }
+        self.marquee = Some(marquee);
+    }
+
+    fn marquee_rect(&self) -> Option<Rect> {
+        let marquee = self.marquee.as_ref().filter(|item| item.active)?;
+        let body = self.body_rect();
+        let offset = self.scroll.offset();
+        let origin = Point::new(
+            body.left() + marquee.origin_content.x - offset.x,
+            body.top() + marquee.origin_content.y - offset.y,
+        );
+        let left = origin
+            .x
+            .min(marquee.current.x)
+            .clamp(body.left(), body.right());
+        let top = origin
+            .y
+            .min(marquee.current.y)
+            .clamp(body.top(), body.bottom());
+        let mut right = origin
+            .x
+            .max(marquee.current.x)
+            .clamp(body.left(), body.right());
+        let mut bottom = origin
+            .y
+            .max(marquee.current.y)
+            .clamp(body.top(), body.bottom());
+        right = right.max((left + 1.0).min(body.right()));
+        bottom = bottom.max((top + 1.0).min(body.bottom()));
+        Some(Rect::new(left, top, right - left, bottom - top))
     }
 
     fn ensure_row_visible(&mut self, row: usize) {
@@ -649,6 +787,10 @@ impl Widget for VirtualList {
                 mix(background, foreground, 0.6),
             );
         }
+        if let Some(rect) = self.marquee_rect() {
+            cv.fill_rect(rect, Color::rgba(accent.r, accent.g, accent.b, 0.08));
+            paint_dashed_rect(cv, rect, accent);
+        }
         cv.restore();
         cv.restore();
 
@@ -666,6 +808,7 @@ impl Widget for VirtualList {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                mods,
             } => {
                 let content = self.content_rect();
                 let widths = self.resolved_widths(self.body_rect().size.width);
@@ -681,32 +824,52 @@ impl Widget for VirtualList {
                     }
                     return EventFlow::Consumed;
                 }
-                if let Some(row) = self.row_at(pos.y) {
-                    self.select_row(
-                        row,
-                        false,
-                        self.selection_mode == VirtualSelectionMode::Multiple,
-                    );
+                let body = self.body_rect();
+                if body.contains(*pos) {
+                    if self.selection_mode == VirtualSelectionMode::Multiple {
+                        self.begin_marquee(*pos, mods.shift, mods.command_or_control());
+                        if let Some(row) = self.row_at(pos.y) {
+                            self.select_row(row, mods.shift, mods.command_or_control());
+                        } else if !mods.shift && !mods.command_or_control() {
+                            self.selected_rows.clear();
+                            self.active_index = None;
+                            self.selection_anchor = None;
+                        }
+                    } else if let Some(row) = self.row_at(pos.y) {
+                        self.select_row(row, false, false);
+                    }
                     return EventFlow::Consumed;
                 }
                 EventFlow::Ignored
             }
             Event::MouseMove { pos } => {
-                let Some(resize) = self.resize else {
-                    return EventFlow::Ignored;
-                };
-                let column = &mut self.columns[resize.index];
-                column.width = (resize.start_width + pos.x - resize.start_x)
-                    .clamp(column.min_width, column.max_width.max(column.min_width));
-                column.flex = 0.0;
-                self.cell_cache.borrow_mut().clear();
-                self.update_metrics();
-                EventFlow::Consumed
+                if let Some(resize) = self.resize {
+                    let column = &mut self.columns[resize.index];
+                    column.width = (resize.start_width + pos.x - resize.start_x)
+                        .clamp(column.min_width, column.max_width.max(column.min_width));
+                    column.flex = 0.0;
+                    self.cell_cache.borrow_mut().clear();
+                    self.update_metrics();
+                    EventFlow::Consumed
+                } else if self.marquee.is_some() {
+                    self.update_marquee(*pos);
+                    EventFlow::Consumed
+                } else {
+                    EventFlow::Ignored
+                }
             }
             Event::MouseUp {
                 button: MouseButton::Left,
                 ..
-            } if self.resize.take().is_some() => EventFlow::Consumed,
+            } => {
+                if self.resize.take().is_some() {
+                    return EventFlow::Consumed;
+                }
+                if self.marquee.take().is_none() {
+                    return EventFlow::Ignored;
+                }
+                EventFlow::Consumed
+            }
             Event::KeyDown { key, mods } => {
                 let count = self.source.row_count();
                 if count == 0 {
@@ -911,6 +1074,31 @@ fn mix(background: Color, foreground: Color, amount: f32) -> Color {
     )
 }
 
+fn paint_dashed_rect(cv: &mut dyn Canvas, rect: Rect, color: Color) {
+    let stroke = 1.0;
+    let step = MARQUEE_DASH_LENGTH + MARQUEE_DASH_GAP;
+    let mut x = rect.left();
+    while x < rect.right() {
+        let width = MARQUEE_DASH_LENGTH.min(rect.right() - x);
+        cv.fill_rect(Rect::new(x, rect.top(), width, stroke), color);
+        cv.fill_rect(
+            Rect::new(x, (rect.bottom() - stroke).max(rect.top()), width, stroke),
+            color,
+        );
+        x += step;
+    }
+    let mut y = rect.top();
+    while y < rect.bottom() {
+        let height = MARQUEE_DASH_LENGTH.min(rect.bottom() - y);
+        cv.fill_rect(Rect::new(rect.left(), y, stroke, height), color);
+        cv.fill_rect(
+            Rect::new((rect.right() - stroke).max(rect.left()), y, stroke, height),
+            color,
+        );
+        y += step;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,10 +1128,13 @@ mod tests {
     #[derive(Default)]
     struct FakeCanvas {
         text_draws: Cell<usize>,
+        fills: RefCell<Vec<Rect>>,
     }
 
     impl Canvas for FakeCanvas {
-        fn fill_rect(&mut self, _rect: Rect, _color: Color) {}
+        fn fill_rect(&mut self, rect: Rect, _color: Color) {
+            self.fills.borrow_mut().push(rect);
+        }
         fn stroke_rect(&mut self, _rect: Rect, _color: Color, _width: f32) {}
         fn fill_round_rect(&mut self, _rect: Rect, _radius: Corners, _color: Color) {}
         fn stroke_round_rect(&mut self, _rect: Rect, _radius: Corners, _color: Color, _width: f32) {
@@ -962,6 +1153,55 @@ mod tests {
     fn layout_list(list: &mut VirtualList, canvas: &FakeCanvas) {
         list.base_mut().rect = Rect::new(0.0, 0.0, 400.0, 220.0);
         list.arrange(Rect::new(0.0, 0.0, 400.0, 220.0), canvas);
+    }
+
+    fn selectable_list() -> VirtualList {
+        VirtualList::new()
+            .source(Rc::new(CountingSource {
+                rows: 20,
+                reads: Cell::new(0),
+            }))
+            .selection_mode(VirtualSelectionMode::Multiple)
+    }
+
+    fn row_center(row: usize) -> Point {
+        Point::new(40.0, DEFAULT_HEADER_HEIGHT + row as f32 * DEFAULT_ROW_HEIGHT + 18.0)
+    }
+
+    fn click(list: &mut VirtualList, row: usize, mods: crate::event::Mods) {
+        let pos = row_center(row);
+        assert_eq!(
+            list.on_event(&Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                mods,
+            }),
+            EventFlow::Consumed
+        );
+        assert_eq!(
+            list.on_event(&Event::MouseUp {
+                pos,
+                button: MouseButton::Left,
+            }),
+            EventFlow::Consumed
+        );
+    }
+
+    fn toggle_mods() -> crate::event::Mods {
+        #[cfg(target_os = "macos")]
+        {
+            crate::event::Mods {
+                meta: true,
+                ..Default::default()
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            crate::event::Mods {
+                ctrl: true,
+                ..Default::default()
+            }
+        }
     }
 
     #[test]
@@ -1026,6 +1266,97 @@ mod tests {
     }
 
     #[test]
+    fn 多选模式普通点击替换已有选区() {
+        let mut list = selectable_list();
+        let canvas = FakeCanvas::default();
+        layout_list(&mut list, &canvas);
+
+        click(&mut list, 0, crate::event::Mods::default());
+        click(&mut list, 2, toggle_mods());
+        assert_eq!(list.selected_row_ids(), vec![100, 102]);
+
+        click(&mut list, 1, crate::event::Mods::default());
+        assert_eq!(list.selected_row_ids(), vec![101]);
+    }
+
+    #[test]
+    fn 主修饰键点击切换单行且_shift_点击连续选择() {
+        let mut list = selectable_list();
+        let canvas = FakeCanvas::default();
+        layout_list(&mut list, &canvas);
+
+        click(&mut list, 1, crate::event::Mods::default());
+        click(&mut list, 3, toggle_mods());
+        assert_eq!(list.selected_row_ids(), vec![101, 103]);
+        click(&mut list, 1, toggle_mods());
+        assert_eq!(list.selected_row_ids(), vec![103]);
+
+        click(&mut list, 1, crate::event::Mods::default());
+        click(
+            &mut list,
+            3,
+            crate::event::Mods {
+                shift: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(list.selected_row_ids(), vec![101, 102, 103]);
+    }
+
+    #[test]
+    fn 鼠标正反向框选并在抬起后停止更新() {
+        let mut list = selectable_list();
+        let canvas = FakeCanvas::default();
+        layout_list(&mut list, &canvas);
+
+        let start = Point::new(30.0, 50.0);
+        list.on_event(&Event::MouseDown {
+            pos: start,
+            button: MouseButton::Left,
+            mods: crate::event::Mods::default(),
+        });
+        list.on_event(&Event::MouseMove {
+            pos: Point::new(180.0, 130.0),
+        });
+        assert_eq!(list.selected_row_ids(), vec![100, 101, 102]);
+        assert!(list.marquee_rect().is_some());
+        list.on_event(&Event::MouseUp {
+            pos: Point::new(180.0, 130.0),
+            button: MouseButton::Left,
+        });
+        assert!(list.marquee.is_none());
+        list.on_event(&Event::MouseMove {
+            pos: Point::new(180.0, 200.0),
+        });
+        assert_eq!(list.selected_row_ids(), vec![100, 101, 102]);
+
+        list.on_event(&Event::MouseDown {
+            pos: row_center(3),
+            button: MouseButton::Left,
+            mods: crate::event::Mods::default(),
+        });
+        list.on_event(&Event::MouseMove {
+            pos: Point::new(20.0, 65.0),
+        });
+        assert_eq!(list.selected_row_ids(), vec![100, 101, 102, 103]);
+    }
+
+    #[test]
+    fn 框选边框使用短线段绘制() {
+        let mut canvas = FakeCanvas::default();
+        let rect = Rect::new(10.0, 20.0, 80.0, 40.0);
+        paint_dashed_rect(&mut canvas, rect, Color::BLACK);
+        let fills = canvas.fills.borrow();
+        assert!(fills.len() > 8);
+        assert!(fills.iter().all(|item| {
+            item.left() >= rect.left()
+                && item.top() >= rect.top()
+                && item.right() <= rect.right()
+                && item.bottom() <= rect.bottom()
+        }));
+    }
+
+    #[test]
     fn 动态列改变水平滚动范围() {
         let mut list = VirtualList::new().columns(vec![
             VirtualColumn::new("a", "A", 300.0),
@@ -1052,6 +1383,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(100.0, 20.0),
                 button: MouseButton::Left,
+                mods: crate::event::Mods::default(),
             },
         );
         dispatcher.take_control_events();

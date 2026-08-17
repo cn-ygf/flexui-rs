@@ -122,6 +122,7 @@ impl Widget for Slider {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 self.set_value_from_x(pos.x);
                 EventFlow::Consumed

@@ -1140,6 +1140,7 @@ impl Widget for Edit {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 let idx = self.hit_index(*pos);
                 self.state.cursor = idx;

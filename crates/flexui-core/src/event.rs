@@ -26,13 +26,31 @@ pub struct Mods {
     pub meta: bool,
 }
 
+impl Mods {
+    /// 当前平台用于离散多选的主修饰键（macOS Command，其余平台 Control）。
+    pub const fn command_or_control(self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.meta
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.ctrl
+        }
+    }
+}
+
 /// 统一事件枚举（一期覆盖鼠标 + 键盘 + 窗口基础事件）。
 #[derive(Debug, Clone)]
 pub enum Event {
     /// 鼠标移动到某点（用于 hover / Hot 状态）。
     MouseMove { pos: Point },
     /// 鼠标按下。
-    MouseDown { pos: Point, button: MouseButton },
+    MouseDown {
+        pos: Point,
+        button: MouseButton,
+        mods: Mods,
+    },
     /// 鼠标抬起。
     MouseUp { pos: Point, button: MouseButton },
     /// 双击（左键，平台原生识别）。

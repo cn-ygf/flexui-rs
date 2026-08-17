@@ -949,6 +949,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 Event::MouseDown {
                     pos: mouse_pos(hwnd, lparam),
                     button: MouseButton::Left,
+                    mods: Mods {
+                        shift: GetKeyState(VK_SHIFT as i32) < 0,
+                        ctrl: GetKeyState(VK_CONTROL as i32) < 0,
+                        ..Default::default()
+                    },
                 },
             );
             0

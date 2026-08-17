@@ -1011,6 +1011,7 @@ impl Dispatcher {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 if let Some(level) = self.overlay_level_at(*pos) {
                     let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
@@ -1326,6 +1327,7 @@ impl Dispatcher {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 // 优先命中滚动条滑块：进入拖动，独占后续 move/up（不改焦点/按压）。
                 if let Some((id, grab)) = scrollbar_grab_at(root, *pos) {
@@ -2238,6 +2240,7 @@ mod tests {
             &Event::MouseDown {
                 pos: p,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2300,6 +2303,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(95.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         // 拖到 y=40：滑块顶=30，行程=50，t=0.6，max=100 → 偏移 60。
@@ -2397,6 +2401,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(25.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert_eq!(root.cursor(), 3);
@@ -2423,6 +2428,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(25.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
 
@@ -2468,6 +2474,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(0.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2495,6 +2502,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(50.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert!(
@@ -2684,6 +2692,7 @@ mod tests {
             &Event::MouseDown {
                 pos: c,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2731,6 +2740,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(280.0, 280.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert!(!disp.has_overlays(), "点外部关闭");
@@ -2767,6 +2777,7 @@ mod tests {
             &Event::MouseDown {
                 pos: c,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2797,6 +2808,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(20.0, 50.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
@@ -2954,6 +2966,7 @@ mod tests {
             &Event::MouseDown {
                 pos: point,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         dispatcher.handle(
@@ -3033,6 +3046,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(0.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         // 全选 + 复制。
@@ -3102,6 +3116,7 @@ mod tests {
             &Event::MouseDown {
                 pos: child,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -3144,6 +3159,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(2.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.select_all_focused(&mut root);
@@ -3439,6 +3455,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(10.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.take_control_events();

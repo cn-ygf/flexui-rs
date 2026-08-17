@@ -253,7 +253,11 @@ define_class!(
                     return;
                 }
             }
-            self.dispatch(Event::MouseDown { pos, button: MouseButton::Left });
+            self.dispatch(Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                mods: event_mods(event),
+            });
             if event.clickCount() >= 2 {
                 self.dispatch(Event::DoubleClick { pos });
             }

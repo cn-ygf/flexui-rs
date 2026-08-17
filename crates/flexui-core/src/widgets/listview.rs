@@ -155,6 +155,7 @@ impl Widget for ListView {
         if let Event::MouseDown {
             pos,
             button: MouseButton::Left,
+            ..
         } = ev
         {
             let content = layout::content_rect(&self.base);
@@ -261,6 +262,7 @@ mod tests {
         lv.on_event(&Event::MouseDown {
             pos: flexui_geometry::Point::new(10.0, 10.0),
             button: MouseButton::Left,
+            mods: crate::event::Mods::default(),
         });
         assert_eq!(lv.selection(), Some(0));
         // 滚动后点击。
@@ -268,6 +270,7 @@ mod tests {
         lv.on_event(&Event::MouseDown {
             pos: flexui_geometry::Point::new(10.0, 10.0),
             button: MouseButton::Left,
+            mods: crate::event::Mods::default(),
         });
         assert_eq!(lv.selection(), Some(1), "滚动 20 后 y=10 对应第 1 行");
     }
