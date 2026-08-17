@@ -200,6 +200,9 @@ pub struct AppState {
 
 pub struct FlexViewIvars {
     state: RefCell<AppState>,
+    /// AppKit 会在 hide/show/minimize 等原生调用中同步回调窗口委托；此队列用于避开
+    /// 业务回调持有 AppState 可变借用时的重入。
+    deferred_native_callbacks: RefCell<Vec<Box<dyn FnOnce(&FlexView)>>>,
 }
 
 define_class!(
@@ -420,82 +423,96 @@ define_class!(
 
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &objc2_foundation::NSNotification) {
-            self.dispatch(Event::WindowFocusChanged { focused: false });
+            self.run_or_defer_native_callback(|view| {
+                view.dispatch(Event::WindowFocusChanged { focused: false });
+            });
         }
 
         #[unsafe(method(windowDidBecomeKey:))]
         fn window_did_become_key(&self, _notification: &objc2_foundation::NSNotification) {
-            self.dispatch(Event::WindowFocusChanged { focused: true });
+            self.run_or_defer_native_callback(|view| {
+                view.dispatch(Event::WindowFocusChanged { focused: true });
+            });
         }
 
         #[unsafe(method(windowDidResize:))]
         fn window_did_resize(&self, _notification: &objc2_foundation::NSNotification) {
             let bounds = self.bounds();
-            self.dispatch(Event::WindowResized {
-                width: bounds.size.width as f32,
-                height: bounds.size.height as f32,
+            let width = bounds.size.width as f32;
+            let height = bounds.size.height as f32;
+            self.run_or_defer_native_callback(move |view| {
+                view.dispatch(Event::WindowResized { width, height });
+                view.sync_zoom_state();
             });
-            self.sync_zoom_state();
         }
 
         #[unsafe(method(windowDidMove:))]
         fn window_did_move(&self, _notification: &objc2_foundation::NSNotification) {
             if let Some(window) = self.window() {
                 let origin = window.frame().origin;
-                self.fire_window_event(flexui_core::WindowEvent::Moved {
-                    x: origin.x as f32,
-                    y: origin.y as f32,
+                let x = origin.x as f32;
+                let y = origin.y as f32;
+                self.run_or_defer_native_callback(move |view| {
+                    view.fire_window_event(flexui_core::WindowEvent::Moved { x, y });
                 });
             }
         }
 
         #[unsafe(method(windowDidMiniaturize:))]
         fn window_did_miniaturize(&self, _notification: &objc2_foundation::NSNotification) {
-            let mut state = self.ivars().state.borrow_mut();
-            let changed = !state.minimized;
-            state.minimized = true;
-            drop(state);
-            if changed {
-                self.fire_window_event(flexui_core::WindowEvent::Minimized);
-            }
+            self.run_or_defer_native_callback(|view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let changed = !state.minimized;
+                state.minimized = true;
+                drop(state);
+                if changed {
+                    view.fire_window_event(flexui_core::WindowEvent::Minimized);
+                }
+            });
         }
 
         #[unsafe(method(windowDidDeminiaturize:))]
         fn window_did_deminiaturize(&self, _notification: &objc2_foundation::NSNotification) {
             let zoomed = self.window().is_some_and(|window| window.isZoomed());
-            let mut state = self.ivars().state.borrow_mut();
-            let changed = state.minimized;
-            state.minimized = false;
-            state.maximized = zoomed;
-            drop(state);
-            if changed {
-                self.fire_window_event(flexui_core::WindowEvent::Restored);
-            }
+            self.run_or_defer_native_callback(move |view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let changed = state.minimized;
+                state.minimized = false;
+                state.maximized = zoomed;
+                drop(state);
+                if changed {
+                    view.fire_window_event(flexui_core::WindowEvent::Restored);
+                }
+            });
         }
 
         #[unsafe(method(windowDidEnterFullScreen:))]
         fn window_did_enter_full_screen(&self, _notification: &objc2_foundation::NSNotification) {
-            let mut state = self.ivars().state.borrow_mut();
-            let changed = !state.maximized;
-            state.fullscreen = true;
-            state.maximized = true;
-            drop(state);
-            if changed {
-                self.fire_window_event(flexui_core::WindowEvent::Maximized);
-            }
+            self.run_or_defer_native_callback(|view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let changed = !state.maximized;
+                state.fullscreen = true;
+                state.maximized = true;
+                drop(state);
+                if changed {
+                    view.fire_window_event(flexui_core::WindowEvent::Maximized);
+                }
+            });
         }
 
         #[unsafe(method(windowDidExitFullScreen:))]
         fn window_did_exit_full_screen(&self, _notification: &objc2_foundation::NSNotification) {
             let zoomed = self.window().is_some_and(|window| window.isZoomed());
-            let mut state = self.ivars().state.borrow_mut();
-            let restored = state.fullscreen && !zoomed;
-            state.fullscreen = false;
-            state.maximized = zoomed;
-            drop(state);
-            if restored {
-                self.fire_window_event(flexui_core::WindowEvent::Restored);
-            }
+            self.run_or_defer_native_callback(move |view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let restored = state.fullscreen && !zoomed;
+                state.fullscreen = false;
+                state.maximized = zoomed;
+                drop(state);
+                if restored {
+                    view.fire_window_event(flexui_core::WindowEvent::Restored);
+                }
+            });
         }
     }
 
@@ -816,6 +833,7 @@ impl FlexView {
                 fullscreen: false,
                 closed: false,
             }),
+            deferred_native_callbacks: RefCell::new(Vec::new()),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
@@ -1022,6 +1040,7 @@ impl FlexView {
 
     /// 帧定时回调：推进动画、派发后台线程消息，并按需重绘。
     fn fire_frame(&self) {
+        self.drain_deferred_native_callbacks();
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let localizer_for_ctx = st.localizer.clone();
@@ -1104,6 +1123,27 @@ impl FlexView {
             self.setNeedsDisplay(true);
         } else if let Some(rect) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(rect));
+        }
+    }
+
+    /// AppKit 窗口委托可能在 WindowHandle 调用栈内同步重入。状态空闲时立即执行，
+    /// 否则推迟到下一帧，避免同一个 RefCell 再次可变借用导致进程 panic。
+    fn run_or_defer_native_callback(&self, callback: impl FnOnce(&FlexView) + 'static) {
+        let state_available = self.ivars().state.try_borrow_mut().is_ok();
+        if state_available {
+            callback(self);
+        } else {
+            self.ivars()
+                .deferred_native_callbacks
+                .borrow_mut()
+                .push(Box::new(callback));
+        }
+    }
+
+    fn drain_deferred_native_callbacks(&self) {
+        let callbacks = std::mem::take(&mut *self.ivars().deferred_native_callbacks.borrow_mut());
+        for callback in callbacks {
+            callback(self);
         }
     }
 
