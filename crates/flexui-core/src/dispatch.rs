@@ -2070,7 +2070,8 @@ fn tick_frame_animations(
     if !node.base().visible {
         return;
     }
-    let subtree_has_focus = subtree_focused_for_frames(node);
+    // 仅在 focus_within 生效时才需要扫描子树的焦点，避免每帧对整棵树做 O(N²) 遍历。
+    let subtree_has_focus = node.base().focus_within && subtree_focused_for_frames(node);
     let b = node.base_mut();
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
     let state =

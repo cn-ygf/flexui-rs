@@ -3,7 +3,7 @@
 use std::cell::Cell;
 
 use flexui_geometry::{Color, Point, Rect, Size};
-use flexui_gfx::{Canvas, TextLayout};
+use flexui_gfx::{Canvas, Font, TextLayout};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::anim::AnimProp;
@@ -92,6 +92,9 @@ pub struct Edit {
     scrollbar: ScrollBarStyle,
     /// 文本发生追加/替换、等待下一次 arrange 时跟随到底部（配合 auto_scroll）。
     append_pending: bool,
+    /// 逐行排版缓存对应的字体；与当前字体一致且 !cache_dirty 时复用 lines，
+    /// 避免大文本在无关布局（兄弟控件变化触发的全树 arrange）时重复整形。
+    shaped_font: Option<Font>,
     /// 最近一次排版/绘制得到的真实插入点矩形。
     caret_rect: Cell<Option<Rect>>,
 }
@@ -110,6 +113,7 @@ impl Edit {
             scroll: Cell::new(ScrollState::new(ScrollAxes::both())),
             scrollbar: ScrollBarStyle::default(),
             append_pending: false,
+            shaped_font: None,
             caret_rect: Cell::new(None),
         }
     }
@@ -715,21 +719,27 @@ impl Widget for Edit {
     }
     fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
         layout::arrange_stack(&mut self.base, content, cv);
-        let text = self.base.text.clone();
-        let mut lines = Vec::new();
-        let mut start = 0usize;
-        for line in text.split('\n') {
-            let n = line.chars().count();
-            let display_line = self.display_slice(line);
-            lines.push(LineCache {
-                start,
-                char_len: n,
-                grapheme_boundaries: Self::grapheme_char_boundaries(line),
-                layout: cv.layout_text(&display_line, &self.base.font),
-            });
-            start += n + 1; // +1 跳过换行符
+        // 逐行整形只依赖 文本 + 字体 + 掩码配置（Edit 不按宽换行）。这些没变就复用缓存，
+        // 避免大文本在无关的全树布局（如兄弟控件文本变化）里被反复重排，拖高 CPU。
+        let font_changed = self.shaped_font.as_ref() != Some(&self.base.font);
+        if self.cache_dirty || font_changed {
+            let text = self.base.text.clone();
+            let mut lines = Vec::new();
+            let mut start = 0usize;
+            for line in text.split('\n') {
+                let n = line.chars().count();
+                let display_line = self.display_slice(line);
+                lines.push(LineCache {
+                    start,
+                    char_len: n,
+                    grapheme_boundaries: Self::grapheme_char_boundaries(line),
+                    layout: cv.layout_text(&display_line, &self.base.font),
+                });
+                start += n + 1; // +1 跳过换行符
+            }
+            self.lines = lines;
+            self.shaped_font = Some(self.base.font.clone());
         }
-        self.lines = lines;
         self.line_h = cv.layout_text("Ag", &self.base.font).height();
 
         self.display_layout = if self.config.multiline {
@@ -1503,6 +1513,43 @@ mod tests {
         e2.set_text_value(text);
         layout_node(&mut e2, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
         assert_eq!(e2.scroll.get().offset().y, 0.0, "未开启则不跟随");
+    }
+
+    #[test]
+    fn 多行大文本_重复布局复用整形缓存() {
+        struct Counting {
+            calls: Cell<usize>,
+        }
+        impl Canvas for Counting {
+            fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+            fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+            fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+            fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+            fn draw_text(&mut self, _t: &str, _o: Point, _f: &Font, _c: Color) {}
+            fn measure_text(&self, t: &str, f: &Font) -> Size {
+                self.calls.set(self.calls.get() + 1);
+                Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+            }
+        }
+        let cv = Counting {
+            calls: Cell::new(0),
+        };
+        let text = (0..50)
+            .map(|i| format!("line {i} with some content"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut e = Edit::new().multiline(true).text(text);
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 100.0), &cv);
+        let first = cv.calls.get();
+        assert!(first > 0);
+        cv.calls.set(0);
+        // 文本/字体不变，再次布局不应重新整形每一行。
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 100.0), &cv);
+        let second = cv.calls.get();
+        assert!(
+            second * 4 < first,
+            "重复布局应复用整形缓存: first={first} second={second}"
+        );
     }
 
     #[test]
