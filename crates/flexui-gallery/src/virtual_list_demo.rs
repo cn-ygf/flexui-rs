@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use flexui::{
-    TextAlign, VirtualColumn, VirtualListSource, VirtualListSourceRef, VirtualSort,
-    VirtualSortDirection, WidgetProperty, WidgetPropertyKey, WindowCtx,
+    NativeMenu, NativeMenuAnchor, NativeMenuItem, Point, TextAlign, VirtualColumn,
+    VirtualListSource, VirtualListSourceRef, VirtualSort, VirtualSortDirection, WidgetProperty,
+    WidgetPropertyKey, WindowCtx,
 };
 
 pub(crate) const CONTROL_NAME: &str = "virtual_table";
@@ -63,6 +64,16 @@ impl VirtualListDemo {
         }
         self.update_status(ctx);
         true
+    }
+
+    pub(crate) fn show_context_menu(&mut self, x: f32, y: f32, ctx: &mut WindowCtx) {
+        let menu = context_menu(!selected_ids(ctx).is_empty());
+        if let Some(command) = ctx.popup_native_menu(
+            &menu,
+            NativeMenuAnchor::Window(Point::new(x, y)),
+        ) {
+            self.handle_click(&command, ctx);
+        }
     }
 
     pub(crate) fn selection_changed(&self, ctx: &mut WindowCtx) {
@@ -168,6 +179,15 @@ impl VirtualListDemo {
         );
         ctx.set_enabled("virtual_delete_selected", selected > 0);
     }
+}
+
+fn context_menu(has_selection: bool) -> NativeMenu {
+    NativeMenu::new()
+        .item(NativeMenuItem::new("virtual_reset", "Reset"))
+        .item(
+            NativeMenuItem::new("virtual_delete_selected", "Delete")
+                .enabled(has_selection),
+        )
 }
 
 fn selected_ids(ctx: &mut WindowCtx) -> Vec<u64> {
@@ -352,5 +372,26 @@ mod tests {
         assert_eq!(format_count(999), "999");
         assert_eq!(format_count(100_000), "100,000");
         assert_eq!(format_count(8_123_456), "8,123,456");
+    }
+
+    #[test]
+    fn 右键菜单仅包含重置和删除且删除状态跟随选区() {
+        let empty = context_menu(false);
+        assert_eq!(empty.items.len(), 2);
+        let flexui::NativeMenuEntry::Item(reset) = &empty.items[0] else {
+            panic!("第一项应为 Reset");
+        };
+        let flexui::NativeMenuEntry::Item(delete) = &empty.items[1] else {
+            panic!("第二项应为 Delete");
+        };
+        assert_eq!(reset.id, "virtual_reset");
+        assert_eq!(delete.id, "virtual_delete_selected");
+        assert!(!delete.enabled);
+
+        let selected = context_menu(true);
+        let flexui::NativeMenuEntry::Item(delete) = &selected.items[1] else {
+            panic!("第二项应为 Delete");
+        };
+        assert!(delete.enabled);
     }
 }

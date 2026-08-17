@@ -715,12 +715,18 @@ impl Canvas for CgCanvas {
             return;
         };
         let dst = to_nsrect(Rect::new(origin.x, origin.y, layer.size.width, layer.size.height));
-        image.drawInRect_fromRect_operation_fraction(
-            dst,
-            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
-            NSCompositingOperation::SourceOver,
-            1.0,
-        );
+        // 缓存层按左上原点生成；主 NSView 同样是 flipped 坐标系，要求 AppKit
+        // 按目标上下文方向回贴，否则静态多行文本会被上下翻转。
+        unsafe {
+            image.drawInRect_fromRect_operation_fraction_respectFlipped_hints(
+                dst,
+                NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+                NSCompositingOperation::SourceOver,
+                1.0,
+                true,
+                None,
+            );
+        }
     }
 }
 
