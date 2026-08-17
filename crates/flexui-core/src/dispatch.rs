@@ -267,8 +267,8 @@ impl<'a> EventCtx<'a> {
         changed
     }
 
-    pub fn scroll_position(&self, name: &str) -> Option<f32> {
-        self.get(name, |w| w.scroll_position()).flatten()
+    pub fn scroll_offset(&self, name: &str) -> Option<Point> {
+        self.get(name, |w| w.scroll_offset()).flatten()
     }
 
     /// 应用控件专属属性；保守地触发布局和整窗重绘。
@@ -1021,9 +1021,9 @@ impl Dispatcher {
                 self.overlay_pressed = None;
                 self.needs_redraw = true;
             }
-            Event::MouseWheel { pos, dy, .. } => {
+            Event::MouseWheel { pos, dx, dy } => {
                 if let Some(level) = self.overlay_level_at(*pos) {
-                    if scroll_tree_at(self.overlays[level].root.as_mut(), *pos, *dy).is_some() {
+                    if scroll_tree_at(self.overlays[level].root.as_mut(), *pos, *dx, *dy).is_some() {
                         self.overlays.truncate(level + 1);
                         self.needs_redraw = true;
                     }
@@ -1365,9 +1365,9 @@ impl Dispatcher {
                     self.forward_to_widget(root, fid, ev);
                 }
             }
-            // 滚轮：滚动光标下最内层可滚动容器。
-            Event::MouseWheel { pos, dy, .. } => {
-                self.scroll_at(root, *pos, *dy);
+            // 滚轮：滚动光标下最内层可滚动容器（双轴）。
+            Event::MouseWheel { pos, dx, dy } => {
+                self.scroll_at(root, *pos, *dx, *dy);
             }
             _ => {}
         }
@@ -1426,11 +1426,11 @@ impl Dispatcher {
     }
 
     /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
-    fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dy: f32) {
-        if let Some((id, rect)) = scroll_tree_at(root, pos, dy) {
+    fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) {
+        if let Some((id, rect)) = scroll_tree_at(root, pos, dx, dy) {
             self.mark_dirty(rect); // 只脏滚动区
-            if let Some(position) = find_by_id(root, id).and_then(Widget::scroll_position) {
-                self.emit_control_event(root, id, ControlEvent::ScrollChanged(position));
+            if let Some(offset) = find_by_id(root, id).and_then(Widget::scroll_offset) {
+                self.emit_control_event(root, id, ControlEvent::ScrollChanged(offset));
             }
         }
     }
@@ -1755,7 +1755,7 @@ struct ControlSnapshot {
     selected: bool,
     selection: Option<usize>,
     value: Option<f32>,
-    scroll: Option<f32>,
+    scroll: Option<Point>,
 }
 
 fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> {
@@ -1765,7 +1765,7 @@ fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> 
         selected: widget.base().selected,
         selection: widget.selected_index(),
         value: widget.animation_value(AnimProp::Value),
-        scroll: widget.scroll_position(),
+        scroll: widget.scroll_offset(),
     })
 }
 
@@ -1875,7 +1875,7 @@ fn place_submenu(
 }
 
 /// 滚动光标下最深的可滚动控件，返回实际发生变化的视口矩形。
-fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<(WidgetId, Rect)> {
+fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) -> Option<(WidgetId, Rect)> {
     let mut target = None;
     for_each_visible_mut(root, true, &mut |widget| {
         if widget.is_scrollable() && widget.children_viewport().contains(pos) {
@@ -1886,7 +1886,7 @@ fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<(WidgetI
     let mut changed_rect = None;
     visit_mut(root, id, &mut |widget| {
         let viewport = widget.children_viewport();
-        if widget.scroll_by(dy) {
+        if widget.scroll_by(dx, dy) {
             changed_rect = Some(viewport);
         }
     });
@@ -2159,8 +2159,8 @@ mod tests {
                 dy: -60.0,
             },
         );
-        assert_eq!(root.scroll_position(), Some(60.0)); // 视口100 内容200 → 可滚到 100，60 有效
-                                                        // 重新布局后首个子应上移 60
+        assert_eq!(root.scroll_offset(), Some(Point::new(0.0, 60.0))); // 视口100 内容200 → 可滚到 100，60 有效
+                                                                       // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
     }
@@ -2437,7 +2437,7 @@ mod tests {
         disp.open_styled_menu(Rect::new(20.0, 20.0, 80.0, 20.0), items, Some(style), None);
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
         let menu_viewport = disp.overlays[0].root.children_viewport();
-        let main_before = root.scroll_position();
+        let main_before = root.scroll_offset();
         disp.handle(
             &mut root,
             &Event::MouseWheel {
@@ -2447,8 +2447,11 @@ mod tests {
             },
         );
         assert!(disp.has_overlays());
-        assert_eq!(disp.overlays[0].root.scroll_position(), Some(32.0));
-        assert_eq!(root.scroll_position(), main_before);
+        assert_eq!(
+            disp.overlays[0].root.scroll_offset(),
+            Some(Point::new(0.0, 32.0))
+        );
+        assert_eq!(root.scroll_offset(), main_before);
     }
 
     #[test]
@@ -2469,7 +2472,7 @@ mod tests {
             Rect::new(0.0, 0.0, 160.0, 100.0),
             &FakeCanvas,
         );
-        assert!(menu.scroll_by(-20.0));
+        assert!(menu.scroll_by(0.0, -20.0));
         let padding_point = Point::new(20.0, 10.0);
         assert!(menu.base().children[0].base().rect.contains(padding_point));
         assert_ne!(

@@ -87,7 +87,8 @@ pub enum ControlEvent {
     SelectedChanged(bool),
     SelectionChanged(Option<usize>),
     ValueChanged(f32),
-    ScrollChanged(f32),
+    /// 滚动偏移变化（横、纵）。
+    ScrollChanged(Point),
     FrameAnimationFinished(FrameLayer),
 }
 

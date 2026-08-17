@@ -35,7 +35,9 @@ impl Easing {
 pub enum AnimProp {
     /// Progress/Slider 的归一化值（夹取到 0~1）。
     Value,
-    /// ScrollView/ListView 的纵向滚动位置。
+    /// 横向滚动位置。
+    ScrollX,
+    /// 纵向滚动位置。
     ScrollY,
 }
 

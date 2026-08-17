@@ -12,6 +12,7 @@ pub mod layout;
 pub mod localization;
 pub mod native_menu;
 pub mod paint;
+pub mod scroll;
 pub mod sizing;
 pub mod style;
 pub mod theme;
@@ -32,6 +33,9 @@ pub use native_menu::{
     NativeSubmenu,
 };
 pub use paint::{paint_tree, paint_tree_in_rect};
+pub use scroll::{
+    paint_scrollbars, thumb_h_rect, thumb_v, ScrollAxes, ScrollBarStyle, ScrollState,
+};
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{
     BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec,
@@ -49,7 +53,7 @@ pub use widget::{
 pub use widgets::{
     build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
     CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
-    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollBarStyle, ScrollView, Separator, Slider,
+    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollView, Separator, Slider,
     Switch, TabBox, VBox,
 };
 pub use window::{

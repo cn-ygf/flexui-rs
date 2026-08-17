@@ -445,8 +445,8 @@ impl<'a> WindowCtx<'a> {
     pub fn set_value(&mut self, name: &str, value: f32) -> bool {
         self.event_ctx(|ctx| ctx.set_value(name, value))
     }
-    pub fn scroll_position(&mut self, name: &str) -> Option<f32> {
-        self.event_ctx(|ctx| ctx.scroll_position(name))
+    pub fn scroll_offset(&mut self, name: &str) -> Option<flexui_geometry::Point> {
+        self.event_ctx(|ctx| ctx.scroll_offset(name))
     }
     pub fn is_enabled(&mut self, name: &str) -> Option<bool> {
         self.event_ctx(|ctx| ctx.is_enabled(name))

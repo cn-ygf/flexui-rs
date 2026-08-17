@@ -3,7 +3,7 @@
 //! 行、选择与滚动状态均由本控件持有；分发器通过 Widget 的滚动能力转发滚轮，
 //! 点击选中经指针转发到 `on_event`，选择变化经 name 上报。
 
-use flexui_geometry::{Color, Rect, Size};
+use flexui_geometry::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
 use crate::anim::AnimProp;
@@ -11,6 +11,7 @@ use crate::common_builders;
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
 use crate::paint::draw_aligned_text;
+use crate::scroll::{paint_scrollbars, ScrollAxes, ScrollBarStyle, ScrollState};
 use crate::style::StyleSpec;
 use crate::theme::WidgetKind;
 use crate::widget::{Base, Widget, WidgetProperty, WidgetPropertyKey, WidgetRole};
@@ -24,8 +25,8 @@ pub struct ListView {
     items: Vec<String>,
     row_h: f32,
     selection: Option<usize>,
-    scroll_y: f32,
-    content_h: f32,
+    scroll: ScrollState,
+    scrollbar: ScrollBarStyle,
 }
 
 impl ListView {
@@ -35,9 +36,15 @@ impl ListView {
             items: Vec::new(),
             row_h: 28.0,
             selection: None,
-            scroll_y: 0.0,
-            content_h: 0.0,
+            scroll: ScrollState::new(ScrollAxes::vertical()),
+            scrollbar: ScrollBarStyle::default(),
         }
+    }
+
+    /// 若已知视口，滚动使第 i 行进入可见区。
+    fn ensure_row_visible(&mut self, i: usize) {
+        let row = Rect::new(0.0, i as f32 * self.row_h, self.scroll.viewport().width, self.row_h);
+        self.scroll.ensure_visible(row, 0.0);
     }
     /// 设置列表项。
     pub fn items(mut self, it: impl IntoIterator<Item = impl Into<String>>) -> Self {
@@ -79,10 +86,10 @@ impl Widget for ListView {
         layout::size_from_content(&self.base, 160.0, self.items.len() as f32 * self.row_h)
     }
     fn arrange(&mut self, content: Rect, _cv: &dyn Canvas) {
-        // 内容总高 = 行数×行高；据视口夹取滚动偏移。
-        self.content_h = self.items.len() as f32 * self.row_h;
-        let max = (self.content_h - content.size.height).max(0.0);
-        self.scroll_y = self.scroll_y.clamp(0.0, max);
+        // 内容总高 = 行数×行高；更新滚动度量并夹取偏移。
+        let total = self.items.len() as f32 * self.row_h;
+        self.scroll
+            .set_metrics(Size::new(content.size.width, total), content.size);
     }
     fn paint_content(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         let content = layout::content_rect(&self.base);
@@ -90,7 +97,7 @@ impl Widget for ListView {
             return;
         }
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
-        let scroll = self.scroll_y;
+        let scroll = self.scroll.offset().y;
         cv.save();
         cv.clip_rect(content);
         for (i, item) in self.items.iter().enumerate() {
@@ -119,26 +126,8 @@ impl Widget for ListView {
             );
         }
         cv.restore();
-        // 简易滚动条：内容超出视口时右侧画一条滑块。
-        if self.content_h > content.size.height {
-            let track_w = 4.0;
-            let vh = content.size.height;
-            let thumb_h = (vh * vh / self.content_h).max(20.0);
-            let max_scroll = self.content_h - vh;
-            let t = if max_scroll > 0.0 {
-                scroll / max_scroll
-            } else {
-                0.0
-            };
-            let ty = content.top() + t * (vh - thumb_h);
-            let thumb = Rect::new(content.right() - track_w, ty, track_w, thumb_h);
-            cv.fill_rect(
-                thumb,
-                style
-                    .scrollbar_color
-                    .unwrap_or(Color::from_u8(120, 128, 148, 200)),
-            );
-        }
+        // 内容超出视口时用统一绘制器画滚动条。
+        paint_scrollbars(cv, content, &self.scroll, &self.scrollbar, style);
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         if let Event::MouseDown {
@@ -147,7 +136,7 @@ impl Widget for ListView {
         } = ev
         {
             let content = layout::content_rect(&self.base);
-            let rel = pos.y - content.top() + self.scroll_y;
+            let rel = pos.y - content.top() + self.scroll.offset().y;
             if rel >= 0.0 {
                 let row = (rel / self.row_h) as usize;
                 if row < self.items.len() {
@@ -190,35 +179,24 @@ impl Widget for ListView {
         }
         let changed = self.selection != Some(index);
         self.selection = Some(index);
+        // 选中行滚动到可见（视口已知时才有效）。
+        self.ensure_row_visible(index);
         changed
     }
     fn is_scrollable(&self) -> bool {
         true
     }
-    fn scroll_by(&mut self, dy: f32) -> bool {
-        let max = (self.content_h - self.base.rect.size.height).max(0.0);
-        let next = (self.scroll_y - dy).clamp(0.0, max);
-        let changed = next != self.scroll_y;
-        self.scroll_y = next;
-        changed
+    fn scroll_by(&mut self, dx: f32, dy: f32) -> bool {
+        self.scroll.scroll_by(dx, dy)
     }
-    fn scroll_position(&self) -> Option<f32> {
-        Some(self.scroll_y)
+    fn scroll_offset(&self) -> Option<Point> {
+        Some(self.scroll.offset())
     }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
-        if prop == AnimProp::ScrollY {
-            Some(self.scroll_y)
-        } else {
-            None
-        }
+        self.scroll.axis_value(prop)
     }
     fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
-        if prop != AnimProp::ScrollY {
-            return false;
-        }
-        let max = (self.content_h - self.base.rect.size.height).max(0.0);
-        self.scroll_y = value.clamp(0.0, max);
-        true
+        self.scroll.set_axis_value(prop, value)
     }
 }
 
@@ -234,7 +212,7 @@ mod tests {
         // 布局：视口高 40（只显示 2 行），内容高 80。
         lv.base_mut().rect = Rect::new(0.0, 0.0, 100.0, 40.0);
         lv.arrange(Rect::new(0.0, 0.0, 100.0, 40.0), &Fake);
-        assert_eq!(lv.content_h, 80.0);
+        assert_eq!(lv.scroll.content().height, 80.0);
         // 点击 y=10 → 第 0 行。
         lv.on_event(&Event::MouseDown {
             pos: flexui_geometry::Point::new(10.0, 10.0),
@@ -242,7 +220,7 @@ mod tests {
         });
         assert_eq!(lv.selection(), Some(0));
         // 滚动后点击。
-        lv.scroll_y = 20.0;
+        assert!(lv.scroll_by(0.0, -20.0));
         lv.on_event(&Event::MouseDown {
             pos: flexui_geometry::Point::new(10.0, 10.0),
             button: MouseButton::Left,

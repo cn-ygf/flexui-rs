@@ -6,9 +6,11 @@ use flexui_geometry::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, TextLayout};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::anim::AnimProp;
 use crate::common_builders;
 use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
+use crate::scroll::{paint_scrollbars, ScrollAxes, ScrollBarStyle, ScrollState};
 use crate::style::{PlaceholderStyleSet, StyleSpec};
 use crate::theme::WidgetKind;
 use crate::widget::{
@@ -80,8 +82,11 @@ pub struct Edit {
     line_h: f32,
     /// 缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
     cache_dirty: bool,
-    /// 单行内容向左卷起的逻辑像素。
-    scroll_x: Cell<f32>,
+    /// 统一滚动状态：单行走横向（`offset.x`），多行走纵向（`offset.y`）。
+    /// 用 `Cell` 以便 `&self` 的绘制阶段随光标跟随更新。
+    scroll: Cell<ScrollState>,
+    /// 纵向滚动条外观（多行内容超出视口时绘制）。
+    scrollbar: ScrollBarStyle,
     /// 最近一次排版/绘制得到的真实插入点矩形。
     caret_rect: Cell<Option<Rect>>,
 }
@@ -97,7 +102,8 @@ impl Edit {
             placeholder_layout: None,
             line_h: 0.0,
             cache_dirty: true,
-            scroll_x: Cell::new(0.0),
+            scroll: Cell::new(ScrollState::new(ScrollAxes::both())),
+            scrollbar: ScrollBarStyle::default(),
             caret_rect: Cell::new(None),
         }
     }
@@ -388,11 +394,12 @@ impl Edit {
     /// 绝对坐标 → 字符索引（多行按 y 定位行，再按 x 定位列）。
     fn hit_index(&self, pos: Point) -> usize {
         let content = layout::content_rect(&self.base);
+        let offset = self.scroll.get().offset();
         let local_x = pos.x - content.left()
             + if self.config.multiline {
                 0.0
             } else {
-                self.scroll_x.get()
+                offset.x
             };
         if !self.config.multiline && !self.cache_dirty {
             if let Some(layout) = &self.display_layout {
@@ -435,7 +442,7 @@ impl Edit {
             return ((local_x / cw).round().max(0.0) as usize).min(self.char_count());
         }
         let li = if self.config.multiline {
-            let rel = (pos.y - content.top()) / self.line_height();
+            let rel = (pos.y - content.top() + offset.y) / self.line_height();
             (rel.floor().max(0.0) as usize).min(self.lines.len() - 1)
         } else {
             0
@@ -548,8 +555,16 @@ impl Edit {
         let sel = self.sel_range();
         let (cur_line, cur_col) = self.pos_of(self.state.cursor);
 
-        let mut y = content.top();
+        let offset_y = self.scroll.get().offset().y;
+        cv.save();
+        cv.clip_rect(self.text_clip_rect(content));
+        let mut y = content.top() - offset_y;
         for (i, line) in self.lines.iter().enumerate() {
+            // 视口外的行跳过绘制（仍需累加 y）。
+            if y + line_h < content.top() || y > content.bottom() {
+                y += line_h;
+                continue;
+            }
             if let Some((lo, hi)) = sel {
                 let (ls, le) = (line.start, line.start + line.char_len);
                 let s = lo.max(ls);
@@ -583,6 +598,10 @@ impl Edit {
             }
             y += line_h;
         }
+        cv.restore();
+        // 内容超出视口时绘制纵向滚动条。
+        let state = self.scroll.get();
+        paint_scrollbars(cv, content, &state, &self.scrollbar, style);
     }
 
     fn shows_placeholder(&self) -> bool {
@@ -608,19 +627,18 @@ impl Edit {
     }
 
     fn update_single_line_scroll(&self, caret: f32, total: f32, content: Rect) {
-        let width = content.size.width.max(0.0);
-        if width <= 1.0 || total <= width {
-            self.scroll_x.set(0.0);
-            return;
-        }
-        let mut scroll = self.scroll_x.get();
-        if caret < scroll {
-            scroll = caret;
-        } else if caret + 2.0 > scroll + width {
-            scroll = caret + 2.0 - width;
-        }
-        self.scroll_x
-            .set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
+        let mut state = self.scroll.get();
+        // 单行内容尺寸：宽 = 文本总宽 + 光标留白，高 = 视口高（纵向不滚）。
+        state.set_metrics(
+            Size::new(total + 2.0, content.size.height),
+            content.size,
+        );
+        // 让光标（含 2px 留白）保持在视口内。
+        state.ensure_visible(
+            Rect::new(caret, 0.0, CARET_WIDTH + 2.0, content.size.height),
+            0.0,
+        );
+        self.scroll.set(state);
     }
 
     /// 横向严格裁到内容区；纵向保留控件 padding，避免字体抗锯齿下沿被切掉。
@@ -714,9 +732,19 @@ impl Widget for Edit {
             .map(|line| line.layout.x_for_char(col))
             .unwrap_or(0.0);
         if self.config.multiline {
+            // 更新纵向滚动度量并让光标行进入视口。
+            let mut state = self.scroll.get();
+            let total_h = self.lines.len() as f32 * self.line_h;
+            state.set_metrics(Size::new(content.size.width, total_h), content.size);
+            state.ensure_visible(
+                Rect::new(x, line as f32 * self.line_h, CARET_WIDTH, self.line_h),
+                0.0,
+            );
+            self.scroll.set(state);
+            let offset_y = state.offset().y;
             self.caret_rect.set(Some(Rect::new(
                 content.left() + x + 1.0,
-                content.top() + line as f32 * self.line_h,
+                content.top() + line as f32 * self.line_h - offset_y,
                 CARET_WIDTH,
                 self.base.font.size,
             )));
@@ -740,7 +768,7 @@ impl Widget for Edit {
                 .unwrap_or(self.line_h.max(self.base.font.size));
             let y = (content.top() + (content.size.height - caret_h) / 2.0).max(content.top());
             self.caret_rect.set(Some(Rect::new(
-                content.left() - self.scroll_x.get() + display_x + 1.0,
+                content.left() - self.scroll.get().offset().x + display_x + 1.0,
                 y,
                 CARET_WIDTH,
                 caret_h,
@@ -755,7 +783,9 @@ impl Widget for Edit {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
         if self.shows_placeholder() {
-            self.scroll_x.set(0.0);
+            let mut state = self.scroll.get();
+            state.set_offset(0.0, 0.0);
+            self.scroll.set(state);
             let style = self
                 .config
                 .placeholder_style
@@ -821,7 +851,7 @@ impl Widget for Edit {
         let line_h = text_layout.height();
         let line_y = Self::layout_y(text_layout, content);
         self.update_single_line_scroll(marked_end_w, total_w, content);
-        let origin_x = content.left() - self.scroll_x.get();
+        let origin_x = content.left() - self.scroll.get().offset().x;
         cv.save();
         cv.clip_rect(self.text_clip_rect(content));
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
@@ -1078,6 +1108,28 @@ impl Widget for Edit {
         if self.config.auto_select_all {
             self.select_all();
         }
+    }
+    fn is_scrollable(&self) -> bool {
+        // 仅多行且内容超出视口时接收滚轮（单行靠光标跟随横向卷动）。
+        self.config.multiline && self.scroll.get().needs_v()
+    }
+    fn scroll_by(&mut self, dx: f32, dy: f32) -> bool {
+        let mut state = self.scroll.get();
+        let changed = state.scroll_by(dx, dy);
+        self.scroll.set(state);
+        changed
+    }
+    fn scroll_offset(&self) -> Option<Point> {
+        Some(self.scroll.get().offset())
+    }
+    fn animation_value(&self, prop: AnimProp) -> Option<f32> {
+        self.scroll.get().axis_value(prop)
+    }
+    fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
+        let mut state = self.scroll.get();
+        let handled = state.set_axis_value(prop, value);
+        self.scroll.set(state);
+        handled
     }
     fn set_text_value(&mut self, text: String) {
         self.base.text = text;
@@ -1409,7 +1461,7 @@ mod tests {
         let cv = FakeCanvas;
         let mut e = Edit::new().text("abcdefghij");
         layout_node(&mut e, Rect::new(0.0, 0.0, 40.0, 30.0), &cv);
-        assert!(e.scroll_x.get() > 0.0);
+        assert!(e.scroll.get().offset().x > 0.0);
         let content = layout::content_rect(e.base());
         let caret = e.text_input_rect().unwrap();
         assert!(caret.left() >= content.left() && caret.right() <= content.right() + 2.0);

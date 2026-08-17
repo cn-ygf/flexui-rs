@@ -453,14 +453,16 @@ pub trait Widget {
         false
     }
 
-    /// 滚动与动画能力。
+    /// 滚动与动画能力（双轴）。
     fn is_scrollable(&self) -> bool {
         false
     }
-    fn scroll_by(&mut self, _dy: f32) -> bool {
+    /// 增量滚动（dx 横向、dy 纵向；正值方向与滚轮一致）。返回是否发生变化。
+    fn scroll_by(&mut self, _dx: f32, _dy: f32) -> bool {
         false
     }
-    fn scroll_position(&self) -> Option<f32> {
+    /// 当前滚动偏移（横、纵）。
+    fn scroll_offset(&self) -> Option<flexui_geometry::Point> {
         None
     }
     fn animation_value(&self, _prop: AnimProp) -> Option<f32> {
