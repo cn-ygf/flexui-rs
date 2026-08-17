@@ -599,9 +599,20 @@ impl Edit {
             y += line_h;
         }
         cv.restore();
-        // 内容超出视口时绘制纵向滚动条。
+        // 内容超出视口时绘制纵向滚动条：贴控件外缘（base.rect 右缘），
+        // 而非内容区右缘，避免被 padding 推离边框太远。
         let state = self.scroll.get();
-        paint_scrollbars(cv, content, &state, &self.scrollbar, style);
+        paint_scrollbars(cv, self.scrollbar_viewport(content), &state, &self.scrollbar, style);
+    }
+
+    /// 滚动条所用视口：纵向跟随内容区，横向贴控件外缘（含 padding）。
+    fn scrollbar_viewport(&self, content: Rect) -> Rect {
+        Rect::new(
+            content.left(),
+            content.top(),
+            (self.base.rect.right() - content.left()).max(0.0),
+            content.size.height,
+        )
     }
 
     fn shows_placeholder(&self) -> bool {
@@ -642,17 +653,20 @@ impl Edit {
     }
 
     /// 横向严格裁到内容区；纵向保留控件 padding，避免字体抗锯齿下沿被切掉。
-    /// 多行出现纵向滚动条时，右侧为滚动条保留留白，避免文字压到滚动条下面。
+    /// 多行出现纵向滚动条时，文字右缘不越过滚动条左侧（含 gap 留白）。
     fn text_clip_rect(&self, content: Rect) -> Rect {
-        let reserve = if self.scroll.get().needs_v() {
-            self.scrollbar.width + self.scrollbar.gap + self.scrollbar.margin
-        } else {
-            0.0
-        };
+        let mut right = content.right();
+        if self.scroll.get().needs_v() {
+            let bar_left = self.base.rect.right()
+                - self.scrollbar.margin
+                - self.scrollbar.width
+                - self.scrollbar.gap;
+            right = right.min(bar_left);
+        }
         Rect::new(
             content.left(),
             self.base.rect.top(),
-            (content.size.width - reserve).max(0.0),
+            (right - content.left()).max(0.0),
             self.base.rect.size.height,
         )
     }

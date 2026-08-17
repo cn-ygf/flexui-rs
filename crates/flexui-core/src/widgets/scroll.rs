@@ -52,15 +52,33 @@ impl ScrollView {
         layout::content_rect(&self.base)
     }
 
+    /// 滚动条所用视口：纵向跟随内容区，横向贴控件外缘（含 padding）。
+    fn scrollbar_viewport(&self) -> Rect {
+        let v = self.viewport();
+        Rect::new(
+            v.left(),
+            v.top(),
+            (self.base.rect.right() - v.left()).max(0.0),
+            v.size.height,
+        )
+    }
+
+    /// 滚动条左缘（贴外缘、留 margin）。内容右缘不得越过此处再往左留 gap。
+    fn scrollbar_left(&self) -> f32 {
+        self.base.rect.right() - self.scrollbar.margin - self.scrollbar.width
+    }
+
     /// 子控件使用的视口始终避开滚动条，避免内容宽度随滚动状态跳动。
+    /// 滚动条贴控件外缘，内容右缘取「内容区右缘」与「滚动条左侧再留 gap」的较小者。
     fn content_viewport(&self) -> Rect {
         let viewport = self.viewport();
-        let reserved =
-            (self.scrollbar.width + self.scrollbar.gap + self.scrollbar.margin).max(0.0);
+        let right = viewport
+            .right()
+            .min(self.scrollbar_left() - self.scrollbar.gap);
         Rect::new(
             viewport.left(),
             viewport.top(),
-            (viewport.size.width - reserved).max(0.0),
+            (right - viewport.left()).max(0.0),
             viewport.size.height,
         )
     }
@@ -150,8 +168,8 @@ impl Widget for ScrollView {
     }
 
     fn paint_foreground(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
-        // 内容高于视口时在子内容之上绘制滚动条（统一绘制器）。
-        paint_scrollbars(cv, self.viewport(), &self.scroll, &self.scrollbar, style);
+        // 内容高于视口时在子内容之上绘制滚动条（统一绘制器），贴控件外缘。
+        paint_scrollbars(cv, self.scrollbar_viewport(), &self.scroll, &self.scrollbar, style);
     }
     fn is_scrollable(&self) -> bool {
         true
@@ -220,13 +238,14 @@ mod tests {
             .push(Panel::new().height(120.0))
             .push(Panel::new().height(120.0));
         layout_node(&mut view, Rect::new(0.0, 0.0, 294.0, 228.0), &FakeCanvas);
-        // 预留 = 条宽5 + 间距4 + 边距2 = 11，视口宽 250 → 子内容宽 239。
+        // 滚动条贴外缘(base.right=294)，条左=294-2-5=287；内容右缘取 min(视口右274,
+        // 287-gap4=283)=274，右侧 padding(20) 已足够容纳滚动条 → 内容用满宽 250。
         assert_eq!(
             view.children_viewport(),
-            Rect::new(23.0, 16.0, 241.0, 188.0)
+            Rect::new(23.0, 16.0, 251.0, 188.0)
         );
         assert_eq!(view.base.children[0].base().rect.left(), 24.0);
-        assert_eq!(view.base.children[0].base().rect.size.width, 239.0);
+        assert_eq!(view.base.children[0].base().rect.size.width, 250.0);
         assert_eq!(view.max_scroll(), 52.0);
         let before = view.base.children[0].base().rect.top();
         assert!(view.scroll_by(0.0, -32.0));
