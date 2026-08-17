@@ -564,6 +564,8 @@ pub struct Dispatcher {
     hover: Option<WidgetId>,
     pressed: Option<WidgetId>,
     focus: Option<WidgetId>,
+    /// 正在拖动的滚动条：目标控件 id + 抓取信息。拖动期间独占鼠标 move/up。
+    scroll_drag: Option<(WidgetId, crate::scroll::ScrollGrab)>,
     /// 最近一次 Edit 交互后恢复闪烁的最早时刻；此前光标保持常亮。
     caret_blink_after: Option<Instant>,
     needs_redraw: bool,
@@ -601,6 +603,7 @@ impl Dispatcher {
             hover: None,
             pressed: None,
             focus: None,
+            scroll_drag: None,
             caret_blink_after: None,
             needs_redraw: false,
             needs_layout: false,
@@ -1294,6 +1297,11 @@ impl Dispatcher {
         }
         match ev {
             Event::MouseMove { pos } => {
+                // 拖动滚动条中：独占鼠标移动，直接更新偏移。
+                if let Some((id, grab)) = self.scroll_drag {
+                    self.drag_scrollbar(root, id, *pos, grab);
+                    return;
+                }
                 let hit = hit_test(root, *pos);
                 self.set_hover(root, hit);
                 // 若正按住某指针型控件（Edit/Slider）：这是一次拖动 → 转发给它。
@@ -1307,6 +1315,11 @@ impl Dispatcher {
                 pos,
                 button: MouseButton::Left,
             } => {
+                // 优先命中滚动条滑块：进入拖动，独占后续 move/up（不改焦点/按压）。
+                if let Some((id, grab)) = scrollbar_grab_at(root, *pos) {
+                    self.scroll_drag = Some((id, grab));
+                    return;
+                }
                 let hit = hit_test(root, *pos);
                 let old_focus = self.focus;
                 self.press(root, hit);
@@ -1331,6 +1344,10 @@ impl Dispatcher {
                 pos,
                 button: MouseButton::Left,
             } => {
+                // 结束滚动条拖动，独占本次抬起。
+                if self.scroll_drag.take().is_some() {
+                    return;
+                }
                 let hit = hit_test(root, *pos);
                 self.release(root, hit);
             }
@@ -1423,6 +1440,28 @@ impl Dispatcher {
         for_each_mut(root, &mut |w| w.base_mut().focused = false);
         self.needs_redraw = true;
         self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
+    }
+
+    /// 拖动滚动条滑块：按鼠标位置更新目标控件偏移，脏其整体区域并上报。
+    fn drag_scrollbar(
+        &mut self,
+        root: &mut dyn Widget,
+        id: WidgetId,
+        pos: Point,
+        grab: crate::scroll::ScrollGrab,
+    ) {
+        let mut changed = false;
+        visit_mut(root, id, &mut |w| {
+            changed = w.scrollbar_drag(pos, &grab);
+        });
+        if changed {
+            if let Some(r) = rect_of(root, id) {
+                self.mark_dirty(r);
+            }
+            if let Some(offset) = find_by_id(root, id).and_then(Widget::scroll_offset) {
+                self.emit_control_event(root, id, ControlEvent::ScrollChanged(offset));
+            }
+        }
     }
 
     /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
@@ -1875,6 +1914,20 @@ fn place_submenu(
 }
 
 /// 滚动光标下最深的可滚动控件，返回实际发生变化的视口矩形。
+/// 命中某个可见控件的滚动条滑块则返回（控件 id + 抓取信息）。深度优先取最内层。
+fn scrollbar_grab_at(
+    root: &mut dyn Widget,
+    pos: Point,
+) -> Option<(WidgetId, crate::scroll::ScrollGrab)> {
+    let mut found = None;
+    for_each_visible_mut(root, true, &mut |widget| {
+        if let Some(grab) = widget.scrollbar_grab(pos) {
+            found = Some((widget.base().id, grab));
+        }
+    });
+    found
+}
+
 fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) -> Option<(WidgetId, Rect)> {
     let mut target = None;
     for_each_visible_mut(root, true, &mut |widget| {
@@ -2171,6 +2224,44 @@ mod tests {
         // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
+    }
+
+    #[test]
+    fn scrollview_拖动滚动条() {
+        let mut root = ScrollView::new()
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0)); // 5×40 = 200 内容高，视口 100
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+
+        let mut disp = Dispatcher::new();
+        // 滑块 x∈[93,98]（宽5、边距2），初始 y∈[0,50]（thumb_h=50）。按在 (95,10)。
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(95.0, 10.0),
+                button: MouseButton::Left,
+            },
+        );
+        // 拖到 y=40：滑块顶=30，行程=50，t=0.6，max=100 → 偏移 60。
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(95.0, 40.0) });
+        let dragged = root.scroll_offset().unwrap().y;
+        assert!((dragged - 60.0).abs() < 0.01, "拖动后偏移应≈60，实为 {dragged}");
+        // 子树立即随拖动上移。
+        assert!((root.base().children[0].base().rect.top() - (-60.0)).abs() < 0.01);
+        // 抬起后结束拖动，再移动不再改变偏移。
+        disp.handle(
+            &mut root,
+            &Event::MouseUp {
+                pos: Point::new(95.0, 40.0),
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(95.0, 80.0) });
+        assert!((root.scroll_offset().unwrap().y - dragged).abs() < 0.01, "抬起后不应再变");
     }
 
     #[test]

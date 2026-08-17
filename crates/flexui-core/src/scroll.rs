@@ -202,6 +202,81 @@ impl Default for ScrollBarStyle {
     }
 }
 
+/// 滚动轴。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollAxis {
+    Vertical,
+    Horizontal,
+}
+
+/// 抓住滚动条滑块拖动时记录的信息：哪根轴 + 鼠标按下点到滑块起始边的距离。
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollGrab {
+    pub axis: ScrollAxis,
+    /// 鼠标按下点相对滑块起始边（纵条顶 / 横条左）的偏移，拖动时保持不变。
+    pub grab: f32,
+}
+
+/// 命中滚动条滑块则返回抓取信息（供拖动）。`viewport`/`style` 须与绘制时一致。
+pub fn thumb_grab(
+    state: &ScrollState,
+    viewport: Rect,
+    style: &ScrollBarStyle,
+    pos: Point,
+) -> Option<ScrollGrab> {
+    if let Some(thumb) = thumb_v(state, viewport, style) {
+        if thumb.contains(pos) {
+            return Some(ScrollGrab {
+                axis: ScrollAxis::Vertical,
+                grab: pos.y - thumb.top(),
+            });
+        }
+    }
+    if let Some(thumb) = thumb_h_rect(state, viewport, style) {
+        if thumb.contains(pos) {
+            return Some(ScrollGrab {
+                axis: ScrollAxis::Horizontal,
+                grab: pos.x - thumb.left(),
+            });
+        }
+    }
+    None
+}
+
+/// 按拖动中的鼠标位置反推并设置滚动偏移。返回是否变化。
+pub fn apply_thumb_drag(
+    state: &mut ScrollState,
+    viewport: Rect,
+    style: &ScrollBarStyle,
+    pos: Point,
+    grab: &ScrollGrab,
+) -> bool {
+    match grab.axis {
+        ScrollAxis::Vertical => {
+            let Some(thumb) = thumb_v(state, viewport, style) else {
+                return false;
+            };
+            let travel = viewport.size.height - thumb.size.height;
+            if travel <= 0.0 {
+                return false;
+            }
+            let t = ((pos.y - grab.grab - viewport.top()) / travel).clamp(0.0, 1.0);
+            state.set_offset(state.offset().x, t * state.max().y)
+        }
+        ScrollAxis::Horizontal => {
+            let Some(thumb) = thumb_h_rect(state, viewport, style) else {
+                return false;
+            };
+            let travel = viewport.size.width - thumb.size.width;
+            if travel <= 0.0 {
+                return false;
+            }
+            let t = ((pos.x - grab.grab - viewport.left()) / travel).clamp(0.0, 1.0);
+            state.set_offset(t * state.max().x, state.offset().y)
+        }
+    }
+}
+
 /// 纵向滑块矩形（内容不足则 None）。`viewport` 为视口矩形（绝对坐标）。
 pub fn thumb_v(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle) -> Option<Rect> {
     if !state.needs_v() {
@@ -305,6 +380,22 @@ mod tests {
         // 目标在上方 → 顶部对齐。
         assert!(s.ensure_visible(Rect::new(0.0, 40.0, 100.0, 20.0), 0.0));
         assert_eq!(s.offset().y, 40.0);
+    }
+
+    #[test]
+    fn 拖动滑块反推偏移() {
+        let mut s = ScrollState::new(ScrollAxes::vertical());
+        s.set_metrics(Size::new(100.0, 300.0), Size::new(100.0, 100.0));
+        let vp = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let style = ScrollBarStyle::default();
+        // 滑块在右缘(宽5、边距2)→ x∈[93,98]，初始 y∈[0,33.33]。
+        let grab = thumb_grab(&s, vp, &style, Point::new(95.0, 10.0)).expect("应命中滑块");
+        assert_eq!(grab.axis, ScrollAxis::Vertical);
+        // 抓取点距滑块顶 10；拖到 y=60 → 滑块顶=50，行程=100-33.33=66.67，t≈0.75。
+        assert!(apply_thumb_drag(&mut s, vp, &style, Point::new(95.0, 60.0), &grab));
+        assert!((s.offset().y - 150.0).abs() < 1.0, "offset={}", s.offset().y);
+        // 滑块外的点不命中。
+        assert!(thumb_grab(&s, vp, &style, Point::new(10.0, 10.0)).is_none());
     }
 
     #[test]

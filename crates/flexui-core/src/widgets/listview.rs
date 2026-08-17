@@ -46,6 +46,17 @@ impl ListView {
         let row = Rect::new(0.0, i as f32 * self.row_h, self.scroll.viewport().width, self.row_h);
         self.scroll.ensure_visible(row, 0.0);
     }
+
+    /// 滚动条所用视口：纵向跟随内容区，横向贴控件外缘。
+    fn scrollbar_viewport(&self) -> Rect {
+        let content = layout::content_rect(&self.base);
+        Rect::new(
+            content.left(),
+            content.top(),
+            (self.base.rect.right() - content.left()).max(0.0),
+            content.size.height,
+        )
+    }
     /// 设置列表项。
     pub fn items(mut self, it: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.items = it.into_iter().map(Into::into).collect();
@@ -126,8 +137,14 @@ impl Widget for ListView {
             );
         }
         cv.restore();
-        // 内容超出视口时用统一绘制器画滚动条。
-        paint_scrollbars(cv, content, &self.scroll, &self.scrollbar, style);
+        // 内容超出视口时用统一绘制器画滚动条（贴控件外缘）。
+        paint_scrollbars(
+            cv,
+            self.scrollbar_viewport(),
+            &self.scroll,
+            &self.scrollbar,
+            style,
+        );
     }
     fn on_event(&mut self, ev: &Event) -> EventFlow {
         if let Event::MouseDown {
@@ -191,6 +208,13 @@ impl Widget for ListView {
     }
     fn scroll_offset(&self) -> Option<Point> {
         Some(self.scroll.offset())
+    }
+    fn scrollbar_grab(&self, pos: Point) -> Option<crate::scroll::ScrollGrab> {
+        crate::scroll::thumb_grab(&self.scroll, self.scrollbar_viewport(), &self.scrollbar, pos)
+    }
+    fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
+        let viewport = self.scrollbar_viewport();
+        crate::scroll::apply_thumb_drag(&mut self.scroll, viewport, &self.scrollbar, pos, grab)
     }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         self.scroll.axis_value(prop)

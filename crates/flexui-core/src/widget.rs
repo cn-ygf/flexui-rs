@@ -465,6 +465,14 @@ pub trait Widget {
     fn scroll_offset(&self) -> Option<flexui_geometry::Point> {
         None
     }
+    /// 命中滚动条滑块则返回抓取信息（供分发器发起拖动）。默认无滚动条。
+    fn scrollbar_grab(&self, _pos: flexui_geometry::Point) -> Option<crate::scroll::ScrollGrab> {
+        None
+    }
+    /// 按拖动中的鼠标位置更新滚动偏移。返回是否变化。
+    fn scrollbar_drag(&mut self, _pos: flexui_geometry::Point, _grab: &crate::scroll::ScrollGrab) -> bool {
+        false
+    }
     fn animation_value(&self, _prop: AnimProp) -> Option<f32> {
         None
     }

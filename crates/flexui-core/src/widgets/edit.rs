@@ -1142,6 +1142,20 @@ impl Widget for Edit {
     fn scroll_offset(&self) -> Option<Point> {
         Some(self.scroll.get().offset())
     }
+    fn scrollbar_grab(&self, pos: Point) -> Option<crate::scroll::ScrollGrab> {
+        let content = layout::content_rect(&self.base);
+        let state = self.scroll.get();
+        crate::scroll::thumb_grab(&state, self.scrollbar_viewport(content), &self.scrollbar, pos)
+    }
+    fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
+        let content = layout::content_rect(&self.base);
+        let viewport = self.scrollbar_viewport(content);
+        let mut state = self.scroll.get();
+        let changed =
+            crate::scroll::apply_thumb_drag(&mut state, viewport, &self.scrollbar, pos, grab);
+        self.scroll.set(state);
+        changed
+    }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         self.scroll.get().axis_value(prop)
     }

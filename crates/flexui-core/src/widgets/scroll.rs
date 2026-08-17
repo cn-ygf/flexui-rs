@@ -185,6 +185,19 @@ impl Widget for ScrollView {
     fn scroll_offset(&self) -> Option<Point> {
         Some(self.scroll.offset())
     }
+    fn scrollbar_grab(&self, pos: Point) -> Option<crate::scroll::ScrollGrab> {
+        crate::scroll::thumb_grab(&self.scroll, self.scrollbar_viewport(), &self.scrollbar, pos)
+    }
+    fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
+        let before = self.scroll.offset();
+        let viewport = self.scrollbar_viewport();
+        let changed =
+            crate::scroll::apply_thumb_drag(&mut self.scroll, viewport, &self.scrollbar, pos, grab);
+        if changed {
+            self.shift_children(before);
+        }
+        changed
+    }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         self.scroll.axis_value(prop)
     }

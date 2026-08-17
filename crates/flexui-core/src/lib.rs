@@ -34,7 +34,8 @@ pub use native_menu::{
 };
 pub use paint::{paint_tree, paint_tree_in_rect};
 pub use scroll::{
-    paint_scrollbars, thumb_h_rect, thumb_v, ScrollAxes, ScrollBarStyle, ScrollState,
+    apply_thumb_drag, paint_scrollbars, thumb_grab, thumb_h_rect, thumb_v, ScrollAxes, ScrollAxis,
+    ScrollBarStyle, ScrollGrab, ScrollState,
 };
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{
