@@ -3,7 +3,7 @@
 use std::cell::{Cell, Ref, RefCell};
 
 use flexui_geometry::{Color, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, TextLayout};
+use flexui_gfx::{Canvas, Font, LayerHandle, TextLayout};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::anim::AnimProp;
@@ -32,6 +32,20 @@ struct LineCache {
     grapheme_boundaries: Vec<usize>,
     /// 惰性整形结果；None 表示尚未整形。用 `RefCell` 以便 `&self` 的绘制阶段填充。
     layout: RefCell<Option<TextLayout>>,
+}
+
+/// 静态多行内容的离屏「过扫描带」缓存：把可见区上下各多渲染一屏到离屏位图，
+/// 滚动时只要还在带内就整块 blit，不再逐行重画（滚动大文本时大幅降 CPU）。
+struct BandCache {
+    layer: LayerHandle,
+    /// 带顶部对应的内容坐标 y（= 首行索引 × 行高）。
+    top: f32,
+    /// 带高度（内容坐标）。
+    height: f32,
+    /// 渲染时的内容宽度、像素密度、文本版本；任一变化即失效重建。
+    width: f32,
+    scale: f32,
+    rev: u64,
 }
 
 /// Edit 的持久配置，不污染所有控件共享的 Base。
@@ -99,6 +113,10 @@ pub struct Edit {
     /// 逐行排版缓存对应的字体；与当前字体一致且 !cache_dirty 时复用 lines，
     /// 避免大文本在无关布局（兄弟控件变化触发的全树 arrange）时重复整形。
     shaped_font: Option<Font>,
+    /// 文本/行元数据版本号；每次重建 lines 自增，用于让离屏带缓存失效。
+    content_rev: u64,
+    /// 静态多行内容的离屏带缓存（`&self` 绘制阶段填充，故用 `RefCell`）。
+    band: RefCell<Option<BandCache>>,
     /// 最近一次排版/绘制得到的真实插入点矩形。
     caret_rect: Cell<Option<Rect>>,
 }
@@ -118,6 +136,8 @@ impl Edit {
             scrollbar: ScrollBarStyle::default(),
             append_pending: false,
             shaped_font: None,
+            content_rev: 0,
+            band: RefCell::new(None),
             caret_rect: Cell::new(None),
         }
     }
@@ -620,6 +640,16 @@ impl Edit {
         };
 
         let offset_y = self.scroll.get().offset().y;
+        // 静态内容（未聚焦、无选区、无 IME 组合）走离屏带缓存：滚动时只 blit。
+        let static_content =
+            !self.base.focused && sel.is_none() && self.state.marked.is_empty();
+        if static_content
+            && self.paint_text_band(cv, content, line_h, offset_y, color).is_some()
+        {
+            let state = self.scroll.get();
+            paint_scrollbars(cv, self.scrollbar_viewport(content), &state, &self.scrollbar, style);
+            return;
+        }
         cv.save();
         cv.clip_rect(self.text_clip_rect(content));
         let line_count = self.lines.len();
@@ -691,6 +721,91 @@ impl Edit {
             (self.base.rect.right() - content.left()).max(0.0),
             content.size.height,
         )
+    }
+
+    /// 用离屏「过扫描带」缓存绘制静态多行文本：带内滚动只 blit，越界或内容变更才重建。
+    /// 返回 `Some` 表示已处理；`None` 表示后端不支持离屏或无内容，调用方退化为逐行绘制。
+    fn paint_text_band(
+        &self,
+        cv: &mut dyn Canvas,
+        content: Rect,
+        line_h: f32,
+        offset_y: f32,
+        color: Color,
+    ) -> Option<()> {
+        let line_count = self.lines.len();
+        if line_h <= 0.0 || line_count == 0 || content.size.width <= 0.0 {
+            return None;
+        }
+        let scale = cv.scale();
+        let vh = content.size.height;
+        let content_h = line_count as f32 * line_h;
+        let vis_top = offset_y;
+        let vis_bottom = (offset_y + vh).min(content_h);
+
+        // 复用条件：同版本/宽度/密度，且带完整覆盖当前可见区间。
+        let reuse = {
+            let band = self.band.borrow();
+            band.as_ref().is_some_and(|b| {
+                b.rev == self.content_rev
+                    && (b.width - content.size.width).abs() < 0.5
+                    && (b.scale - scale).abs() < 0.01
+                    && b.top <= vis_top + 0.5
+                    && b.top + b.height >= vis_bottom - 0.5
+            })
+        };
+
+        if !reuse {
+            // 以可见区为中心上下各扩一屏做过扫描带，按整行对齐。
+            let overscan = vh;
+            let band_first = ((vis_top - overscan) / line_h).floor().max(0.0) as usize;
+            let band_last = (((vis_bottom + overscan) / line_h).ceil() as usize).min(line_count);
+            if band_last <= band_first {
+                return None;
+            }
+            let btop = band_first as f32 * line_h;
+            let bheight = (band_last - band_first) as f32 * line_h;
+            let width = content.size.width;
+            let layer = cv.capture_layer(Size::new(width, bheight), &mut |lc| {
+                self.render_band(lc, band_first, band_last, line_h, width, color);
+            })?;
+            *self.band.borrow_mut() = Some(BandCache {
+                layer,
+                top: btop,
+                height: bheight,
+                width,
+                scale,
+                rev: self.content_rev,
+            });
+        }
+
+        let band = self.band.borrow();
+        let b = band.as_ref()?;
+        // 带顶部内容坐标 b.top → 屏幕 y。
+        let screen_y = content.top() - offset_y + b.top;
+        cv.save();
+        cv.clip_rect(self.text_clip_rect(content));
+        cv.draw_layer(&b.layer, Point::new(content.left(), screen_y));
+        cv.restore();
+        Some(())
+    }
+
+    /// 把 [first,last) 行渲染进离屏画布（带内局部坐标，顶部为 0）。
+    fn render_band(
+        &self,
+        cv: &mut dyn Canvas,
+        first: usize,
+        last: usize,
+        line_h: f32,
+        width: f32,
+        color: Color,
+    ) {
+        for i in first..last {
+            let y = (i - first) as f32 * line_h;
+            if let Some(layout) = self.line_layout(cv, i) {
+                Self::draw_input_layout(cv, &layout, Rect::new(0.0, y, width, line_h), color);
+            }
+        }
     }
 
     fn shows_placeholder(&self) -> bool {
@@ -795,6 +910,9 @@ impl Widget for Edit {
             }
             self.lines = lines;
             self.shaped_font = Some(self.base.font.clone());
+            // 文本/行结构变了：作废离屏带缓存。
+            self.content_rev = self.content_rev.wrapping_add(1);
+            *self.band.borrow_mut() = None;
         }
         self.line_h = cv.layout_text("Ag", &self.base.font).height();
 
@@ -1606,6 +1724,62 @@ mod tests {
             second * 4 < first,
             "重复布局应复用整形缓存: first={first} second={second}"
         );
+    }
+
+    #[test]
+    fn 多行静态_滚动复用离屏带() {
+        struct BandCanvas {
+            captures: Cell<usize>,
+            blits: Cell<usize>,
+        }
+        impl Canvas for BandCanvas {
+            fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+            fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+            fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+            fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+            fn draw_text(&mut self, _t: &str, _o: Point, _f: &Font, _c: Color) {}
+            fn measure_text(&self, t: &str, f: &Font) -> Size {
+                Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+            }
+            fn scale(&self) -> f32 {
+                2.0
+            }
+            fn capture_layer(
+                &mut self,
+                size: Size,
+                draw: &mut dyn FnMut(&mut dyn Canvas),
+            ) -> Option<LayerHandle> {
+                self.captures.set(self.captures.get() + 1);
+                draw(self);
+                Some(LayerHandle::new(size, 2.0, std::rc::Rc::new(())))
+            }
+            fn draw_layer(&mut self, _layer: &LayerHandle, _origin: Point) {
+                self.blits.set(self.blits.get() + 1);
+            }
+        }
+        let mut cv = BandCanvas {
+            captures: Cell::new(0),
+            blits: Cell::new(0),
+        };
+        let text = (0..200)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut e = Edit::new().multiline(true).text(text); // 未聚焦、无选区 → 静态
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 100.0), &cv);
+        // 首帧：建带一次 + blit 一次。
+        e.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.captures.get(), 1);
+        assert_eq!(cv.blits.get(), 1);
+        // 带内小滚动：只 blit，不重建。
+        assert!(e.scroll_by(0.0, -20.0));
+        e.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.captures.get(), 1, "带内滚动应复用离屏带");
+        assert_eq!(cv.blits.get(), 2);
+        // 猛滚越出带：重建一次。
+        assert!(e.scroll_by(0.0, -5000.0));
+        e.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.captures.get(), 2, "越界滚动应重建带");
     }
 
     #[test]

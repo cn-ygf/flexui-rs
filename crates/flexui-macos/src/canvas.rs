@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
-use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextBoundary, TextLayout};
+use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, LayerHandle, TextBoundary, TextLayout};
 
 use core_foundation::attributed_string::CFMutableAttributedString;
 use core_foundation::base::{CFRange, TCFType};
@@ -672,7 +672,60 @@ impl Canvas for CgCanvas {
     fn clip_round_rect(&mut self, rect: Rect, radius: Corners) {
         round_rect_path(rect, radius).addClip();
     }
+
+    fn scale(&self) -> f32 {
+        self.backing_scale
+    }
+
+    /// 用 NSImage 离屏渲染一段内容：lockFocus 得到按点计的上下文，翻转成左上原点
+    /// （与主视图 drawRect 一致），复用同一套绘制代码渲染，返回 NSImage 句柄供 blit。
+    #[allow(deprecated)] // lockFocus 已弃用，但离屏一次性渲染足够可靠
+    fn capture_layer(
+        &mut self,
+        size: Size,
+        draw: &mut dyn FnMut(&mut dyn Canvas),
+    ) -> Option<LayerHandle> {
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return None;
+        }
+        let ns_size = NSSize::new(size.width as f64, size.height as f64);
+        let image = NSImage::initWithSize(NSImage::alloc(), ns_size);
+        image.lockFocus();
+        // lockFocus 的上下文是「左下原点、y 向上、以点为单位」；翻转成左上原点 y 向下，
+        // 使所有绘制代码（含 CoreText 的二次翻转）与主视图坐标系完全一致。
+        if let Some(ns_ctx) = NSGraphicsContext::currentContext() {
+            let ns_cg = ns_ctx.CGContext();
+            let raw = Retained::as_ptr(&ns_cg).cast_mut().cast();
+            let cg = unsafe { CGContext::from_existing_context_ptr(raw) };
+            cg.translate(0.0, size.height as f64);
+            cg.scale(1.0, -1.0);
+        }
+        let mut off = CgCanvas::with_image_cache(self.backing_scale, self.image_cache.clone());
+        draw(&mut off);
+        image.unlockFocus();
+        Some(LayerHandle::new(
+            size,
+            self.backing_scale,
+            Rc::new(NsImageLayer(image)),
+        ))
+    }
+
+    fn draw_layer(&mut self, layer: &LayerHandle, origin: Point) {
+        let Some(NsImageLayer(image)) = layer.data::<NsImageLayer>() else {
+            return;
+        };
+        let dst = to_nsrect(Rect::new(origin.x, origin.y, layer.size.width, layer.size.height));
+        image.drawInRect_fromRect_operation_fraction(
+            dst,
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+            NSCompositingOperation::SourceOver,
+            1.0,
+        );
+    }
 }
+
+/// 离屏图层后端载体：持有 NSImage。
+struct NsImageLayer(Retained<NSImage>);
 
 /// 度量文字时颜色不影响尺寸，用黑色占位。
 fn color_black() -> Color {
