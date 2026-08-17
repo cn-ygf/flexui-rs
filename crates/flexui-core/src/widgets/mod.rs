@@ -25,6 +25,7 @@ mod slider;
 mod switch;
 mod tabbox;
 mod vbox;
+mod virtual_list;
 
 pub use button::Button;
 pub use checkbox::CheckBox;
@@ -47,6 +48,10 @@ pub use slider::Slider;
 pub use switch::Switch;
 pub use tabbox::TabBox;
 pub use vbox::VBox;
+pub use virtual_list::{
+    VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualListSource,
+    VirtualListSourceRef, VirtualSelectionMode, VirtualSort, VirtualSortDirection,
+};
 
 use flexui_geometry::{Color, Corners, Rect};
 use flexui_gfx::{Canvas, TextAlign};

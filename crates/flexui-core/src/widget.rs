@@ -111,6 +111,15 @@ pub enum WidgetPropertyKey {
     BindGroup,
     ScrollBar,
     AutoScroll,
+    VirtualColumns,
+    VirtualSource,
+    VirtualSelectionMode,
+    VirtualSelectedRows,
+    HeaderHeight,
+    ShowHeader,
+    Striped,
+    FillLastColumn,
+    Overscan,
 }
 
 /// XML/构建器及运行时写入控件专属配置的类型安全入口。
@@ -164,6 +173,18 @@ pub enum WidgetProperty {
     ScrollBar(crate::scroll::ScrollBarVisibility),
     /// 文本追加后自动滚到底部（日志/聊天场景）。
     AutoScroll(bool),
+    /// 虚拟列表列定义。
+    VirtualColumns(Vec<crate::widgets::VirtualColumn>),
+    /// 虚拟列表惰性数据源。
+    VirtualSource(crate::widgets::VirtualListSourceRef),
+    VirtualSelectionMode(crate::widgets::VirtualSelectionMode),
+    /// 虚拟列表选中行的稳定 ID。
+    VirtualSelectedRows(Vec<u64>),
+    HeaderHeight(f32),
+    ShowHeader(bool),
+    Striped(bool),
+    FillLastColumn(bool),
+    Overscan(usize),
 }
 
 /// 平台文本输入协议需要的只读快照。
@@ -456,6 +477,26 @@ pub trait Widget {
         None
     }
     fn set_selected_index(&mut self, _index: usize) -> bool {
+        false
+    }
+
+    /// 多选列表当前选中的稳定行 ID；非多选控件返回 None。
+    fn selected_rows(&self) -> Option<Vec<u64>> {
+        None
+    }
+
+    /// 可排序数据控件的当前排序状态。
+    fn sort_state(&self) -> Option<crate::widgets::VirtualSort> {
+        None
+    }
+
+    /// 数据表当前列定义；用于列宽拖动后的状态持久化。
+    fn virtual_columns(&self) -> Option<Vec<crate::widgets::VirtualColumn>> {
+        None
+    }
+
+    /// 通知惰性数据控件重新读取数据和布局度量。
+    fn refresh_data(&mut self) -> bool {
         false
     }
 

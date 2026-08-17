@@ -4,11 +4,20 @@ use flexui::{
     ThemeMode, WindowCtx, WindowImpl,
 };
 
-use crate::{http_demo, resources, themes};
+use crate::{http_demo, resources, themes, virtual_list_demo};
 
-#[derive(Default)]
 pub(crate) struct GalleryWindow {
     ui: Option<MainProxy>,
+    virtual_list: virtual_list_demo::VirtualListDemo,
+}
+
+impl Default for GalleryWindow {
+    fn default() -> Self {
+        Self {
+            ui: None,
+            virtual_list: virtual_list_demo::VirtualListDemo::default(),
+        }
+    }
 }
 
 impl WindowImpl for GalleryWindow {
@@ -28,15 +37,31 @@ impl WindowImpl for GalleryWindow {
         {
             ctx.set_selected("theme_switch", true);
         }
+        self.virtual_list.init(ctx);
     }
 
     fn on_control_event(&mut self, name: &str, event: &ControlEvent, ctx: &mut WindowCtx) {
-        if let ("theme_switch", ControlEvent::SelectedChanged(dark)) = (name, event) {
-            ctx.set_theme(if *dark { Theme::dark() } else { Theme::light() });
+        match (name, event) {
+            ("theme_switch", ControlEvent::SelectedChanged(dark)) => {
+                ctx.set_theme(if *dark { Theme::dark() } else { Theme::light() });
+            }
+            (virtual_list_demo::CONTROL_NAME, ControlEvent::RowsSelectionChanged(_)) => {
+                self.virtual_list.selection_changed(ctx);
+            }
+            (virtual_list_demo::CONTROL_NAME, ControlEvent::SortChanged(sort)) => {
+                self.virtual_list.sort_changed(sort.clone(), ctx);
+            }
+            (virtual_list_demo::CONTROL_NAME, ControlEvent::ColumnsChanged(columns)) => {
+                self.virtual_list.columns_changed(columns.clone());
+            }
+            _ => {}
         }
     }
 
     fn on_click(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if self.virtual_list.handle_click(name, ctx) {
+            return;
+        }
         match name {
             "apply_bilibili_theme" => {
                 ctx.set_selected("theme_switch", false);

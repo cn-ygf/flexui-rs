@@ -56,8 +56,9 @@ pub use widget::{
 pub use widgets::{
     build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
     CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
-    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollView, Separator, Slider,
-    Switch, TabBox, VBox,
+    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollView, Separator, Slider, Switch, TabBox,
+    VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualListSource,
+    VirtualListSourceRef, VirtualSelectionMode, VirtualSort, VirtualSortDirection,
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,

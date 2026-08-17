@@ -271,6 +271,18 @@ impl<'a> EventCtx<'a> {
         self.get(name, |w| w.scroll_offset()).flatten()
     }
 
+    /// 让惰性数据控件重新读取数据源，并自动触发布局和重绘。
+    pub fn refresh_data(&mut self, name: &str) -> bool {
+        let mut refreshed = false;
+        let found = self
+            .mutate(name, |widget| refreshed = widget.refresh_data())
+            .is_some();
+        if found && refreshed {
+            self.invalidate(Invalidation::Layout);
+        }
+        found && refreshed
+    }
+
     /// 应用控件专属属性；保守地触发布局和整窗重绘。
     pub fn set_property(&mut self, name: &str, property: crate::widget::WidgetProperty) -> bool {
         use crate::widget::WidgetProperty as Property;
@@ -1348,6 +1360,12 @@ impl Dispatcher {
                 if self.scroll_drag.take().is_some() {
                     return;
                 }
+                // 指针型控件需要收到抬起事件来结束列宽拖动、文本拖选等内部状态。
+                if let Some(id) = self.pressed {
+                    if is_pointer_target(role_of(root, id)) {
+                        self.forward_to_widget(root, id, ev);
+                    }
+                }
                 let hit = hit_test(root, *pos);
                 self.release(root, hit);
             }
@@ -1755,6 +1773,19 @@ impl Dispatcher {
         if before.selection != after.selection {
             self.emit_control_event(root, id, ControlEvent::SelectionChanged(after.selection));
         }
+        if before.selected_rows != after.selected_rows {
+            if let Some(rows) = after.selected_rows {
+                self.emit_control_event(root, id, ControlEvent::RowsSelectionChanged(rows));
+            }
+        }
+        if before.sort != after.sort {
+            self.emit_control_event(root, id, ControlEvent::SortChanged(after.sort));
+        }
+        if before.columns != after.columns {
+            if let Some(columns) = after.columns {
+                self.emit_control_event(root, id, ControlEvent::ColumnsChanged(columns));
+            }
+        }
         if before.value != after.value {
             if let Some(value) = after.value {
                 self.emit_control_event(root, id, ControlEvent::ValueChanged(value));
@@ -1795,6 +1826,9 @@ struct ControlSnapshot {
     selection: Option<usize>,
     value: Option<f32>,
     scroll: Option<Point>,
+    selected_rows: Option<Vec<u64>>,
+    sort: Option<crate::widgets::VirtualSort>,
+    columns: Option<Vec<crate::widgets::VirtualColumn>>,
 }
 
 fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> {
@@ -1805,6 +1839,9 @@ fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> 
         selection: widget.selected_index(),
         value: widget.animation_value(AnimProp::Value),
         scroll: widget.scroll_offset(),
+        selected_rows: widget.selected_rows(),
+        sort: widget.sort_state(),
+        columns: widget.virtual_columns(),
     })
 }
 

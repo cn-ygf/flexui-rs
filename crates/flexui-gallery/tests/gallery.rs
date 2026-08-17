@@ -37,7 +37,7 @@ fn embedded_gallery_loads_all_included_pages() {
         find_by_name(doc.root.as_ref(), "pages").unwrap(),
     )
     .unwrap();
-    assert_eq!(pages.base().children.len(), 6);
+    assert_eq!(pages.base().children.len(), 7);
     for name in [
         "apply_bilibili_theme",
         "restore_default_theme",
@@ -49,6 +49,15 @@ fn embedded_gallery_loads_all_included_pages() {
         "http_url",
         "http_go",
         "http_response",
+        "nav_virtual_list",
+        "virtual_table",
+        "virtual_add_column",
+        "virtual_remove_column",
+        "virtual_add_rows",
+        "virtual_delete_selected",
+        "virtual_density",
+        "virtual_reset",
+        "virtual_status",
     ] {
         assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
     }

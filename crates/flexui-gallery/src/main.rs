@@ -4,6 +4,7 @@ mod app;
 mod http_demo;
 mod resources;
 mod themes;
+mod virtual_list_demo;
 
 use app::GalleryWindow;
 use flexui::Window;

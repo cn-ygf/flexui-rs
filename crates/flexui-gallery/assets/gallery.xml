@@ -32,6 +32,8 @@
                indicator="false" variant="nav" height="40"/>
         <Radio name="nav_async" text-verbatim="Async HTTP" group="1" tab-index="5"
                indicator="false" variant="nav" height="40"/>
+        <Radio name="nav_virtual_list" text-verbatim="Virtual List" group="1" tab-index="6"
+               indicator="false" variant="nav" height="40"/>
       </VBox>
       <TabBox name="pages" bindgroup="1" width="fill" height="fill">
         <Include src="pages/basic.xml"/>
@@ -40,6 +42,7 @@
         <Include src="pages/states.xml"/>
         <Include src="pages/native_menu.xml"/>
         <Include src="pages/async_http.xml"/>
+        <Include src="pages/virtual_list.xml"/>
       </TabBox>
     </HBox>
   </VBox>

@@ -448,6 +448,10 @@ impl<'a> WindowCtx<'a> {
     pub fn scroll_offset(&mut self, name: &str) -> Option<flexui_geometry::Point> {
         self.event_ctx(|ctx| ctx.scroll_offset(name))
     }
+    /// 让 VirtualList 等惰性数据控件重新读取数据源。
+    pub fn refresh_data(&mut self, name: &str) -> bool {
+        self.event_ctx(|ctx| ctx.refresh_data(name))
+    }
     pub fn is_enabled(&mut self, name: &str) -> Option<bool> {
         self.event_ctx(|ctx| ctx.is_enabled(name))
     }

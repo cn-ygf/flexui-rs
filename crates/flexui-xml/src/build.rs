@@ -1,6 +1,7 @@
 //! XML → 控件树的构建（L4/L5）。对应需求 C10（XML 布局）、C11（v-if）、C12（平台谓词）。
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use flexui_core::{
     Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
@@ -8,7 +9,8 @@ use flexui_core::{
     Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
     Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec,
     Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode, VBox,
-    VisualState, Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
+    VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualSelectionMode, VisualState,
+    Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -338,8 +340,11 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
         }
     }
 
-    // ComboBox/ListView 的 <item> 子元素已在 make_node 收进数据，不作为控件子节点。
-    if matches!(tag.as_str(), "combobox" | "select" | "listview" | "list") {
+    // 数据控件的元数据子元素已在 make_node 收进数据，不作为控件子节点。
+    if matches!(
+        tag.as_str(),
+        "combobox" | "select" | "listview" | "list" | "virtuallist" | "virtual-list"
+    ) {
         return Ok(Some(node));
     }
 
@@ -502,6 +507,72 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             }
             node
         }
+        "virtuallist" | "virtual-list" => {
+            let columns = el
+                .children
+                .iter()
+                .filter(|child| child.tag.eq_ignore_ascii_case("column"))
+                .enumerate()
+                .map(|(index, child)| parse_virtual_column(child, index))
+                .collect::<Vec<_>>();
+            let rows = el
+                .children
+                .iter()
+                .filter(|child| child.tag.eq_ignore_ascii_case("row"))
+                .enumerate()
+                .map(|(index, child)| {
+                    let id = child
+                        .attr("id")
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .unwrap_or(index as u64 + 1);
+                    let values = child
+                        .attr("values")
+                        .unwrap_or("")
+                        .split('|')
+                        .map(str::trim)
+                        .collect::<Vec<_>>();
+                    let mut row = VirtualListRow::new(id);
+                    for (column_index, column) in columns.iter().enumerate() {
+                        let value = child
+                            .attr(&column.key)
+                            .or_else(|| values.get(column_index).copied())
+                            .unwrap_or("");
+                        row = row.cell(column.key.clone(), value);
+                    }
+                    row
+                })
+                .collect::<Vec<_>>();
+            let source = Rc::new(VirtualListRows::from_rows(rows));
+            let mut list = VirtualList::new().columns(columns).source(source);
+            if let Some(value) = el.attr("row-height").and_then(|value| value.parse().ok()) {
+                list = list.row_height(value);
+            }
+            if let Some(value) = el
+                .attr("header-height")
+                .and_then(|value| value.parse().ok())
+            {
+                list = list.header_height(value);
+            }
+            if let Some(value) = el.attr("show-header") {
+                list = list.show_header(parse_bool(value));
+            }
+            if let Some(value) = el.attr("striped") {
+                list = list.striped(parse_bool(value));
+            }
+            if let Some(value) = el.attr("fill-last-column") {
+                list = list.fill_last_column(parse_bool(value));
+            }
+            if let Some(value) = el.attr("overscan").and_then(|value| value.parse().ok()) {
+                list = list.overscan(value);
+            }
+            if let Some(value) = el.attr("selection-mode") {
+                list = list.selection_mode(parse_virtual_selection_mode(value));
+            }
+            if let Some(index) = el.attr("selected").and_then(|value| value.parse().ok()) {
+                list.set_selected_index(index);
+            }
+            Box::new(list)
+        }
         "separator" | "hr" => {
             let vertical = el
                 .attr("orientation")
@@ -537,8 +608,9 @@ fn apply_attrs(
             // 已在别处处理的属性（Separator orientation/thickness、Image src、
             // ComboBox options、ListView items/row-height）。
             "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
-            | "options-args" | "items-args" | "row-height" | "text-args" | "placeholder-args"
-            | "tooltip-args" | "title-args" => {}
+            | "options-args" | "items-args" | "row-height" | "header-height" | "show-header"
+            | "striped" | "fill-last-column" | "overscan" | "selection-mode" | "text-args"
+            | "placeholder-args" | "tooltip-args" | "title-args" => {}
             "name" => node.base_mut().name = Some(v.clone()),
             "variant" => node.base_mut().variant = v.trim().to_owned(),
             "class" | "classes" => {
@@ -693,7 +765,16 @@ fn apply_attrs(
             }
             "checked" => node.base_mut().selected = parse_bool(v),
             "selected" => {
-                if matches!(tag, "tabbox" | "combobox" | "select" | "listview" | "list") {
+                if matches!(
+                    tag,
+                    "tabbox"
+                        | "combobox"
+                        | "select"
+                        | "listview"
+                        | "list"
+                        | "virtuallist"
+                        | "virtual-list"
+                ) {
                     node.apply_property(WidgetProperty::SelectedIndex(v.parse().unwrap_or(0)));
                 } else {
                     node.base_mut().selected = parse_bool(v);
@@ -1275,6 +1356,56 @@ fn parse_align_items(v: &str) -> Align {
 
 fn parse_bool(s: &str) -> bool {
     matches!(s.to_lowercase().as_str(), "true" | "1" | "yes" | "on")
+}
+
+fn parse_virtual_column(element: &Element, index: usize) -> VirtualColumn {
+    let key = element
+        .attr("key")
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("column_{index}"));
+    let title = element
+        .attr("title-verbatim")
+        .or_else(|| element.attr("title"))
+        .unwrap_or(&key)
+        .to_owned();
+    let width = element
+        .attr("width")
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(120.0);
+    let mut column = VirtualColumn::new(key, title, width);
+    if let Some(value) = element
+        .attr("min-width")
+        .and_then(|value| value.parse().ok())
+    {
+        column = column.min_width(value);
+    }
+    if let Some(value) = element
+        .attr("max-width")
+        .and_then(|value| value.parse().ok())
+    {
+        column = column.max_width(value);
+    }
+    if let Some(value) = element.attr("flex").and_then(|value| value.parse().ok()) {
+        column = column.flex(value);
+    }
+    if let Some(value) = element.attr("align") {
+        column = column.align(parse_align(value).unwrap_or(TextAlign::Left));
+    }
+    if let Some(value) = element.attr("sortable") {
+        column = column.sortable(parse_bool(value));
+    }
+    if let Some(value) = element.attr("resizable") {
+        column = column.resizable(parse_bool(value));
+    }
+    column
+}
+
+fn parse_virtual_selection_mode(value: &str) -> VirtualSelectionMode {
+    match value.to_ascii_lowercase().as_str() {
+        "none" | "off" => VirtualSelectionMode::None,
+        "multiple" | "multi" | "extended" => VirtualSelectionMode::Multiple,
+        _ => VirtualSelectionMode::Single,
+    }
 }
 
 /// 解析滚动条可见性：always/on → 始终；hidden/none/off → 隐藏；其余按 auto。
@@ -1991,6 +2122,40 @@ mod tests {
             sv.property(flexui_core::WidgetPropertyKey::ScrollBar),
             Some(WidgetProperty::ScrollBar(ScrollBarVisibility::Hidden))
         ));
+    }
+
+    #[test]
+    fn xml_虚拟列表列与静态行() {
+        let xml = r#"
+            <VirtualList row-height="30" header-height="38" selection-mode="multiple"
+                         overscan="5" selected="1">
+              <Column key="id" title-verbatim="ID" width="72" align="right"/>
+              <Column key="name" title-verbatim="Name" width="180" flex="1"/>
+              <Row id="41" values="41|Alpha"/>
+              <Row id="42" values="42|Beta"/>
+            </VirtualList>
+        "#;
+        let root = load_str(xml, &Context::new()).unwrap().root;
+        assert_eq!(root.base().kind, flexui_core::WidgetKind::VirtualList);
+        assert!(matches!(
+            root.property(flexui_core::WidgetPropertyKey::VirtualColumns),
+            Some(WidgetProperty::VirtualColumns(columns))
+                if columns.len() == 2 && columns[1].key == "name" && columns[1].flex == 1.0
+        ));
+        assert!(matches!(
+            root.property(flexui_core::WidgetPropertyKey::VirtualSelectionMode),
+            Some(WidgetProperty::VirtualSelectionMode(
+                VirtualSelectionMode::Multiple
+            ))
+        ));
+        let source = match root.property(flexui_core::WidgetPropertyKey::VirtualSource) {
+            Some(WidgetProperty::VirtualSource(source)) => source,
+            _ => panic!("应生成静态虚拟列表数据源"),
+        };
+        assert_eq!(source.row_count(), 2);
+        assert_eq!(source.row_id(1), 42);
+        assert_eq!(source.cell_text(1, "name"), "Beta");
+        assert_eq!(root.selected_index(), Some(1));
     }
 
     #[test]

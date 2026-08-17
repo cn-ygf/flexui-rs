@@ -86,6 +86,12 @@ pub enum ControlEvent {
     TextChanged(String),
     SelectedChanged(bool),
     SelectionChanged(Option<usize>),
+    /// 虚拟列表多选变化，内容为稳定行 ID。
+    RowsSelectionChanged(Vec<u64>),
+    /// 虚拟列表排序变化。
+    SortChanged(Option<crate::widgets::VirtualSort>),
+    /// 虚拟列表列宽等列定义发生交互式变化。
+    ColumnsChanged(Vec<crate::widgets::VirtualColumn>),
     ValueChanged(f32),
     /// 滚动偏移变化（横、纵）。
     ScrollChanged(Point),
