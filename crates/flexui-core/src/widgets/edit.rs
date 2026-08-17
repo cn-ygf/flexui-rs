@@ -1,6 +1,6 @@
 //! Edit：文本输入（选区、复制/剪切/粘贴、IME；单行/多行）。
 
-use std::cell::Cell;
+use std::cell::{Cell, Ref, RefCell};
 
 use flexui_geometry::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, TextLayout};
@@ -22,12 +22,16 @@ const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
 const PLACEHOLDER_COLOR: Color = Color::rgba(0.50, 0.50, 0.50, 1.0);
 const CARET_WIDTH: f32 = 1.0;
 
-/// 逻辑行缓存；排版、绘制、光标与命中测试共用同一个平台文字布局。
+/// 逻辑行缓存。整形（`layout`）按需惰性生成：只有真正被绘制/命中的行才会调用
+/// 平台整形，避免大文本（如 16KB 响应）在每次重排时对全部行做整形，拖高 CPU。
 struct LineCache {
     start: usize,
     char_len: usize,
+    /// 原始行文本（不含掩码）；惰性整形时再套 `display_slice`。
+    text: String,
     grapheme_boundaries: Vec<usize>,
-    layout: TextLayout,
+    /// 惰性整形结果；None 表示尚未整形。用 `RefCell` 以便 `&self` 的绘制阶段填充。
+    layout: RefCell<Option<TextLayout>>,
 }
 
 /// Edit 的持久配置，不污染所有控件共享的 Base。
@@ -392,16 +396,35 @@ impl Edit {
         self.delete_range(idx, self.next_grapheme_boundary(idx));
     }
 
-    /// 行内本地 x → 最近 grapheme 边界列号（0..=行长）。
+    /// 惰性取第 li 行的整形结果：缺失则用 `cv` 现场整形并缓存。仅可见/被命中的行会整形。
+    fn line_layout(&self, cv: &dyn Canvas, li: usize) -> Option<Ref<'_, TextLayout>> {
+        let line = self.lines.get(li)?;
+        if line.layout.borrow().is_none() {
+            let shaped = cv.layout_text(&self.display_slice(&line.text), &self.base.font);
+            *line.layout.borrow_mut() = Some(shaped);
+        }
+        Some(Ref::map(line.layout.borrow(), |slot| slot.as_ref().unwrap()))
+    }
+
+    /// 按等宽估算的列号（未整形时的回退）。
+    fn est_col(&self, local_x: f32) -> usize {
+        ((local_x / (self.base.font.size * 0.6).max(1.0)).round().max(0.0)) as usize
+    }
+
+    /// 行内本地 x → 最近 grapheme 边界列号（0..=行长）。无 Canvas，仅用已整形（可见）行，
+    /// 否则回退等宽估算。
     fn col_at(&self, li: usize, local_x: f32) -> usize {
-        let est = |x: f32| ((x / (self.base.font.size * 0.6).max(1.0)).round().max(0.0)) as usize;
         if self.cache_dirty || li >= self.lines.len() {
-            return est(local_x);
+            return self.est_col(local_x);
         }
         let line = &self.lines[li];
-        let raw = line.layout.closest_char_for_x(local_x);
+        let slot = line.layout.borrow();
+        let Some(layout) = slot.as_ref() else {
+            return self.est_col(local_x).min(line.char_len);
+        };
+        let raw = layout.closest_char_for_x(local_x);
         Self::snap_to_grapheme_boundary(raw, local_x, &line.grapheme_boundaries, |index| {
-            line.layout.x_for_char(index)
+            layout.x_for_char(index)
         })
     }
 
@@ -494,15 +517,27 @@ impl Edit {
         }
         let (line, col) = self.pos_of(self.state.cursor);
         let target = (line as i32 + dir).clamp(0, self.lines.len() as i32 - 1) as usize;
-        let x = self.lines[line].layout.x_for_char(col);
-        let target_line = &self.lines[target];
-        let raw_target_col = target_line.layout.closest_char_for_x(x);
-        let target_col = Self::snap_to_grapheme_boundary(
-            raw_target_col,
-            x,
-            &target_line.grapheme_boundaries,
-            |index| target_line.layout.x_for_char(index),
-        );
+        let char_w = (self.base.font.size * 0.6).max(1.0);
+        // 当前行 x：优先用已整形结果，否则等宽估算。
+        let x = self.lines[line]
+            .layout
+            .borrow()
+            .as_ref()
+            .map(|l| l.x_for_char(col))
+            .unwrap_or_else(|| col as f32 * char_w);
+        let target_col = {
+            let target_line = &self.lines[target];
+            let slot = target_line.layout.borrow();
+            match slot.as_ref() {
+                Some(layout) => Self::snap_to_grapheme_boundary(
+                    layout.closest_char_for_x(x),
+                    x,
+                    &target_line.grapheme_boundaries,
+                    |index| layout.x_for_char(index),
+                ),
+                None => ((x / char_w).round().max(0.0) as usize).min(target_line.char_len),
+            }
+        };
         let nidx = self.lines[target].start + target_col.min(self.lines[target].char_len);
         self.set_cursor(nidx, extend);
     }
@@ -582,18 +617,27 @@ impl Edit {
         cv.save();
         cv.clip_rect(self.text_clip_rect(content));
         let mut y = content.top() - offset_y;
-        for (i, line) in self.lines.iter().enumerate() {
-            // 视口外的行跳过绘制（仍需累加 y）。
+        let line_count = self.lines.len();
+        for i in 0..line_count {
+            // 视口外的行跳过绘制（仍需累加 y），因此只整形可见行。
             if y + line_h < content.top() || y > content.bottom() {
                 y += line_h;
                 continue;
             }
+            let (ls, char_len) = {
+                let line = &self.lines[i];
+                (line.start, line.char_len)
+            };
+            let Some(layout) = self.line_layout(cv, i) else {
+                y += line_h;
+                continue;
+            };
             if let Some((lo, hi)) = sel {
-                let (ls, le) = (line.start, line.start + line.char_len);
+                let le = ls + char_len;
                 let s = lo.max(ls);
                 let e = hi.min(le);
                 if s < e {
-                    for rect in line.layout.selection_rects(s - ls..e - ls, y, line_h) {
+                    for rect in layout.selection_rects(s - ls..e - ls, y, line_h) {
                         cv.fill_rect(
                             Rect::new(
                                 content.left() + rect.left(),
@@ -608,12 +652,12 @@ impl Edit {
             }
             Self::draw_input_layout(
                 cv,
-                &line.layout,
+                &layout,
                 Rect::new(content.left(), y, content.size.width, line_h),
                 color,
             );
             if self.base.focused && self.base.caret_on && i == cur_line {
-                let cx = content.left() + line.layout.x_for_char(cur_col) + 1.0;
+                let cx = content.left() + layout.x_for_char(cur_col) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
                 let caret = Rect::new(cx, cyc.max(y), CARET_WIDTH, caret_h);
                 self.caret_rect.set(Some(caret));
@@ -723,17 +767,18 @@ impl Widget for Edit {
         // 避免大文本在无关的全树布局（如兄弟控件文本变化）里被反复重排，拖高 CPU。
         let font_changed = self.shaped_font.as_ref() != Some(&self.base.font);
         if self.cache_dirty || font_changed {
+            // 只建立各行的廉价元数据（不做平台整形）；整形推迟到真正绘制/命中该行时。
             let text = self.base.text.clone();
             let mut lines = Vec::new();
             let mut start = 0usize;
             for line in text.split('\n') {
                 let n = line.chars().count();
-                let display_line = self.display_slice(line);
                 lines.push(LineCache {
                     start,
                     char_len: n,
+                    text: line.to_string(),
                     grapheme_boundaries: Self::grapheme_char_boundaries(line),
-                    layout: cv.layout_text(&display_line, &self.base.font),
+                    layout: RefCell::new(None),
                 });
                 start += n + 1; // +1 跳过换行符
             }
@@ -775,10 +820,10 @@ impl Widget for Edit {
         self.cache_dirty = false;
         let content = layout::content_rect(&self.base);
         let (line, col) = self.pos_of(self.state.cursor);
+        // 光标所在行需要精确 x：现场整形该行（单行也走这里）。
         let x = self
-            .lines
-            .get(line)
-            .map(|line| line.layout.x_for_char(col))
+            .line_layout(cv, line)
+            .map(|layout| layout.x_for_char(col))
             .unwrap_or(0.0);
         if self.config.multiline {
             // 更新纵向滚动度量。
@@ -1549,6 +1594,26 @@ mod tests {
         assert!(
             second * 4 < first,
             "重复布局应复用整形缓存: first={first} second={second}"
+        );
+    }
+
+    #[test]
+    fn 多行大文本_只整形可见行() {
+        let mut cv = rec_canvas();
+        let text = (0..200)
+            .map(|i| format!("line number {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut e = Edit::new().multiline(true).text(text);
+        // 视口只容纳少量行。
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+        e.paint_content(&mut cv, &StyleSpec::default());
+        let shaped = e.lines.iter().filter(|l| l.layout.borrow().is_some()).count();
+        assert!(e.lines.len() >= 200);
+        assert!(
+            shaped < 20,
+            "只应整形可见行(+光标行)，实际整形 {shaped} / 共 {} 行",
+            e.lines.len()
         );
     }
 
