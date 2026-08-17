@@ -611,25 +611,37 @@ impl Edit {
             return;
         }
         let sel = self.sel_range();
-        let (cur_line, cur_col) = self.pos_of(self.state.cursor);
+        // 仅在需要画光标时才求光标行（省去未聚焦大文本每帧 O(行数) 的定位）。
+        let draw_caret = self.base.focused && self.base.caret_on;
+        let (cur_line, cur_col) = if draw_caret {
+            self.pos_of(self.state.cursor)
+        } else {
+            (usize::MAX, 0)
+        };
 
         let offset_y = self.scroll.get().offset().y;
         cv.save();
         cv.clip_rect(self.text_clip_rect(content));
-        let mut y = content.top() - offset_y;
         let line_count = self.lines.len();
-        for i in 0..line_count {
-            // 视口外的行跳过绘制（仍需累加 y），因此只整形可见行。
-            if y + line_h < content.top() || y > content.bottom() {
-                y += line_h;
-                continue;
+        // 直接算出可见行区间，避免每帧遍历全部行（大日志时 O(总行数)→O(可见行数)）。
+        let (first, last) = if line_h > 0.0 {
+            let first = ((offset_y / line_h).floor() as isize - 1).max(0) as usize;
+            let last = (((offset_y + content.size.height) / line_h).floor() as usize + 1)
+                .min(line_count.saturating_sub(1));
+            (first, last)
+        } else {
+            (0, line_count.saturating_sub(1))
+        };
+        for i in first..=last {
+            if i >= line_count {
+                break;
             }
+            let y = content.top() - offset_y + i as f32 * line_h;
             let (ls, char_len) = {
                 let line = &self.lines[i];
                 (line.start, line.char_len)
             };
             let Some(layout) = self.line_layout(cv, i) else {
-                y += line_h;
                 continue;
             };
             if let Some((lo, hi)) = sel {
@@ -656,14 +668,13 @@ impl Edit {
                 Rect::new(content.left(), y, content.size.width, line_h),
                 color,
             );
-            if self.base.focused && self.base.caret_on && i == cur_line {
+            if draw_caret && i == cur_line {
                 let cx = content.left() + layout.x_for_char(cur_col) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
                 let caret = Rect::new(cx, cyc.max(y), CARET_WIDTH, caret_h);
                 self.caret_rect.set(Some(caret));
                 cv.fill_rect(caret, color);
             }
-            y += line_h;
         }
         cv.restore();
         // 内容超出视口时绘制纵向滚动条：贴控件外缘（base.rect 右缘），
