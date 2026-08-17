@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use flexui_geometry::{Insets, Rect, Size};
+use flexui_gfx::{Insets, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageSource};
 
 use crate::anim::AnimProp;
@@ -509,19 +509,19 @@ pub trait Widget {
         false
     }
     /// 当前滚动偏移（横、纵）。
-    fn scroll_offset(&self) -> Option<flexui_geometry::Point> {
+    fn scroll_offset(&self) -> Option<flexui_gfx::Point> {
         None
     }
     /// 命中滚动条滑块则返回抓取信息（供分发器发起拖动）。默认无滚动条。
-    fn scrollbar_grab(&self, _pos: flexui_geometry::Point) -> Option<crate::scroll::ScrollGrab> {
+    fn scrollbar_grab(&self, _pos: flexui_gfx::Point) -> Option<crate::scroll::ScrollGrab> {
         None
     }
     /// 按拖动中的鼠标位置更新滚动偏移。返回是否变化。
-    fn scrollbar_drag(&mut self, _pos: flexui_geometry::Point, _grab: &crate::scroll::ScrollGrab) -> bool {
+    fn scrollbar_drag(&mut self, _pos: flexui_gfx::Point, _grab: &crate::scroll::ScrollGrab) -> bool {
         false
     }
     /// 该点是否落在本控件的滚动条区域（供光标形状判断：滚动条上应显示箭头而非文本光标）。
-    fn scrollbar_contains(&self, _pos: flexui_geometry::Point) -> bool {
+    fn scrollbar_contains(&self, _pos: flexui_gfx::Point) -> bool {
         false
     }
     fn animation_value(&self, _prop: AnimProp) -> Option<f32> {

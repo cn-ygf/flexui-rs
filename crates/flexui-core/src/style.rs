@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use flexui_geometry::{Color, Corners};
+use flexui_gfx::{Color, Corners};
 use flexui_gfx::{Font, ImageFit, ImageSource, TextAlign};
 
 use crate::frame_animation::FrameAnimation;
@@ -357,7 +357,7 @@ fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui_geometry::Color;
+    use flexui_gfx::Color;
 
     fn spec_bg(c: Color) -> StyleSpec {
         StyleSpec {

@@ -1,6 +1,6 @@
 //! Label：文本标签控件（不可交互）。
 
-use flexui_geometry::{Color, Size};
+use flexui_gfx::{Color, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
 use crate::common_builders;

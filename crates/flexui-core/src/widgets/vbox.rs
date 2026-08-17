@@ -1,6 +1,6 @@
 //! VBox：纵向弹性容器（主轴纵向 Flex + flex_grow，交叉轴拉伸）。
 
-use flexui_geometry::{Rect, Size};
+use flexui_gfx::{Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::common_builders;

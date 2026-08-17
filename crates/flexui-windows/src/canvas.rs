@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
+use flexui_gfx::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextLayout};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;

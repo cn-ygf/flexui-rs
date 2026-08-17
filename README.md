@@ -191,7 +191,7 @@ Linux is not currently supported.
 | `flexui-core` | Widget tree, layout, events, styles, themes, animation |
 | `flexui-xml` | XML parsing, includes, bindings, and window documents |
 | `flexui-macos` / `flexui-windows` | Native windows, input, and rendering backends |
-| `flexui-gfx` / `flexui-geometry` | Canvas contracts and geometry primitives |
+| `flexui-gfx` | Canvas contracts and geometry primitives |
 | `flexui-resource` / `flexui-svg` | Resource providers and SVG rasterization |
 | `flexui-i18n` | Localization catalogs, fallback, and plurals |
 | `flexui-native-menu` | Cross-platform system popup menus |

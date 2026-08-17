@@ -9,7 +9,7 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::widget::Widget;
 use crate::widget::{Node, WidgetProperty, WidgetPropertyKey};
 use crate::{ControlEvent, WindowEvent};
-use flexui_geometry::Rect;
+use flexui_gfx::Rect;
 use flexui_i18n::{LocalizedStringResource, Localizer};
 
 /// 标题栏模式（一期先实现 System；隐藏留控件/无边框见开发计划阶段 3）。
@@ -136,7 +136,7 @@ pub trait WindowHandle {
 /// 上下文菜单等浮层的打开请求（由 WindowCtx 收集，后端排空后交分发器）。
 pub struct OverlayRequest {
     /// 锚点矩形（右键点位可用 0 尺寸 rect）。
-    pub anchor: flexui_geometry::Rect,
+    pub anchor: flexui_gfx::Rect,
     /// 菜单项 (标签, name)；选中后按 name 经 on_activate 上报。
     pub items: Vec<(String, String)>,
     /// 自定义菜单外观；None 使用框架默认值。
@@ -343,7 +343,7 @@ impl<'a> WindowCtx<'a> {
     }
 
     /// 在 anchor 处弹出上下文菜单；items 为 (标签, name)。选中项经 on_activate 上报。
-    pub fn open_menu(&mut self, anchor: flexui_geometry::Rect, items: Vec<(String, String)>) {
+    pub fn open_menu(&mut self, anchor: flexui_gfx::Rect, items: Vec<(String, String)>) {
         self.overlay_requests.push(OverlayRequest {
             anchor,
             items,
@@ -358,7 +358,7 @@ impl<'a> WindowCtx<'a> {
     /// 在 anchor 处弹出带自定义外观和当前选中项的菜单。
     pub fn open_styled_menu(
         &mut self,
-        anchor: flexui_geometry::Rect,
+        anchor: flexui_gfx::Rect,
         items: Vec<(String, String)>,
         style: crate::widgets::MenuStyle,
         selected_name: Option<String>,
@@ -375,7 +375,7 @@ impl<'a> WindowCtx<'a> {
     /// 在 anchor 处弹出带图标、子菜单和自定义外观的菜单。
     pub fn open_styled_menu_entries(
         &mut self,
-        anchor: flexui_geometry::Rect,
+        anchor: flexui_gfx::Rect,
         entries: Vec<crate::widgets::MenuEntry>,
         style: crate::widgets::MenuStyle,
     ) {
@@ -453,7 +453,7 @@ impl<'a> WindowCtx<'a> {
     pub fn set_value(&mut self, name: &str, value: f32) -> bool {
         self.event_ctx(|ctx| ctx.set_value(name, value))
     }
-    pub fn scroll_offset(&mut self, name: &str) -> Option<flexui_geometry::Point> {
+    pub fn scroll_offset(&mut self, name: &str) -> Option<flexui_gfx::Point> {
         self.event_ctx(|ctx| ctx.scroll_offset(name))
     }
     /// 让 VirtualList 等惰性数据控件重新读取数据源。
@@ -566,7 +566,7 @@ impl<'a> WindowCtx<'a> {
             crate::NativeMenuAnchor::Screen(point) => crate::NativeMenuPopupAnchor::Screen(point),
             crate::NativeMenuAnchor::Control(name) => {
                 let rect = self.get(&name, |widget| widget.base().rect)?;
-                crate::NativeMenuPopupAnchor::Window(flexui_geometry::Point::new(
+                crate::NativeMenuPopupAnchor::Window(flexui_gfx::Point::new(
                     rect.left(),
                     rect.bottom(),
                 ))

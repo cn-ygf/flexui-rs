@@ -190,7 +190,7 @@ XML 不是必选项，但很适合贴图界面以及设计与业务代码分离�
 | `flexui-core` | 控件树、布局、事件、样式、主题和动画 |
 | `flexui-xml` | XML 解析、Include、绑定和窗口文档 |
 | `flexui-macos` / `flexui-windows` | 原生窗口、输入和绘制后端 |
-| `flexui-gfx` / `flexui-geometry` | 画布接口与几何基础类型 |
+| `flexui-gfx` | 画布接口与几何基础类型 |
 | `flexui-resource` / `flexui-svg` | 资源提供器与 SVG 光栅化 |
 | `flexui-i18n` | 多语言词典、回退和复数规则 |
 | `flexui-native-menu` | 跨平台系统弹出菜单 |

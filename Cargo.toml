@@ -2,7 +2,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/flexui-geometry",
     "crates/flexui-resource",
     "crates/flexui-i18n",
     "crates/flexui-gfx",
@@ -20,7 +19,6 @@ members = [
 
 # 统一依赖版本，子 crate 用 workspace = true 引用
 [workspace.dependencies]
-flexui-geometry = { path = "crates/flexui-geometry" }
 flexui-gfx = { path = "crates/flexui-gfx" }
 flexui-svg = { path = "crates/flexui-svg" }
 flexui-native-menu = { path = "crates/flexui-native-menu" }

@@ -4,7 +4,7 @@
 //! - VBox/HBox：主轴顺序排列 + `flex_grow` 分配剩余空间，交叉轴拉伸。
 //! - 所有节点的 `rect` 最终是窗口逻辑坐标下的绝对矩形，供绘制与命中测试直接使用。
 
-use flexui_geometry::{Insets, Rect, Size};
+use flexui_gfx::{Insets, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::sizing::{Align, Justify, Sizing};
@@ -315,29 +315,29 @@ mod tests {
     /// 测试用假画布：文字度量按固定字宽估算，避免依赖平台。
     struct FakeCanvas;
     impl Canvas for FakeCanvas {
-        fn fill_rect(&mut self, _r: Rect, _c: flexui_geometry::Color) {}
-        fn stroke_rect(&mut self, _r: Rect, _c: flexui_geometry::Color, _w: f32) {}
+        fn fill_rect(&mut self, _r: Rect, _c: flexui_gfx::Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: flexui_gfx::Color, _w: f32) {}
         fn fill_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
             _w: f32,
         ) {
         }
         fn draw_text(
             &mut self,
             _t: &str,
-            _o: flexui_geometry::Point,
+            _o: flexui_gfx::Point,
             _f: &Font,
-            _c: flexui_geometry::Color,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn padding_收缩内容区() {
         let mut root = Panel::new();
-        root.base_mut().padding = flexui_geometry::Insets::all(10.0);
+        root.base_mut().padding = flexui_gfx::Insets::all(10.0);
         root.base_mut().children.push(Box::new(Panel::new()));
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
@@ -415,7 +415,7 @@ mod tests {
     fn padding_每边不同_收缩内容区() {
         let mut root = Panel::new();
         // 左5 上10 右15 下20
-        root.base_mut().padding = flexui_geometry::Insets::new(5.0, 10.0, 15.0, 20.0);
+        root.base_mut().padding = flexui_gfx::Insets::new(5.0, 10.0, 15.0, 20.0);
         root.base_mut().children.push(Box::new(Panel::new()));
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);

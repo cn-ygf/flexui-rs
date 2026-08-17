@@ -4,7 +4,7 @@
 //! 再交给 `Dispatcher` 做命中测试与分发。坐标一律为「逻辑像素、左上原点」。
 
 use crate::frame_animation::FrameLayer;
-use flexui_geometry::Point;
+use flexui_gfx::Point;
 
 /// 鼠标按键。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

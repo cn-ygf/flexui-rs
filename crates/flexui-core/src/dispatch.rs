@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use flexui_geometry::{Point, Rect, Size};
+use flexui_gfx::{Point, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::anim::{Anim, AnimProp, Easing};
@@ -557,7 +557,7 @@ pub struct Overlay {
     /// 点击浮层外部是否关闭（菜单恒为 true）。
     pub dismiss_outside: bool,
     /// 浮层相对窗口边缘的安全边距。
-    pub window_margin: flexui_geometry::Insets,
+    pub window_margin: flexui_gfx::Insets,
     /// 当前层的菜单数据，用于按行展开子菜单。
     pub entries: Vec<crate::widgets::MenuEntry>,
     pub style: crate::widgets::MenuStyle,
@@ -859,7 +859,7 @@ impl Dispatcher {
                 desired,
                 window,
                 0.0,
-                flexui_geometry::Insets::default(),
+                flexui_gfx::Insets::default(),
                 crate::widgets::MenuAlignment::Start,
             );
             layout_node(node, rect, &*cv);
@@ -1679,7 +1679,7 @@ impl Dispatcher {
                 anchor,
                 owner: Some(id),
                 dismiss_outside: true,
-                window_margin: flexui_geometry::Insets::default(),
+                window_margin: flexui_gfx::Insets::default(),
                 entries,
                 style,
                 parent_item: None,
@@ -1914,7 +1914,7 @@ fn place_overlay(
     desired: Size,
     window: Size,
     min_width: f32,
-    margin: flexui_geometry::Insets,
+    margin: flexui_gfx::Insets,
     alignment: crate::widgets::MenuAlignment,
 ) -> Rect {
     let available_w = (window.width - margin.horizontal()).max(0.0);
@@ -1952,7 +1952,7 @@ fn place_submenu(
     anchor: Rect,
     desired: Size,
     window: Size,
-    margin: flexui_geometry::Insets,
+    margin: flexui_gfx::Insets,
 ) -> Rect {
     let available_w = (window.width - margin.horizontal()).max(0.0);
     let available_h = (window.height - margin.vertical()).max(0.0);
@@ -2189,36 +2189,36 @@ mod tests {
         Slider, TabBox, VBox,
     };
     use crate::WidgetProperty;
-    use flexui_geometry::{Rect, Size};
+    use flexui_gfx::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
     use std::rc::Rc;
 
     struct FakeCanvas;
     impl Canvas for FakeCanvas {
-        fn fill_rect(&mut self, _r: Rect, _c: flexui_geometry::Color) {}
-        fn stroke_rect(&mut self, _r: Rect, _c: flexui_geometry::Color, _w: f32) {}
+        fn fill_rect(&mut self, _r: Rect, _c: flexui_gfx::Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: flexui_gfx::Color, _w: f32) {}
         fn fill_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
             _w: f32,
         ) {
         }
         fn draw_text(
             &mut self,
             _t: &str,
-            _o: flexui_geometry::Point,
+            _o: flexui_gfx::Point,
             _f: &Font,
-            _c: flexui_geometry::Color,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
@@ -2537,7 +2537,7 @@ mod tests {
             Size::new(40.0, 30.0),
             win,
             50.0,
-            flexui_geometry::Insets::default(),
+            flexui_gfx::Insets::default(),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r.top(), 30.0);
@@ -2548,7 +2548,7 @@ mod tests {
             Size::new(40.0, 30.0),
             win,
             0.0,
-            flexui_geometry::Insets::default(),
+            flexui_gfx::Insets::default(),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r2.top(), 50.0);
@@ -2558,7 +2558,7 @@ mod tests {
             Size::new(40.0, 10.0),
             win,
             0.0,
-            flexui_geometry::Insets::default(),
+            flexui_gfx::Insets::default(),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r3.left(), 160.0);
@@ -2568,7 +2568,7 @@ mod tests {
             Size::new(294.0, 228.0),
             Size::new(580.0, 416.0),
             68.0,
-            flexui_geometry::Insets::new(0.0, 0.0, 14.0, 28.0),
+            flexui_gfx::Insets::new(0.0, 0.0, 14.0, 28.0),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r4, Rect::new(272.0, 160.0, 294.0, 228.0));
@@ -2606,7 +2606,7 @@ mod tests {
             width: Some(160.0),
             height: Some(100.0),
             row_height: 32.0,
-            panel_padding: flexui_geometry::Insets::all(4.0),
+            panel_padding: flexui_gfx::Insets::all(4.0),
             ..Default::default()
         };
         let items = (0..8)
@@ -2639,7 +2639,7 @@ mod tests {
             width: Some(160.0),
             height: Some(100.0),
             row_height: 32.0,
-            panel_padding: flexui_geometry::Insets::new(10.0, 16.0, 10.0, 16.0),
+            panel_padding: flexui_gfx::Insets::new(10.0, 16.0, 10.0, 16.0),
             ..Default::default()
         };
         let items = (0..5)
@@ -3284,7 +3284,7 @@ mod tests {
     #[test]
     fn hover_脏区包含所有状态阴影() {
         use crate::style::{BaseState, Shadow, StyleSet, StyleSpec};
-        use flexui_geometry::Color;
+        use flexui_gfx::Color;
 
         let style = StyleSet::new()
             .with_normal(StyleSpec::default())

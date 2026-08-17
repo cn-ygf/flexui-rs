@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use flexui_geometry::{Color, Corners};
+use flexui_gfx::{Color, Corners};
 use flexui_gfx::TextAlign;
 
 use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};

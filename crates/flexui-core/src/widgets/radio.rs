@@ -1,6 +1,6 @@
 //! Radio：单选控件（同 group 互斥，可绑定 tab_index 驱动 TabBox 组成 tabbar）。
 
-use flexui_geometry::Size;
+use flexui_gfx::Size;
 use flexui_gfx::Canvas;
 
 use crate::common_builders;
@@ -68,7 +68,7 @@ impl Widget for Radio {
         if self.indicator_visible {
             paint_indicator_and_text(&self.base, cv, style, true);
         } else {
-            let color = style.fg_color.unwrap_or(flexui_geometry::Color::WHITE);
+            let color = style.fg_color.unwrap_or(flexui_gfx::Color::WHITE);
             let align = style.text_align.unwrap_or(flexui_gfx::TextAlign::Center);
             crate::paint::draw_aligned_text(
                 cv,

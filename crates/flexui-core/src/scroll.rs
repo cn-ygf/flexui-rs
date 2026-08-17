@@ -5,7 +5,7 @@
 //!
 //! 约定：`offset` 表示「内容相对视口向左上卷起的像素」——即绘制时子内容整体平移 `-offset`。
 
-use flexui_geometry::{Color, Corners, Point, Rect, Size};
+use flexui_gfx::{Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource};
 
 use crate::anim::AnimProp;

@@ -3,7 +3,7 @@
 //! 行、选择与滚动状态均由本控件持有；分发器通过 Widget 的滚动能力转发滚轮，
 //! 点击选中经指针转发到 `on_event`，选择变化经 name 上报。
 
-use flexui_geometry::{Color, Point, Rect, Size};
+use flexui_gfx::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
 
 use crate::anim::AnimProp;
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(lv.scroll.content().height, 80.0);
         // 点击 y=10 → 第 0 行。
         lv.on_event(&Event::MouseDown {
-            pos: flexui_geometry::Point::new(10.0, 10.0),
+            pos: flexui_gfx::Point::new(10.0, 10.0),
             button: MouseButton::Left,
             mods: crate::event::Mods::default(),
         });
@@ -268,7 +268,7 @@ mod tests {
         // 滚动后点击。
         assert!(lv.scroll_by(0.0, -20.0));
         lv.on_event(&Event::MouseDown {
-            pos: flexui_geometry::Point::new(10.0, 10.0),
+            pos: flexui_gfx::Point::new(10.0, 10.0),
             button: MouseButton::Left,
             mods: crate::event::Mods::default(),
         });
@@ -279,11 +279,11 @@ mod tests {
     impl Canvas for Fake {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
-        fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_geometry::Corners, _c: Color) {}
+        fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_gfx::Corners, _c: Color) {}
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
+            _rad: flexui_gfx::Corners,
             _c: Color,
             _w: f32,
         ) {
@@ -291,7 +291,7 @@ mod tests {
         fn draw_text(
             &mut self,
             _t: &str,
-            _o: flexui_geometry::Point,
+            _o: flexui_gfx::Point,
             _f: &flexui_gfx::Font,
             _c: Color,
         ) {

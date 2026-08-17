@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use flexui_geometry::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
+use flexui_gfx::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, LayerHandle, TextBoundary, TextLayout};
 
 use core_foundation::attributed_string::CFMutableAttributedString;

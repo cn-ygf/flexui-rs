@@ -1,14 +1,16 @@
-//! flexui-gfx：平台无关的绘图抽象层（L2）。
+//! flexui-gfx：平台无关的几何与绘图抽象层（L2）。
 //!
-//! 只定义「画什么」的接口 `Canvas` 与字体描述 `Font`，不含任何平台实现。
+//! 定义几何、颜色、字体描述以及「画什么」的接口 `Canvas`，不含任何平台实现。
 //! macOS / Windows 后端各自实现 `Canvas`，上层控件面向本接口自绘，彻底与平台解耦。
+
+mod geometry;
+
+pub use geometry::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
 
 use std::any::Any;
 use std::fmt;
 use std::ops::Range;
 use std::rc::Rc;
-
-use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
 
 /// 图片来源：磁盘文件路径 / 内存位图字节 / SVG 字节。
 #[derive(Debug, Clone, PartialEq)]
@@ -470,8 +472,7 @@ pub trait Canvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{image_density_from_path, Font, ImageSource, TextBoundary, TextLayout};
-    use flexui_geometry::Size;
+    use super::{image_density_from_path, Font, ImageSource, Size, TextBoundary, TextLayout};
 
     #[test]
     fn font_样式构建() {

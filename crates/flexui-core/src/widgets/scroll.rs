@@ -2,7 +2,7 @@
 //!
 //! 滚动状态复用统一的 `ScrollState`（见 `crate::scroll`），与 ListView/Edit 共用一套逻辑。
 
-use flexui_geometry::{Point, Rect, Size};
+use flexui_gfx::{Point, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::anim::AnimProp;
@@ -268,7 +268,7 @@ mod tests {
     use super::*;
     use crate::layout::layout_node;
     use crate::widgets::Panel;
-    use flexui_geometry::{Color, Corners};
+    use flexui_gfx::{Color, Corners};
     use flexui_gfx::Font;
 
     struct FakeCanvas;
@@ -277,7 +277,7 @@ mod tests {
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
         fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
-        fn draw_text(&mut self, _t: &str, _o: flexui_geometry::Point, _f: &Font, _c: Color) {}
+        fn draw_text(&mut self, _t: &str, _o: flexui_gfx::Point, _f: &Font, _c: Color) {}
         fn measure_text(&self, text: &str, font: &Font) -> Size {
             Size::new(text.len() as f32 * font.size * 0.5, font.size)
         }

@@ -2,7 +2,7 @@
 
 use std::cell::{Cell, Ref, RefCell};
 
-use flexui_geometry::{Color, Point, Rect, Size};
+use flexui_gfx::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, LayerHandle, TextLayout};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1444,7 +1444,7 @@ impl TextControl for Edit {}
 mod tests {
     use super::*;
     use crate::layout::layout_node;
-    use flexui_geometry::{Color, Corners, Point, Rect, Size};
+    use flexui_gfx::{Color, Corners, Point, Rect, Size};
     use flexui_gfx::Font;
     use std::cell::RefCell;
 

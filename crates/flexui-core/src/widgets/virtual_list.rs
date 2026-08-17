@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use flexui_geometry::{Color, Point, Rect, Size};
+use flexui_gfx::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, TextAlign, TextLayout};
 
 use crate::anim::AnimProp;
@@ -1103,7 +1103,7 @@ fn paint_dashed_rect(cv: &mut dyn Canvas, rect: Rect, color: Color) {
 mod tests {
     use super::*;
     use crate::dispatch::Dispatcher;
-    use flexui_geometry::Corners;
+    use flexui_gfx::Corners;
 
     struct CountingSource {
         rows: usize,
