@@ -67,6 +67,11 @@ impl ListView {
         self.row_h = h.max(1.0);
         self
     }
+    /// 滚动条可见性模式（auto/always/hidden）。
+    pub fn scrollbar(mut self, visibility: crate::scroll::ScrollBarVisibility) -> Self {
+        self.scroll.set_visibility(visibility);
+        self
+    }
     /// 预选中第 i 行。
     pub fn selected(mut self, i: usize) -> Self {
         if i < self.items.len() {
@@ -176,6 +181,10 @@ impl Widget for ListView {
                 self.row_h = height.max(1.0);
                 true
             }
+            WidgetProperty::ScrollBar(v) => {
+                self.scroll.set_visibility(v);
+                true
+            }
             _ => false,
         }
     }
@@ -184,6 +193,9 @@ impl Widget for ListView {
             WidgetPropertyKey::Items => Some(WidgetProperty::Items(self.items.clone())),
             WidgetPropertyKey::SelectedIndex => self.selection.map(WidgetProperty::SelectedIndex),
             WidgetPropertyKey::RowHeight => Some(WidgetProperty::RowHeight(self.row_h)),
+            WidgetPropertyKey::ScrollBar => {
+                Some(WidgetProperty::ScrollBar(self.scroll.visibility()))
+            }
             _ => None,
         }
     }
@@ -215,6 +227,14 @@ impl Widget for ListView {
     fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
         let viewport = self.scrollbar_viewport();
         crate::scroll::apply_thumb_drag(&mut self.scroll, viewport, &self.scrollbar, pos, grab)
+    }
+    fn scrollbar_contains(&self, pos: Point) -> bool {
+        crate::scroll::scrollbar_region_contains(
+            &self.scroll,
+            self.scrollbar_viewport(),
+            &self.scrollbar,
+            pos,
+        )
     }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         self.scroll.axis_value(prop)

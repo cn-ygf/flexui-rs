@@ -23,7 +23,7 @@ use objc2_foundation::{
 use flexui_core::event::keys;
 use flexui_core::{
     apply_localizations, find_mut_by_id, layout_node, paint_tree_in_rect, Dispatcher, Event, Mods,
-    MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate,
+    MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WindowCtx, WindowDelegate,
     WindowDragRegion, WindowHandle,
 };
 
@@ -619,22 +619,6 @@ pub(crate) fn filenames_pboard_type() -> &'static objc2_app_kit::NSPasteboardTyp
 }
 
 /// 命中测试：光标下最上层控件是否为文本输入（Edit）。用于切换 I-beam 光标。
-fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
-    fn topmost(node: &dyn Widget, p: Point) -> Option<bool> {
-        let b = node.base();
-        if !b.visible || !b.rect.contains(p) {
-            return None;
-        }
-        for c in b.children.iter().rev() {
-            if let Some(r) = topmost(c.as_ref(), p) {
-                return Some(r);
-            }
-        }
-        Some(b.role == WidgetRole::Edit && b.enabled)
-    }
-    topmost(root, p) == Some(true)
-}
-
 fn apply_close_request(window: &NSWindow) {
     if let Some(owner) = window.sheetParent() {
         owner.endSheet(window);
@@ -1084,11 +1068,11 @@ impl FlexView {
         flexui_core::Point::new(p.x as f32, p.y as f32)
     }
 
-    /// 悬停在文本控件上时切换为 I-beam 光标，否则箭头。
+    /// 悬停在文本控件上时切换为 I-beam 光标，否则箭头（滚动条上用箭头）。
     fn update_cursor(&self, p: Point) {
         let over = {
             let st = self.ivars().state.borrow();
-            point_over_edit(st.root.as_ref(), p)
+            flexui_core::point_wants_text_cursor(st.root.as_ref(), p)
         };
         if over {
             NSCursor::IBeamCursor().set();

@@ -1849,6 +1849,24 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
     }
 }
 
+/// 该点是否需要文本 I-beam 光标：命中控件是可用的文本框，且不在其滚动条区域。
+/// 供各平台后端统一决定鼠标光标形状（避免每个后端各写一份、且漏掉滚动条）。
+/// 基于 `hit_test`，因此正确穿透 `HitPolicy::Transparent` 浮层。
+pub fn point_wants_text_cursor(root: &dyn Widget, p: Point) -> bool {
+    let Some(id) = hit_test(root, p) else {
+        return false;
+    };
+    fn check(node: &dyn Widget, id: WidgetId, p: Point) -> Option<bool> {
+        let b = node.base();
+        if b.id == id {
+            // 文本框但落在其滚动条上 → 用箭头（返回 false）。
+            return Some(b.role == WidgetRole::Edit && b.enabled && !node.scrollbar_contains(p));
+        }
+        b.children.iter().find_map(|c| check(c.as_ref(), id, p))
+    }
+    check(root, id, p) == Some(true)
+}
+
 /// 读取控件的可动画属性值。
 /// 写入控件的可动画属性值（带各自的取值约束）。
 /// 计算浮层摆放矩形：优先锚点下方、放不下则上翻；X 夹到窗内；至少 min_width 宽。
@@ -2287,6 +2305,22 @@ mod tests {
         let ctx = disp.take_context_clicks();
         assert_eq!(ctx.len(), 1);
         assert_eq!(ctx[0].0, "b");
+    }
+
+    #[test]
+    fn 光标_滚动条区域用箭头() {
+        use crate::scroll::ScrollBarVisibility;
+        use crate::widgets::Edit;
+        let cv = FakeCanvas;
+        let mut edit = Edit::new()
+            .multiline(true)
+            .scrollbar(ScrollBarVisibility::Always);
+        edit.set_text_value("a\nb\nc\nd\ne\nf\ng\nh".into());
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 120.0, 40.0), &cv);
+        // 文本区 → 文本 I-beam。
+        assert!(point_wants_text_cursor(&edit, Point::new(10.0, 10.0)));
+        // 右缘滚动条区 → 箭头（false）。
+        assert!(!point_wants_text_cursor(&edit, Point::new(115.0, 20.0)));
     }
 
     #[test]

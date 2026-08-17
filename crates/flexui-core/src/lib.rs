@@ -23,7 +23,9 @@ pub mod window;
 // 常用类型再导出，方便上层与后端使用。
 pub use anim::{AnimProp, Easing};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
-pub use dispatch::{hit_test, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask};
+pub use dispatch::{
+    hit_test, point_wants_text_cursor, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
+};
 pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
 pub use layout::{layout_node, Axis};
@@ -34,8 +36,8 @@ pub use native_menu::{
 };
 pub use paint::{paint_tree, paint_tree_in_rect};
 pub use scroll::{
-    apply_thumb_drag, paint_scrollbars, thumb_grab, thumb_h_rect, thumb_v, ScrollAxes, ScrollAxis,
-    ScrollBarStyle, ScrollGrab, ScrollState,
+    apply_thumb_drag, paint_scrollbars, scrollbar_region_contains, thumb_grab, thumb_h_rect,
+    thumb_v, ScrollAxes, ScrollAxis, ScrollBarStyle, ScrollBarVisibility, ScrollGrab, ScrollState,
 };
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{

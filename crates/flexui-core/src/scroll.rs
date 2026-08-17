@@ -11,6 +11,23 @@ use flexui_gfx::{Canvas, ImageFit, ImageSource};
 use crate::anim::AnimProp;
 use crate::style::StyleSpec;
 
+/// 滚动条可见性模式（对齐大厂控件的 auto/always/hidden）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollBarVisibility {
+    /// 内容超出视口才显示（默认）。
+    Auto,
+    /// 始终显示（内容不足时滑块占满轨道、不可拖）。
+    Always,
+    /// 从不显示（仍可滚轮 / 程序滚动）。
+    Hidden,
+}
+
+impl Default for ScrollBarVisibility {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 /// 允许滚动的轴。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScrollAxes {
@@ -43,17 +60,27 @@ pub struct ScrollState {
     content: Size,
     viewport: Size,
     axes: ScrollAxes,
+    visibility: ScrollBarVisibility,
 }
 
 impl ScrollState {
-    /// 按允许的轴创建（初始偏移 0）。
+    /// 按允许的轴创建（初始偏移 0，可见性 Auto）。
     pub fn new(axes: ScrollAxes) -> Self {
         Self {
             offset: Point::new(0.0, 0.0),
             content: Size::default(),
             viewport: Size::default(),
             axes,
+            visibility: ScrollBarVisibility::Auto,
         }
+    }
+
+    /// 设置滚动条可见性模式。
+    pub fn set_visibility(&mut self, visibility: ScrollBarVisibility) {
+        self.visibility = visibility;
+    }
+    pub fn visibility(&self) -> ScrollBarVisibility {
+        self.visibility
     }
 
     /// 更新内容与视口尺寸（一般在 arrange 时调用），随即把偏移夹到合法范围。
@@ -116,12 +143,28 @@ impl ScrollState {
         self.set_offset(self.offset.x - dx, self.offset.y - dy)
     }
 
-    /// 需要纵向 / 横向滚动条（内容超出视口且该轴允许）。
+    /// 内容是否超出视口（该轴允许时）——决定「是否可滚动」，与可见性无关。
     pub fn needs_v(&self) -> bool {
         self.axes.y && self.content.height > self.viewport.height + 0.5
     }
     pub fn needs_h(&self) -> bool {
         self.axes.x && self.content.width > self.viewport.width + 0.5
+    }
+
+    /// 是否应绘制纵向 / 横向滚动条（含可见性模式：Always 始终、Hidden 从不、Auto 看溢出）。
+    pub fn show_v(&self) -> bool {
+        match self.visibility {
+            ScrollBarVisibility::Hidden => false,
+            ScrollBarVisibility::Always => self.axes.y,
+            ScrollBarVisibility::Auto => self.needs_v(),
+        }
+    }
+    pub fn show_h(&self) -> bool {
+        match self.visibility {
+            ScrollBarVisibility::Hidden => false,
+            ScrollBarVisibility::Always => self.axes.x,
+            ScrollBarVisibility::Auto => self.needs_h(),
+        }
     }
 
     /// 调整偏移使内容坐标下的矩形 `rect` 落入视口（光标 / 选中行跟随）。返回是否变化。
@@ -277,13 +320,13 @@ pub fn apply_thumb_drag(
     }
 }
 
-/// 纵向滑块矩形（内容不足则 None）。`viewport` 为视口矩形（绝对坐标）。
+/// 纵向滑块矩形（不显示则 None）。`viewport` 为视口矩形（绝对坐标）。
 pub fn thumb_v(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle) -> Option<Rect> {
-    if !state.needs_v() {
+    if !state.show_v() {
         return None;
     }
     let vh = viewport.size.height;
-    let content_h = state.content().height;
+    let content_h = state.content().height.max(vh); // Always 且内容不足时滑块占满
     let ratio = vh / content_h;
     let thumb_h = (vh * ratio).max(style.min_thumb_height).min(vh);
     let max = (content_h - vh).max(1.0);
@@ -294,13 +337,13 @@ pub fn thumb_v(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle) -> O
     Some(Rect::new(x, y, style.width, thumb_h))
 }
 
-/// 横向滑块矩形（内容不足则 None）。
+/// 横向滑块矩形（不显示则 None）。
 pub fn thumb_h_rect(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle) -> Option<Rect> {
-    if !state.needs_h() {
+    if !state.show_h() {
         return None;
     }
     let vw = viewport.size.width;
-    let content_w = state.content().width;
+    let content_w = state.content().width.max(vw);
     let ratio = vw / content_w;
     let thumb_w = (vw * ratio).max(style.min_thumb_height).min(vw);
     let max = (content_w - vw).max(1.0);
@@ -309,6 +352,30 @@ pub fn thumb_h_rect(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle)
     // 贴底缘，留 margin 留白。
     let y = viewport.bottom() - style.width - style.margin;
     Some(Rect::new(x, y, thumb_w, style.width))
+}
+
+/// 该点是否落在滚动条区域（滑块所在的整条轨道，用于光标形状 / 命中判断）。
+pub fn scrollbar_region_contains(
+    state: &ScrollState,
+    viewport: Rect,
+    style: &ScrollBarStyle,
+    pos: Point,
+) -> bool {
+    if state.show_v() {
+        let x = viewport.right() - style.width - style.margin;
+        let track = Rect::new(x, viewport.top(), style.width, viewport.size.height);
+        if track.contains(pos) {
+            return true;
+        }
+    }
+    if state.show_h() {
+        let y = viewport.bottom() - style.width - style.margin;
+        let track = Rect::new(viewport.left(), y, viewport.size.width, style.width);
+        if track.contains(pos) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 按需绘制纵/横滚动条到视口之上（供 ScrollView/ListView/Edit 复用）。
@@ -396,6 +463,32 @@ mod tests {
         assert!((s.offset().y - 150.0).abs() < 1.0, "offset={}", s.offset().y);
         // 滑块外的点不命中。
         assert!(thumb_grab(&s, vp, &style, Point::new(10.0, 10.0)).is_none());
+    }
+
+    #[test]
+    fn 可见性模式() {
+        let style = ScrollBarStyle::default();
+        let vp = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let mut s = ScrollState::new(ScrollAxes::vertical());
+        // 内容不足视口：Auto 不显示。
+        s.set_metrics(Size::new(100.0, 50.0), Size::new(100.0, 100.0));
+        assert!(!s.show_v());
+        assert!(thumb_v(&s, vp, &style).is_none());
+        // Always：即使不足也显示，滑块占满。
+        s.set_visibility(ScrollBarVisibility::Always);
+        assert!(s.show_v());
+        let thumb = thumb_v(&s, vp, &style).expect("Always 应有滑块");
+        assert_eq!(thumb.size.height, 100.0);
+        // Hidden：即使溢出也不显示，但仍可滚动（needs_v）。
+        s.set_visibility(ScrollBarVisibility::Hidden);
+        s.set_metrics(Size::new(100.0, 300.0), Size::new(100.0, 100.0));
+        assert!(!s.show_v());
+        assert!(s.needs_v());
+        assert!(thumb_v(&s, vp, &style).is_none());
+        // 落在滚动条区域判断随可见性变化。
+        s.set_visibility(ScrollBarVisibility::Auto);
+        assert!(scrollbar_region_contains(&s, vp, &style, Point::new(95.0, 50.0)));
+        assert!(!scrollbar_region_contains(&s, vp, &style, Point::new(10.0, 50.0)));
     }
 
     #[test]

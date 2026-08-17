@@ -9,8 +9,8 @@ use std::ptr::{null, null_mut};
 use flexui_core::event::keys;
 use flexui_core::{
     apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
-    Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WidgetRole,
-    WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
+    Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
+    WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -891,7 +891,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let dpi = GetDpiForWindow(hwnd);
                 let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
                 let logical = Point::new(p.x as f32 / scale, p.y as f32 / scale);
-                let cursor = if point_over_edit((*state).root.as_ref(), logical) {
+                let cursor = if flexui_core::point_wants_text_cursor((*state).root.as_ref(), logical)
+                {
                     IDC_IBEAM
                 } else {
                     IDC_ARROW
@@ -1501,22 +1502,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 }
 
 /// 命中最上层可交互控件，判断当前位置是否应显示文本输入光标。
-fn point_over_edit(root: &dyn Widget, point: Point) -> bool {
-    let Some(hit) = hit_test(root, point) else {
-        return false;
-    };
-    fn is_enabled_edit(node: &dyn Widget, id: flexui_core::WidgetId) -> Option<bool> {
-        if node.base().id == id {
-            return Some(node.base().role == WidgetRole::Edit && node.base().enabled);
-        }
-        node.base()
-            .children
-            .iter()
-            .find_map(|child| is_enabled_edit(child.as_ref(), id))
-    }
-    is_enabled_edit(root, hit) == Some(true)
-}
-
 /// WM_PAINT 期间：双缓冲 + DPI 缩放绘制整棵控件树。
 ///
 /// 先画到 32bpp 离屏位图（抗锯齿/ClearType 在位图上效果最佳），再整块 blit 到窗口，
@@ -1631,10 +1616,16 @@ mod cursor_tests {
         edit.base_mut().rect = Rect::new(20.0, 20.0, 120.0, 36.0);
         root.base_mut().children.push(Box::new(edit));
 
-        assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
-        assert!(!point_over_edit(&root, Point::new(180.0, 80.0)));
+        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
+        assert!(!flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(180.0, 80.0)
+        ));
         root.base_mut().children[0].base_mut().enabled = false;
-        assert!(!point_over_edit(&root, Point::new(30.0, 30.0)));
+        assert!(!flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(30.0, 30.0)
+        ));
     }
 
     #[test]
@@ -1651,6 +1642,6 @@ mod cursor_tests {
         overlay.base_mut().hit = HitPolicy::Transparent;
         root.base_mut().children.push(Box::new(overlay));
 
-        assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
+        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
     }
 }

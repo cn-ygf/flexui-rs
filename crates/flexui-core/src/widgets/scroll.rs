@@ -47,6 +47,11 @@ impl ScrollView {
         self.scrollbar = style;
         self
     }
+    /// 滚动条可见性模式（auto/always/hidden）。
+    pub fn scrollbar(mut self, visibility: crate::scroll::ScrollBarVisibility) -> Self {
+        self.scroll.set_visibility(visibility);
+        self
+    }
 
     fn viewport(&self) -> Rect {
         layout::content_rect(&self.base)
@@ -70,11 +75,17 @@ impl ScrollView {
 
     /// 子控件使用的视口始终避开滚动条，避免内容宽度随滚动状态跳动。
     /// 滚动条贴控件外缘，内容右缘取「内容区右缘」与「滚动条左侧再留 gap」的较小者。
+    /// 可见性为 Hidden 时不预留（内容用满宽）。
     fn content_viewport(&self) -> Rect {
         let viewport = self.viewport();
-        let right = viewport
-            .right()
-            .min(self.scrollbar_left() - self.scrollbar.gap);
+        let reserve = self.scroll.visibility() != crate::scroll::ScrollBarVisibility::Hidden;
+        let right = if reserve {
+            viewport
+                .right()
+                .min(self.scrollbar_left() - self.scrollbar.gap)
+        } else {
+            viewport.right()
+        };
         Rect::new(
             viewport.left(),
             viewport.top(),
@@ -197,6 +208,34 @@ impl Widget for ScrollView {
             self.shift_children(before);
         }
         changed
+    }
+    fn scrollbar_contains(&self, pos: Point) -> bool {
+        crate::scroll::scrollbar_region_contains(
+            &self.scroll,
+            self.scrollbar_viewport(),
+            &self.scrollbar,
+            pos,
+        )
+    }
+    fn apply_property(&mut self, property: crate::widget::WidgetProperty) -> bool {
+        match property {
+            crate::widget::WidgetProperty::ScrollBar(v) => {
+                self.scroll.set_visibility(v);
+                true
+            }
+            _ => false,
+        }
+    }
+    fn property(
+        &self,
+        key: crate::widget::WidgetPropertyKey,
+    ) -> Option<crate::widget::WidgetProperty> {
+        match key {
+            crate::widget::WidgetPropertyKey::ScrollBar => Some(
+                crate::widget::WidgetProperty::ScrollBar(self.scroll.visibility()),
+            ),
+            _ => None,
+        }
     }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         self.scroll.axis_value(prop)

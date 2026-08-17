@@ -6,9 +6,9 @@ use flexui_core::{
     Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
     FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, Image, ImageFit, ImageSource, Insets,
     Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
-    Radio, Rect, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec, Switch, TabBox, TextAlign,
-    ThemeColorBinding, ThemeColorProperty, TitlebarMode, VBox, VisualState, Widget, WidgetId,
-    WidgetProperty, WindowConfig, WindowDragRegion,
+    Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec,
+    Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode, VBox,
+    VisualState, Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -672,6 +672,12 @@ fn apply_attrs(
             "autoselall" | "auto-select-all" | "select-all-on-focus" => {
                 node.apply_property(WidgetProperty::AutoSelectAll(parse_bool(v)));
             }
+            "autoscroll" | "auto-scroll" | "follow-tail" | "stick-to-bottom" => {
+                node.apply_property(WidgetProperty::AutoScroll(parse_bool(v)));
+            }
+            "scrollbar" | "scroll-bar" | "scrollbars" => {
+                node.apply_property(WidgetProperty::ScrollBar(parse_scrollbar_visibility(v)));
+            }
             "mouse" => {
                 node.base_mut().hit = if v.eq_ignore_ascii_case("transparent") {
                     HitPolicy::Transparent
@@ -1269,6 +1275,15 @@ fn parse_align_items(v: &str) -> Align {
 
 fn parse_bool(s: &str) -> bool {
     matches!(s.to_lowercase().as_str(), "true" | "1" | "yes" | "on")
+}
+
+/// 解析滚动条可见性：always/on → 始终；hidden/none/off → 隐藏；其余按 auto。
+fn parse_scrollbar_visibility(s: &str) -> ScrollBarVisibility {
+    match s.to_lowercase().as_str() {
+        "always" | "on" | "visible" | "show" => ScrollBarVisibility::Always,
+        "hidden" | "none" | "off" | "hide" => ScrollBarVisibility::Hidden,
+        _ => ScrollBarVisibility::Auto,
+    }
 }
 
 fn parse_align(s: &str) -> Option<TextAlign> {
@@ -1954,6 +1969,28 @@ mod tests {
         assert_eq!(state.text, "123");
         assert_eq!(state.cursor, 3);
         assert!(!root.replace_selection("9"), "readonly 应阻止修改");
+    }
+
+    #[test]
+    fn xml_滚动条可见性与自动滚动() {
+        let xml = r#"<Edit multiline="true" scrollbar="always" autoscroll="true"/>"#;
+        let root = load_str(xml, &Context::new()).unwrap().root;
+        assert!(matches!(
+            root.property(flexui_core::WidgetPropertyKey::ScrollBar),
+            Some(WidgetProperty::ScrollBar(ScrollBarVisibility::Always))
+        ));
+        assert!(matches!(
+            root.property(flexui_core::WidgetPropertyKey::AutoScroll),
+            Some(WidgetProperty::AutoScroll(true))
+        ));
+        // ScrollView 也支持 scrollbar 属性。
+        let sv = load_str(r#"<ScrollView scrollbar="hidden"/>"#, &Context::new())
+            .unwrap()
+            .root;
+        assert!(matches!(
+            sv.property(flexui_core::WidgetPropertyKey::ScrollBar),
+            Some(WidgetProperty::ScrollBar(ScrollBarVisibility::Hidden))
+        ));
     }
 
     #[test]

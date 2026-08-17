@@ -109,6 +109,8 @@ pub enum WidgetPropertyKey {
     Vertical,
     Thickness,
     BindGroup,
+    ScrollBar,
+    AutoScroll,
 }
 
 /// XML/构建器及运行时写入控件专属配置的类型安全入口。
@@ -158,6 +160,10 @@ pub enum WidgetProperty {
     Vertical(bool),
     Thickness(f32),
     BindGroup(Option<u32>),
+    /// 滚动条可见性模式（auto/always/hidden）。
+    ScrollBar(crate::scroll::ScrollBarVisibility),
+    /// 文本追加后自动滚到底部（日志/聊天场景）。
+    AutoScroll(bool),
 }
 
 /// 平台文本输入协议需要的只读快照。
@@ -471,6 +477,10 @@ pub trait Widget {
     }
     /// 按拖动中的鼠标位置更新滚动偏移。返回是否变化。
     fn scrollbar_drag(&mut self, _pos: flexui_geometry::Point, _grab: &crate::scroll::ScrollGrab) -> bool {
+        false
+    }
+    /// 该点是否落在本控件的滚动条区域（供光标形状判断：滚动条上应显示箭头而非文本光标）。
+    fn scrollbar_contains(&self, _pos: flexui_geometry::Point) -> bool {
         false
     }
     fn animation_value(&self, _prop: AnimProp) -> Option<f32> {

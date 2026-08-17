@@ -41,6 +41,8 @@ pub struct EditConfig {
     pub password_char: char,
     pub max_chars: Option<usize>,
     pub auto_select_all: bool,
+    /// 多行：文本追加后自动滚到底部（日志/聊天场景）。
+    pub auto_scroll: bool,
 }
 
 impl Default for EditConfig {
@@ -55,6 +57,7 @@ impl Default for EditConfig {
             password_char: '\u{2022}',
             max_chars: None,
             auto_select_all: false,
+            auto_scroll: false,
         }
     }
 }
@@ -87,6 +90,8 @@ pub struct Edit {
     scroll: Cell<ScrollState>,
     /// 纵向滚动条外观（多行内容超出视口时绘制）。
     scrollbar: ScrollBarStyle,
+    /// 文本发生追加/替换、等待下一次 arrange 时跟随到底部（配合 auto_scroll）。
+    append_pending: bool,
     /// 最近一次排版/绘制得到的真实插入点矩形。
     caret_rect: Cell<Option<Rect>>,
 }
@@ -104,6 +109,7 @@ impl Edit {
             cache_dirty: true,
             scroll: Cell::new(ScrollState::new(ScrollAxes::both())),
             scrollbar: ScrollBarStyle::default(),
+            append_pending: false,
             caret_rect: Cell::new(None),
         }
     }
@@ -152,6 +158,18 @@ impl Edit {
     }
     pub fn auto_select_all(mut self, on: bool) -> Self {
         self.config.auto_select_all = on;
+        self
+    }
+    /// 多行：文本追加后自动滚到底部。
+    pub fn auto_scroll(mut self, on: bool) -> Self {
+        self.config.auto_scroll = on;
+        self
+    }
+    /// 滚动条可见性模式（auto/always/hidden）。
+    pub fn scrollbar(self, visibility: crate::scroll::ScrollBarVisibility) -> Self {
+        let mut state = self.scroll.get();
+        state.set_visibility(visibility);
+        self.scroll.set(state);
         self
     }
 
@@ -337,6 +355,7 @@ impl Edit {
         self.state.cursor = idx + n;
         self.state.sel_anchor = None;
         self.cache_dirty = true;
+        self.append_pending = true;
         true
     }
 
@@ -656,7 +675,7 @@ impl Edit {
     /// 多行出现纵向滚动条时，文字右缘不越过滚动条左侧（含 gap 留白）。
     fn text_clip_rect(&self, content: Rect) -> Rect {
         let mut right = content.right();
-        if self.scroll.get().needs_v() {
+        if self.scroll.get().show_v() {
             let bar_left = self.base.rect.right()
                 - self.scrollbar.margin
                 - self.scrollbar.width
@@ -752,14 +771,21 @@ impl Widget for Edit {
             .map(|line| line.layout.x_for_char(col))
             .unwrap_or(0.0);
         if self.config.multiline {
-            // 更新纵向滚动度量并让光标行进入视口。
+            // 更新纵向滚动度量。
             let mut state = self.scroll.get();
             let total_h = self.lines.len() as f32 * self.line_h;
             state.set_metrics(Size::new(content.size.width, total_h), content.size);
-            state.ensure_visible(
-                Rect::new(x, line as f32 * self.line_h, CARET_WIDTH, self.line_h),
-                0.0,
-            );
+            if self.base.focused {
+                // 编辑中：光标行保持可见。
+                state.ensure_visible(
+                    Rect::new(x, line as f32 * self.line_h, CARET_WIDTH, self.line_h),
+                    0.0,
+                );
+            } else if self.config.auto_scroll && self.append_pending {
+                // 未聚焦 + 开启自动滚动 + 有新文本：跟随到底部。
+                state.set_offset(state.offset().x, state.max().y);
+            }
+            self.append_pending = false;
             self.scroll.set(state);
             let offset_y = state.offset().y;
             self.caret_rect.set(Some(Rect::new(
@@ -1094,6 +1120,12 @@ impl Widget for Edit {
                 self.normalize_text();
             }
             WidgetProperty::AutoSelectAll(v) => self.config.auto_select_all = v,
+            WidgetProperty::AutoScroll(v) => self.config.auto_scroll = v,
+            WidgetProperty::ScrollBar(v) => {
+                let mut state = self.scroll.get();
+                state.set_visibility(v);
+                self.scroll.set(state);
+            }
             _ => return false,
         }
         true
@@ -1119,6 +1151,12 @@ impl Widget for Edit {
             WidgetPropertyKey::MaxChars => Some(WidgetProperty::MaxChars(self.config.max_chars)),
             WidgetPropertyKey::AutoSelectAll => {
                 Some(WidgetProperty::AutoSelectAll(self.config.auto_select_all))
+            }
+            WidgetPropertyKey::AutoScroll => {
+                Some(WidgetProperty::AutoScroll(self.config.auto_scroll))
+            }
+            WidgetPropertyKey::ScrollBar => {
+                Some(WidgetProperty::ScrollBar(self.scroll.get().visibility()))
             }
             _ => None,
         }
@@ -1156,6 +1194,16 @@ impl Widget for Edit {
         self.scroll.set(state);
         changed
     }
+    fn scrollbar_contains(&self, pos: Point) -> bool {
+        let content = layout::content_rect(&self.base);
+        let state = self.scroll.get();
+        crate::scroll::scrollbar_region_contains(
+            &state,
+            self.scrollbar_viewport(content),
+            &self.scrollbar,
+            pos,
+        )
+    }
     fn animation_value(&self, prop: AnimProp) -> Option<f32> {
         self.scroll.get().axis_value(prop)
     }
@@ -1170,6 +1218,7 @@ impl Widget for Edit {
         self.state.cursor = self.base.text.chars().count();
         self.state.sel_anchor = None;
         self.state.marked.clear();
+        self.append_pending = true;
         self.normalize_text();
     }
     fn text_input_rect(&self) -> Option<Rect> {
@@ -1433,6 +1482,27 @@ mod tests {
         let h1 = one.measure(Size::new(200.0, 200.0), &cv).height;
         let h3 = three.measure(Size::new(200.0, 200.0), &cv).height;
         assert!(h3 > h1, "三行应比一行高: {h3} vs {h1}");
+    }
+
+    #[test]
+    fn 多行_autoscroll追加后跟随底部() {
+        let cv = FakeCanvas;
+        let text = (0..20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 开启 auto_scroll：设文本后布局，偏移应跟随到底部。
+        let mut e = Edit::new().multiline(true).auto_scroll(true);
+        e.set_text_value(text.clone());
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+        let s = e.scroll.get();
+        assert!(s.max().y > 0.0, "内容应溢出视口");
+        assert!((s.offset().y - s.max().y).abs() < 0.5, "auto_scroll 应跟随到底部");
+        // 关闭 auto_scroll：偏移保持顶部。
+        let mut e2 = Edit::new().multiline(true);
+        e2.set_text_value(text);
+        layout_node(&mut e2, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+        assert_eq!(e2.scroll.get().offset().y, 0.0, "未开启则不跟随");
     }
 
     #[test]
