@@ -109,7 +109,7 @@ impl WindowImpl for GalleryWindow {
 
     fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
         if name == virtual_list_demo::CONTROL_NAME {
-            self.virtual_list.show_context_menu(x, y, ctx);
+            self.virtual_list.show_context_menu(ctx);
         } else if name == "native_context_target" {
             show_menu(
                 ctx,

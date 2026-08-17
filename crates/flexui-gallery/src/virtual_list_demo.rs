@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use flexui::{
-    NativeMenu, NativeMenuAnchor, NativeMenuItem, Point, TextAlign, VirtualColumn,
-    VirtualListSource, VirtualListSourceRef, VirtualSort, VirtualSortDirection, WidgetProperty,
-    WidgetPropertyKey, WindowCtx,
+    NativeMenu, NativeMenuAnchor, NativeMenuItem, TextAlign, VirtualColumn, VirtualListSource,
+    VirtualListSourceRef, VirtualSort, VirtualSortDirection, WidgetProperty, WidgetPropertyKey,
+    WindowCtx,
 };
 
 pub(crate) const CONTROL_NAME: &str = "virtual_table";
@@ -66,12 +66,9 @@ impl VirtualListDemo {
         true
     }
 
-    pub(crate) fn show_context_menu(&mut self, x: f32, y: f32, ctx: &mut WindowCtx) {
+    pub(crate) fn show_context_menu(&mut self, ctx: &mut WindowCtx) {
         let menu = context_menu(!selected_ids(ctx).is_empty());
-        if let Some(command) = ctx.popup_native_menu(
-            &menu,
-            NativeMenuAnchor::Window(Point::new(x, y)),
-        ) {
+        if let Some(command) = ctx.popup_native_menu(&menu, NativeMenuAnchor::Cursor) {
             self.handle_click(&command, ctx);
         }
     }
