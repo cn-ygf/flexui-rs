@@ -1,9 +1,11 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod app;
+mod close_prompt;
 mod login;
 mod resources;
 mod settings;
+mod tray;
 
 use flexui::Window;
 
@@ -14,5 +16,5 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     flexui::set_application_icon(include_bytes!("../assets/app.icns"));
-    Window::new(MainWindow).center().run();
+    Window::new(MainWindow::default()).center().run();
 }

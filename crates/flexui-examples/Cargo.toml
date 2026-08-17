@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 flexui = { path = "../flexui" }
+image = { workspace = true }
+tray-icon = { workspace = true }
 
 [build-dependencies]
 winresource = { version = "0.1.31", default-features = false }

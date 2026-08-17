@@ -67,6 +67,8 @@ const DEFAULT_DRAG_STRIP: f32 = 40.0;
 const WM_APP_RESTORE_REDRAW: u32 = WM_APP + 2;
 /// 一个窗口切换语言时通知同线程的全部 flexui 窗口。
 const WM_APP_LOCALE_CHANGED: u32 = WM_APP + 3;
+/// 应用级退出时绕过各窗口关闭确认并销毁全部原生窗口。
+const WM_APP_FORCE_CLOSE: u32 = WM_APP + 4;
 
 thread_local! {
     /// 所有窗口都由同一 UI 线程创建，注册表用于跨普通窗口和 owned tool window 广播环境变化。
@@ -144,6 +146,29 @@ struct WinWindowHandle {
 impl WindowHandle for WinWindowHandle {
     fn set_title(&mut self, title: &str) {
         unsafe { SetWindowTextW(self.hwnd, wide(title).as_ptr()) };
+    }
+    fn show(&mut self) {
+        unsafe {
+            if IsIconic(self.hwnd) != 0 {
+                ShowWindow(self.hwnd, SW_RESTORE);
+            } else {
+                ShowWindow(self.hwnd, SW_SHOW);
+            }
+            SetForegroundWindow(self.hwnd);
+        }
+    }
+    fn hide(&mut self) {
+        unsafe {
+            ShowWindow(self.hwnd, SW_HIDE);
+        }
+    }
+    fn quit(&mut self) {
+        let windows = THREAD_WINDOWS.with(|windows| windows.borrow().clone());
+        for window in windows {
+            unsafe {
+                PostMessageW(window, WM_APP_FORCE_CLOSE, 0, 0);
+            }
+        }
     }
     fn close(&mut self) {
         unsafe { PostMessageW(self.hwnd, WM_CLOSE, 0, 0) };
@@ -1282,7 +1307,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let st = &mut *state;
                 if wparam == 2 {
                     let locale_changed = refresh_localizations(hwnd, st);
-                    if !st.minimized {
+                    if !st.minimized && IsWindowVisible(hwnd) != 0 {
                         st.disp.tick_anims(st.root.as_mut(), 0.016);
                     }
                     let msgs = st.disp.drain_messages();
@@ -1344,7 +1369,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     } else if let Some(rect) = dirty {
                         InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
                     }
-                } else if !st.minimized {
+                } else if !st.minimized && IsWindowVisible(hwnd) != 0 {
                     let blink = st.disp.blink(st.root.as_mut());
                     st.disp.tooltip_tick(st.root.as_mut());
                     let layout = st.disp.take_layout();
@@ -1365,6 +1390,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_APP_FORCE_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        }
         // 模态 owner 重新启用时保证应用共享环境已应用；disabled 窗口可能延迟处理普通消息。
         WM_ENABLE if wparam != 0 => {
             if !state.is_null() && refresh_localizations(hwnd, &mut *state) {
@@ -1381,16 +1410,36 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 关闭请求 → 窗口委托 on_closing；返回 false 阻止关闭。
         WM_CLOSE => {
-            let allow = if !state.is_null() {
+            let (allow, new_windows) = if !state.is_null() {
                 let st = &mut *state;
                 let mut handle = WinWindowHandle { hwnd };
                 let root = &mut st.root;
                 let delegate = &mut st.delegate;
-                let mut ctx =
-                    WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
+                let mut ctx = WindowCtx::with_proxy_and_localizer(
+                    root.as_mut(),
+                    &mut handle,
+                    st.disp.proxy(),
+                    st.localizer.clone(),
+                );
                 let allow = delegate.on_closing(&mut ctx);
+                let overlays = ctx.take_overlay_requests();
+                let anims = ctx.take_anim_requests();
+                let new_windows = ctx.take_new_windows();
                 st.disp.invalidate(ctx.take_invalidation());
                 if !allow {
+                    for request in overlays {
+                        open_overlay_request(&mut st.disp, request);
+                    }
+                    for request in anims {
+                        st.disp.animate(
+                            st.root.as_mut(),
+                            &request.name,
+                            request.prop,
+                            request.to,
+                            request.dur_secs,
+                            request.easing,
+                        );
+                    }
                     let layout = st.disp.take_layout();
                     let redraw = st.disp.take_redraw();
                     let dirty = st.disp.take_dirty();
@@ -1401,10 +1450,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
                     }
                 }
-                allow
+                (allow, new_windows)
             } else {
-                true
+                (true, Vec::new())
             };
+            if !allow {
+                for window in new_windows {
+                    create_window(window, hwnd);
+                }
+            }
             if allow {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             } else {

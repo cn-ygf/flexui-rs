@@ -109,6 +109,14 @@ impl WindowConfig {
 /// 窗口控制句柄（由后端实现）：≈ duilib Window 的 Close/ShowWindow 等。
 pub trait WindowHandle {
     fn set_title(&mut self, title: &str);
+    /// 显示并激活窗口；隐藏或最小化后都可用它恢复到前台。
+    fn show(&mut self) {}
+    /// 隐藏窗口但不销毁，常用于最小化到系统托盘。
+    fn hide(&mut self) {}
+    /// 退出应用事件循环；默认关闭当前窗口，平台后端可覆盖为应用级退出。
+    fn quit(&mut self) {
+        self.close();
+    }
     fn close(&mut self);
     fn minimize(&mut self);
     fn maximize(&mut self);
@@ -521,6 +529,18 @@ impl<'a> WindowCtx<'a> {
     // —— 窗口控制 ——
     pub fn set_title(&mut self, title: &str) {
         self.win.set_title(title);
+    }
+    /// 显示并激活当前窗口。
+    pub fn show(&mut self) {
+        self.win.show();
+    }
+    /// 隐藏当前窗口但保持窗口和进程存活。
+    pub fn hide(&mut self) {
+        self.win.hide();
+    }
+    /// 退出整个应用，而不只是关闭当前窗口。
+    pub fn quit(&mut self) {
+        self.win.quit();
     }
     pub fn close(&mut self) {
         self.win.close();

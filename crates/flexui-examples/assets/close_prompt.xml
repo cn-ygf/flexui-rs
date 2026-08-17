@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Window title="close.title" width="360" height="210" resizable="false" titlebar="none"
+        system-corners="true" system-shadow="true">
+  <VBox width="360" height="210" padding="10 12 14 12" bgcolor="#343C78" spacing="0">
+    <HBox width="fill" height="24">
+      <Panel flex="1" mouse="transparent"/>
+      <Button name="close_prompt" tooltip="close.cancel" width="24" height="24"
+              normal-bgimage="button/close_normal.svg" hot-bgimage="button/close_hover.svg"
+              pushed-bgimage="button/close_pushed.svg" normal-bgfit="center"
+              hot-bgfit="center" pushed-bgfit="center"/>
+    </HBox>
+
+    <VBox flex="1" width="fill" align="center" spacing="12">
+      <HBox width="fill" height="28" padding="0 0 0 10" spacing="8">
+        <Radio name="close_hide" text="close.hide_to_tray" group="91" checked="true"
+               width="185" height="28" font-size="14" normal-fgcolor="#C5CAE0"
+               selected-fgcolor="#FFFFFF"/>
+        <Radio name="close_exit" text="close.exit_app" group="91" width="115" height="28"
+               font-size="14" normal-fgcolor="#C5CAE0" selected-fgcolor="#FFFFFF"/>
+      </HBox>
+
+      <Button name="confirm_close" text="close.confirm" width="120" height="36"
+              normal-bgcolor="#00CFC4" hot-bgcolor="#11DBCF" pushed-bgcolor="#00B9B0"
+              normal-fgcolor="#FFFFFF" hot-fgcolor="#FFFFFF" pushed-fgcolor="#FFFFFF"
+              border-width="0" font-size="15" bold="true" corner-radius="4"/>
+
+      <HBox width="fill" height="24" justify="center">
+        <CheckBox name="close_remember" text="close.do_not_ask" width="130" height="24"
+                  font-size="13" normal-fgcolor="#AEB5D7" selected-fgcolor="#C9CEE4"/>
+      </HBox>
+    </VBox>
+  </VBox>
+</Window>

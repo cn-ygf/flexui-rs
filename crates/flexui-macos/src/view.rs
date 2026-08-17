@@ -11,7 +11,7 @@ use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent,
+    NSApplication, NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent,
     NSEventModifierFlags, NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
@@ -123,6 +123,22 @@ impl MacWindowHandle {
 impl WindowHandle for MacWindowHandle {
     fn set_title(&mut self, title: &str) {
         self.window.setTitle(&NSString::from_str(title));
+    }
+    fn show(&mut self) {
+        if self.window.isMiniaturized() {
+            self.window.deminiaturize(None);
+        }
+        self.window.makeKeyAndOrderFront(None);
+        let app = NSApplication::sharedApplication(self.window.mtm());
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+    }
+    fn hide(&mut self) {
+        self.window.orderOut(None);
+    }
+    fn quit(&mut self) {
+        let app = NSApplication::sharedApplication(self.window.mtm());
+        app.terminate(None);
     }
     fn close(&mut self) {
         // AppKit 关闭 sheet 时会同步回调窗口委托。这里只记录请求，由外层在释放
@@ -809,6 +825,9 @@ impl FlexView {
     /// 关闭请求 → 窗口委托 on_closing，返回是否允许关闭。
     pub fn fire_close(&self) -> (bool, bool) {
         let window = self.window();
+        let Some(win) = window else {
+            return (true, false);
+        };
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
         let AppState {
@@ -818,28 +837,48 @@ impl FlexView {
             layout_dirty,
             ..
         } = &mut *st;
-        if let Some(win) = window {
-            let mut handle = MacWindowHandle::new(win);
-            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
-            let allow = delegate.on_closing(&mut ctx);
-            disp.invalidate(ctx.take_invalidation());
-            let close_requested = handle.take_close_request();
-            if !allow {
-                let redraw = disp.take_redraw();
-                let layout = disp.take_layout();
-                *layout_dirty |= layout;
-                let dirty = disp.take_dirty();
-                drop(st);
-                if redraw || layout {
-                    self.setNeedsDisplay(true);
-                } else if let Some(rect) = dirty {
-                    self.setNeedsDisplayInRect(to_nsrect(rect));
-                }
-            }
-            (allow, close_requested)
-        } else {
-            (true, false)
+        let mut handle = MacWindowHandle::new(win);
+        let mut ctx = WindowCtx::with_proxy_and_localizer(
+            root.as_mut(),
+            &mut handle,
+            disp.proxy(),
+            localizer,
+        );
+        let allow = delegate.on_closing(&mut ctx);
+        let overlays = ctx.take_overlay_requests();
+        let anims = ctx.take_anim_requests();
+        let new_windows = ctx.take_new_windows();
+        disp.invalidate(ctx.take_invalidation());
+        let close_requested = handle.take_close_request();
+        if allow || close_requested {
+            return (allow, close_requested);
         }
+
+        for request in overlays {
+            open_overlay_request(disp, request);
+        }
+        for request in anims {
+            disp.animate(
+                root.as_mut(),
+                &request.name,
+                request.prop,
+                request.to,
+                request.dur_secs,
+                request.easing,
+            );
+        }
+        let redraw = disp.take_redraw();
+        let layout = disp.take_layout();
+        *layout_dirty |= layout;
+        let dirty = disp.take_dirty();
+        drop(st);
+        self.create_windows(new_windows);
+        if redraw || layout {
+            self.setNeedsDisplay(true);
+        } else if let Some(rect) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(rect));
+        }
+        (allow, close_requested)
     }
 
     /// 依次触发初始化前、初始化和初始化完成钩子。
@@ -1006,7 +1045,9 @@ impl FlexView {
             layout_dirty,
             ..
         } = &mut *st;
-        disp.tick_anims(root.as_mut(), 0.016);
+        if window.as_ref().is_some_and(|window| window.isVisible()) {
+            disp.tick_anims(root.as_mut(), 0.016);
+        }
         let msgs = disp.drain_messages();
         let tasks = disp.drain_ui_tasks();
         let control_events = disp.take_control_events();
@@ -1184,6 +1225,9 @@ impl FlexView {
 
     /// 光标闪烁定时回调：切换焦点控件 caret 相位；顺带驱动 Tooltip 延时显示。
     fn fire_blink(&self) {
+        if !self.window().is_some_and(|window| window.isVisible()) {
+            return;
+        }
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, disp, .. } = &mut *st;
         let rect = disp.blink(root.as_mut());
