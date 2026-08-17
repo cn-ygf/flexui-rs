@@ -645,7 +645,7 @@ impl Edit {
     /// 多行出现纵向滚动条时，右侧为滚动条保留留白，避免文字压到滚动条下面。
     fn text_clip_rect(&self, content: Rect) -> Rect {
         let reserve = if self.scroll.get().needs_v() {
-            self.scrollbar.width + self.scrollbar.gap
+            self.scrollbar.width + self.scrollbar.gap + self.scrollbar.margin
         } else {
             0.0
         };

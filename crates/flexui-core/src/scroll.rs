@@ -179,6 +179,8 @@ pub struct ScrollBarStyle {
     pub width: f32,
     /// 内容与滚动条之间保留的间距。
     pub gap: f32,
+    /// 滚动条与视口边缘（右缘 / 底缘）之间保留的留白，一般 1~2px。
+    pub margin: f32,
     /// 滑块最小长度（沿滚动轴）。
     pub min_thumb_height: f32,
     pub thumb_color: Color,
@@ -191,6 +193,7 @@ impl Default for ScrollBarStyle {
         Self {
             width: 5.0,
             gap: 4.0,
+            margin: 2.0,
             min_thumb_height: 24.0,
             thumb_color: Color::from_u8(200, 210, 230, 160),
             thumb_image: None,
@@ -211,7 +214,9 @@ pub fn thumb_v(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle) -> O
     let max = (content_h - vh).max(1.0);
     let t = (state.offset().y / max).clamp(0.0, 1.0);
     let y = viewport.top() + (vh - thumb_h) * t;
-    Some(Rect::new(viewport.right() - style.width, y, style.width, thumb_h))
+    // 贴右缘，留 margin 留白。
+    let x = viewport.right() - style.width - style.margin;
+    Some(Rect::new(x, y, style.width, thumb_h))
 }
 
 /// 横向滑块矩形（内容不足则 None）。
@@ -226,7 +231,9 @@ pub fn thumb_h_rect(state: &ScrollState, viewport: Rect, style: &ScrollBarStyle)
     let max = (content_w - vw).max(1.0);
     let t = (state.offset().x / max).clamp(0.0, 1.0);
     let x = viewport.left() + (vw - thumb_w) * t;
-    Some(Rect::new(x, viewport.bottom() - style.width, thumb_w, style.width))
+    // 贴底缘，留 margin 留白。
+    let y = viewport.bottom() - style.width - style.margin;
+    Some(Rect::new(x, y, thumb_w, style.width))
 }
 
 /// 按需绘制纵/横滚动条到视口之上（供 ScrollView/ListView/Edit 复用）。

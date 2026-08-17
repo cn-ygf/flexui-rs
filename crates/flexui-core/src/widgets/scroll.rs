@@ -55,7 +55,8 @@ impl ScrollView {
     /// 子控件使用的视口始终避开滚动条，避免内容宽度随滚动状态跳动。
     fn content_viewport(&self) -> Rect {
         let viewport = self.viewport();
-        let reserved = (self.scrollbar.width + self.scrollbar.gap).max(0.0);
+        let reserved =
+            (self.scrollbar.width + self.scrollbar.gap + self.scrollbar.margin).max(0.0);
         Rect::new(
             viewport.left(),
             viewport.top(),
@@ -219,12 +220,13 @@ mod tests {
             .push(Panel::new().height(120.0))
             .push(Panel::new().height(120.0));
         layout_node(&mut view, Rect::new(0.0, 0.0, 294.0, 228.0), &FakeCanvas);
+        // 预留 = 条宽5 + 间距4 + 边距2 = 11，视口宽 250 → 子内容宽 239。
         assert_eq!(
             view.children_viewport(),
-            Rect::new(23.0, 16.0, 243.0, 188.0)
+            Rect::new(23.0, 16.0, 241.0, 188.0)
         );
         assert_eq!(view.base.children[0].base().rect.left(), 24.0);
-        assert_eq!(view.base.children[0].base().rect.size.width, 241.0);
+        assert_eq!(view.base.children[0].base().rect.size.width, 239.0);
         assert_eq!(view.max_scroll(), 52.0);
         let before = view.base.children[0].base().rect.top();
         assert!(view.scroll_by(0.0, -32.0));
