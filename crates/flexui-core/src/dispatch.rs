@@ -1885,9 +1885,11 @@ fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) -> Option
     let id = target?;
     let mut changed_rect = None;
     visit_mut(root, id, &mut |widget| {
-        let viewport = widget.children_viewport();
+        // 脏区用控件整体矩形：children_viewport 会排除右侧滚动条列，
+        // 只脏内容区会导致滚动条滑块不随内容重绘。
+        let rect = widget.base().rect;
         if widget.scroll_by(dx, dy) {
-            changed_rect = Some(viewport);
+            changed_rect = Some(rect);
         }
     });
     changed_rect.map(|rect| (id, rect))
@@ -2160,7 +2162,13 @@ mod tests {
             },
         );
         assert_eq!(root.scroll_offset(), Some(Point::new(0.0, 60.0))); // 视口100 内容200 → 可滚到 100，60 有效
-                                                                       // 重新布局后首个子应上移 60
+                                                                       // 脏区须覆盖控件整体（含右侧滚动条列），否则滑块不重绘。
+        let dirty = disp.dirty.expect("滚轮滚动应产生脏区");
+        assert!(
+            dirty.right() >= root.base().rect.right() - 0.01,
+            "脏区右边界须到达控件右缘以重绘滚动条：{dirty:?}"
+        );
+        // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
     }

@@ -642,11 +642,17 @@ impl Edit {
     }
 
     /// 横向严格裁到内容区；纵向保留控件 padding，避免字体抗锯齿下沿被切掉。
+    /// 多行出现纵向滚动条时，右侧为滚动条保留留白，避免文字压到滚动条下面。
     fn text_clip_rect(&self, content: Rect) -> Rect {
+        let reserve = if self.scroll.get().needs_v() {
+            self.scrollbar.width + self.scrollbar.gap
+        } else {
+            0.0
+        };
         Rect::new(
             content.left(),
             self.base.rect.top(),
-            content.size.width,
+            (content.size.width - reserve).max(0.0),
             self.base.rect.size.height,
         )
     }
