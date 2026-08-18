@@ -335,7 +335,11 @@ fn all_visual_states() -> impl Iterator<Item = VisualState> {
 
 fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
     let has_base = state.base != BaseState::Normal;
+    // Pushed 未定义的字段先回退到 Hot（再回退 Normal），避免按下瞬间丢背景/边框。
+    let pushed_hot_fallback =
+        (state.base == BaseState::Pushed).then(|| VisualState::new(BaseState::Hot, false));
     [
+        pushed_hot_fallback,
         has_base.then(|| VisualState::new(state.base, false)),
         state
             .focused

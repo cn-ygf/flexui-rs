@@ -294,10 +294,12 @@ define_class!(
 
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
+            // 精确滚动（触控板）已是像素增量；鼠标滚轮是行增量，需放大为像素，否则滚动过慢。
+            let factor = if event.hasPreciseScrollingDeltas() { 1.0 } else { 40.0 };
             self.dispatch(Event::MouseWheel {
                 pos: self.point(event),
-                dx: event.scrollingDeltaX() as f32,
-                dy: event.scrollingDeltaY() as f32,
+                dx: event.scrollingDeltaX() as f32 * factor,
+                dy: event.scrollingDeltaY() as f32 * factor,
             });
         }
 
