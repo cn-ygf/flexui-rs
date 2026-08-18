@@ -204,6 +204,8 @@ pub trait WindowImpl: 'static {
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下。
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
+    /// 鼠标滚轮（dx/dy 为滚动增量）。滚动容器已先行处理；窗口层可据此做缩放等。
+    fn on_wheel(&mut self, _dx: f32, _dy: f32, _ctx: &mut WindowCtx) {}
     /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 文件拖放到窗口（绝对路径）。
@@ -255,6 +257,9 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     }
     fn on_key(&mut self, key: u32, ctx: &mut WindowCtx) {
         self.imp.on_key(key, ctx);
+    }
+    fn on_wheel(&mut self, dx: f32, dy: f32, ctx: &mut WindowCtx) {
+        self.imp.on_wheel(dx, dy, ctx);
     }
     fn on_message(&mut self, msg: &str, ctx: &mut WindowCtx) {
         self.imp.on_message(msg, ctx);

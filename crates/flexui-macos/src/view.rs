@@ -1185,6 +1185,12 @@ impl FlexView {
         }
         disp.handle(root.as_mut(), &ev);
         let window_event = flexui_core::WindowEvent::from_event(&ev);
+        // 滚轮增量（滚动容器已先行处理，这里再回传窗口层做缩放等自定义）。
+        let wheel = if let Event::MouseWheel { dx, dy, .. } = &ev {
+            Some((*dx, *dy))
+        } else {
+            None
+        };
         let acts = disp.take_activations();
         let doubles = disp.take_double_clicks();
         let contexts = disp.take_context_clicks();
@@ -1200,6 +1206,7 @@ impl FlexView {
             || !contexts.is_empty()
             || !control_events.is_empty()
             || window_event.is_some()
+            || wheel.is_some()
         {
             if let Some(win) = window.as_ref() {
                 let mut handle = MacWindowHandle::new(win.clone());
@@ -1216,6 +1223,9 @@ impl FlexView {
                 }
                 for (name, event) in &control_events {
                     delegate.on_control_event(name, event, &mut ctx);
+                }
+                if let Some((dx, dy)) = wheel {
+                    delegate.on_wheel(dx, dy, &mut ctx);
                 }
                 if let Some(event) = &window_event {
                     delegate.on_window_event(event, &mut ctx);

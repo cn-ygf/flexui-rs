@@ -599,6 +599,9 @@ pub trait WindowDelegate {
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下（平台无关键码）。
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
+    /// 鼠标滚轮（dx/dy 为滚动增量，dy>0 通常为向上）。滚动容器已先行处理，这里供
+    /// 窗口层做自定义缩放等（如图片预览滚轮放大缩小）。
+    fn on_wheel(&mut self, _dx: f32, _dy: f32, _ctx: &mut WindowCtx) {}
     /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 文件拖放到窗口（paths 为被拖入的文件/目录绝对路径）。
