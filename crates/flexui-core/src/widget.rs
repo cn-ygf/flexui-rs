@@ -238,6 +238,8 @@ pub struct Base {
     pub pressed: bool,
     pub focused: bool,
     pub focusable: bool,
+    /// 文本是否可选中（拖选 + Cmd+C 复制）；开启时控件也会获得焦点。
+    pub selectable: bool,
     /// 任一后代获得焦点时，本节点及其子树使用 focus 状态样式。
     pub focus_within: bool,
     /// 光标闪烁相位（true=显示），由分发器的 blink 定时切换；Edit 绘制光标用。
@@ -332,6 +334,7 @@ impl Base {
                     | WidgetRole::Edit
                     | WidgetRole::ComboBox
             ),
+            selectable: false,
             visible: true,
             hit: HitPolicy::Solid,
             selected: false,

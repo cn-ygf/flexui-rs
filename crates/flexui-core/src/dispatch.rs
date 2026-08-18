@@ -1317,9 +1317,9 @@ impl Dispatcher {
                 }
                 let hit = hit_test(root, *pos);
                 self.set_hover(root, hit);
-                // 若正按住某指针型控件（Edit/Slider）：这是一次拖动 → 转发给它。
+                // 若正按住某指针型控件（Edit/Slider）或可选中文本控件：这是一次拖动 → 转发给它。
                 if let Some(id) = self.pressed {
-                    if is_pointer_target(role_of(root, id)) {
+                    if is_pointer_target(role_of(root, id)) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -1337,10 +1337,10 @@ impl Dispatcher {
                 let hit = hit_test(root, *pos);
                 let old_focus = self.focus;
                 self.press(root, hit);
-                // 命中指针型控件（Edit/Slider/ListView）：转发按下，让其按坐标定位/选中。
+                // 命中指针型控件（Edit/Slider/ListView）或可选中文本控件：转发按下，让其按坐标定位/选中。
                 if let Some(id) = self.pressed {
                     let role = role_of(root, id);
-                    if is_pointer_target(role) {
+                    if is_pointer_target(role) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                         if old_focus != self.focus && role == Some(WidgetRole::Edit) {
                             visit_mut(root, id, &mut |w| w.focus_gained());
@@ -1364,7 +1364,7 @@ impl Dispatcher {
                 }
                 // 指针型控件需要收到抬起事件来结束列宽拖动、文本拖选等内部状态。
                 if let Some(id) = self.pressed {
-                    if is_pointer_target(role_of(root, id)) {
+                    if is_pointer_target(role_of(root, id)) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -1388,7 +1388,7 @@ impl Dispatcher {
                     if let Some(name) = name_of(root, id) {
                         self.double_clicked.push(name);
                     }
-                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                    if role_of(root, id) == Some(WidgetRole::Edit) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -2033,6 +2033,11 @@ fn is_pointer_target(role: Option<WidgetRole>) -> bool {
         role,
         Some(WidgetRole::Edit) | Some(WidgetRole::Slider) | Some(WidgetRole::ListView)
     )
+}
+
+/// 该控件是否开启了文本选中（可选中控件也接收鼠标按下/拖动/抬起以驱动选区）。
+fn selectable_of(node: &dyn Widget, id: WidgetId) -> bool {
+    find_by_id(node, id).map(|w| w.base().selectable).unwrap_or(false)
 }
 
 /// 按 id 找控件的角色（用于判断是否文本控件）。

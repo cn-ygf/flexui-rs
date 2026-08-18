@@ -218,6 +218,15 @@ macro_rules! common_builders {
                 self.base.enabled = e;
                 self
             }
+            /// 文本是否可选中（拖选 + Cmd+C 复制）。开启即让控件可获得焦点。
+            /// 目前 Label 已实现选区行为，其它有 `base.text` 的控件后续可复用同一机制。
+            pub fn selectable(mut self, on: bool) -> Self {
+                self.base.selectable = on;
+                if on {
+                    self.base.focusable = true;
+                }
+                self
+            }
             /// 命中策略（穿透/不穿透）。
             pub fn hit(mut self, h: $crate::widget::HitPolicy) -> Self {
                 self.base.hit = h;
