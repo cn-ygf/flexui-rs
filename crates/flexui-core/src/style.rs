@@ -238,6 +238,16 @@ impl StyleSet {
         Self::default()
     }
 
+    /// 是否有任一槽定义了帧动画（bg/fg）。用于每帧廉价判断，跳过无动画控件的样式解析。
+    pub fn has_frame_animation(&self) -> bool {
+        self.normal.bg_animation.is_some()
+            || self.normal.fg_animation.is_some()
+            || self
+                .slots
+                .values()
+                .any(|s| s.bg_animation.is_some() || s.fg_animation.is_some())
+    }
+
     /// 设置某状态槽。
     pub fn set(&mut self, state: VisualState, spec: StyleSpec) {
         if state == VisualState::default() {

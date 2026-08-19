@@ -38,7 +38,10 @@ impl ScrollView {
 
     /// 是否已贴到底部（容 1px 误差）。
     fn at_bottom(&self) -> bool {
-        self.scroll.offset().y >= self.scroll.max().y - 1.0
+        // 内容不足以滚动时（max<=0）不算“在底部”，否则会误开启粘底：
+        // 短内容变长后会被粘到底部。
+        let max = self.scroll.max().y;
+        max > 1.0 && self.scroll.offset().y >= max - 1.0
     }
     pub fn spacing(mut self, s: f32) -> Self {
         self.base.spacing = s;

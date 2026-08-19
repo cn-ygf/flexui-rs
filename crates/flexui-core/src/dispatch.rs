@@ -2119,27 +2119,37 @@ fn tick_frame_animations(
     let subtree_has_focus = node.base().focus_within && subtree_focused_for_frames(node);
     let b = node.base_mut();
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
-    let state =
-        crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
-    let style = b.style.resolve_over(&b.theme_style, state);
-    let changed = b
-        .bg_frame_player
-        .tick_state(style.bg_animation.as_ref(), dt)
-        | b.fg_frame_player
-            .tick_state(style.fg_animation.as_ref(), dt)
-        | b.click_bg_frame_player.tick(dt)
-        | b.click_fg_frame_player.tick(dt);
-    if b.bg_frame_player.take_finished() || b.click_bg_frame_player.take_finished() {
-        finished.push((b.id, FrameLayer::Background));
+    // 廉价门控：本控件既没有定义帧动画、也没有正在播放的帧动画时，跳过昂贵的
+    // 样式解析(resolve_over→StyleSpec::clone)。空闲时（大列表尤甚）大幅降低每帧 CPU。
+    let has_anim = b.bg_frame_player.is_active()
+        || b.fg_frame_player.is_active()
+        || b.click_bg_frame_player.is_active()
+        || b.click_fg_frame_player.is_active()
+        || b.style.has_frame_animation()
+        || b.theme_style.has_frame_animation();
+    if has_anim {
+        let state =
+            crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
+        let style = b.style.resolve_over(&b.theme_style, state);
+        let changed = b
+            .bg_frame_player
+            .tick_state(style.bg_animation.as_ref(), dt)
+            | b.fg_frame_player
+                .tick_state(style.fg_animation.as_ref(), dt)
+            | b.click_bg_frame_player.tick(dt)
+            | b.click_fg_frame_player.tick(dt);
+        if b.bg_frame_player.take_finished() || b.click_bg_frame_player.take_finished() {
+            finished.push((b.id, FrameLayer::Background));
+        }
+        if b.fg_frame_player.take_finished() || b.click_fg_frame_player.take_finished() {
+            finished.push((b.id, FrameLayer::Foreground));
+        }
+        if changed {
+            let rect = b.rect;
+            *dirty = Some(dirty.map_or(rect, |current| union_rect(current, rect)));
+        }
     }
-    if b.fg_frame_player.take_finished() || b.click_fg_frame_player.take_finished() {
-        finished.push((b.id, FrameLayer::Foreground));
-    }
-    let rect = b.rect;
     let pass_focus = focus_active && b.focus_within;
-    if changed {
-        *dirty = Some(dirty.map_or(rect, |current| union_rect(current, rect)));
-    }
     let child_count = b.children.len();
     for i in 0..child_count {
         tick_frame_animations(b.children[i].as_mut(), dt, pass_focus, dirty, finished);
