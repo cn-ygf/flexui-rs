@@ -21,6 +21,9 @@ pub struct ScrollView {
     base: Base,
     scroll: ScrollState,
     scrollbar: ScrollBarStyle,
+    /// 粘底：开启后每次布局都把纵向偏移贴到底部（聊天等追加式列表）。
+    /// 用户手动上滚会取消，滚回底部会重新开启。
+    stick_bottom: bool,
 }
 
 impl ScrollView {
@@ -29,7 +32,13 @@ impl ScrollView {
             base: Base::new_kind(WidgetRole::Plain, WidgetKind::ScrollView),
             scroll: ScrollState::new(ScrollAxes::vertical()),
             scrollbar: ScrollBarStyle::default(),
+            stick_bottom: false,
         }
+    }
+
+    /// 是否已贴到底部（容 1px 误差）。
+    fn at_bottom(&self) -> bool {
+        self.scroll.offset().y >= self.scroll.max().y - 1.0
     }
     pub fn spacing(mut self, s: f32) -> Self {
         self.base.spacing = s;
@@ -161,6 +170,11 @@ impl Widget for ScrollView {
         // 更新滚动度量并夹取偏移（内容高 total、视口 = 子内容视口）。
         self.scroll
             .set_metrics(Size::new(content.size.width, total), content.size);
+        // 粘底：内容变化（含图片异步撑高）后仍把偏移贴到底部。
+        if self.stick_bottom {
+            let max = self.scroll.max();
+            self.scroll.set_offset(max.x, max.y);
+        }
         // 从 content.top - offset.y 起纵向摆放（超出部分由绘制裁剪）。
         let spacing = self.base.spacing;
         let mut y = content.top() - self.scroll.offset().y;
@@ -191,7 +205,19 @@ impl Widget for ScrollView {
         if changed {
             self.shift_children(before);
         }
+        // 手动滚动后按是否停在底部同步粘底开关：上滚离开底部则取消，滚回底部则重新粘底。
+        self.stick_bottom = self.at_bottom();
         changed
+    }
+    fn scroll_to_end(&mut self) -> bool {
+        self.stick_bottom = true;
+        // 立即按当前度量贴到底部（布局已就绪时无需等下一帧）。
+        let before = self.scroll.offset();
+        let max = self.scroll.max();
+        if self.scroll.set_offset(max.x, max.y) {
+            self.shift_children(before);
+        }
+        true
     }
     fn scroll_offset(&self) -> Option<Point> {
         Some(self.scroll.offset())
@@ -207,6 +233,8 @@ impl Widget for ScrollView {
         if changed {
             self.shift_children(before);
         }
+        // 拖动滚动条同样同步粘底开关。
+        self.stick_bottom = self.at_bottom();
         changed
     }
     fn scrollbar_contains(&self, pos: Point) -> bool {

@@ -23,6 +23,12 @@ impl HBox {
         self.base.spacing = s;
         self
     }
+    /// 设置初始选中态（参与样式解析的 selected 维度）。
+    /// 用于可点击富行等：切换选中只需 `ctx.set_selected(name, bool)`，无需重建。
+    pub fn selected(mut self, on: bool) -> Self {
+        self.base.selected = on;
+        self
+    }
     pub fn push(mut self, child: impl Widget + 'static) -> Self {
         self.base.children.push(Box::new(child));
         self

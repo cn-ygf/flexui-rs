@@ -515,6 +515,12 @@ pub trait Widget {
     fn scroll_offset(&self) -> Option<flexui_gfx::Point> {
         None
     }
+    /// 开启「粘底」：此后每次布局都把纵向偏移贴到底部，直到用户手动上滚。
+    /// 适合聊天等追加式列表——新增内容（含图片异步撑高）后仍保持在最底。
+    /// 返回该控件是否支持粘底。
+    fn scroll_to_end(&mut self) -> bool {
+        false
+    }
     /// 命中滚动条滑块则返回抓取信息（供分发器发起拖动）。默认无滚动条。
     fn scrollbar_grab(&self, _pos: flexui_gfx::Point) -> Option<crate::scroll::ScrollGrab> {
         None
