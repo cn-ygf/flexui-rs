@@ -3316,7 +3316,8 @@ mod tests {
             },
         );
 
-        assert_eq!(disp.take_dirty(), Some(Rect::new(0.0, 0.0, 208.0, 46.0)));
+        // 按钮固定宽 100 优先于父 Stretch（不再拉伸到 200）；脏区 = 100 + 阴影 dx8 = 108。
+        assert_eq!(disp.take_dirty(), Some(Rect::new(0.0, 0.0, 108.0, 46.0)));
     }
 
     #[test]
