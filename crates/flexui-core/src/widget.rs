@@ -148,6 +148,8 @@ pub enum WidgetProperty {
     Placeholder(String),
     PlaceholderStyle(PlaceholderStyleSet),
     Multiline(bool),
+    /// Label 自动换行的最大宽度（像素）；None 表示单行不换行。
+    WrapWidth(Option<f32>),
     ReadOnly(bool),
     NumberOnly(bool),
     Password(bool),

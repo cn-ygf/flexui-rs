@@ -748,6 +748,9 @@ fn apply_attrs(
             "maxchar" | "max-chars" | "max-length" => {
                 node.apply_property(WidgetProperty::MaxChars(v.parse().ok()));
             }
+            "wrap-width" | "wrapwidth" | "wrap" => {
+                node.apply_property(WidgetProperty::WrapWidth(v.trim().parse().ok()));
+            }
             "autoselall" | "auto-select-all" | "select-all-on-focus" => {
                 node.apply_property(WidgetProperty::AutoSelectAll(parse_bool(v)));
             }
