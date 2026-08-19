@@ -1898,8 +1898,9 @@ pub fn point_wants_text_cursor(root: &dyn Widget, p: Point) -> bool {
     fn check(node: &dyn Widget, id: WidgetId, p: Point) -> Option<bool> {
         let b = node.base();
         if b.id == id {
-            // 文本框但落在其滚动条上 → 用箭头（返回 false）。
-            return Some(b.role == WidgetRole::Edit && b.enabled && !node.scrollbar_contains(p));
+            // 文本框或可选中文本（如可选中的 Label）显示 I 型光标；落在滚动条上 → 箭头。
+            let text_like = b.role == WidgetRole::Edit || b.selectable;
+            return Some(text_like && b.enabled && !node.scrollbar_contains(p));
         }
         b.children.iter().find_map(|c| check(c.as_ref(), id, p))
     }
