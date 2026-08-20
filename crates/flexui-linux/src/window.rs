@@ -606,30 +606,45 @@ fn render(conn: &RustConnection, st: &mut WinState) {
 }
 
 /// 把 ImageSurface 的像素 PutImage 到窗口。
+///
+/// 单次 PutImage 受 X 最大请求长度限制，整窗缓冲很容易超限，故按水平条带分块上传。
+/// cairo ARGB32 与 X TrueColor 24/32 位小端(BGRA)内存序一致，可直接上传。
 fn present(conn: &RustConnection, st: &WinState, surface: &ImageSurface, pw: i32, ph: i32) {
     let mut surface = surface.clone();
     surface.flush();
     let stride = surface.stride();
+    if stride != pw * 4 {
+        return;
+    }
     let Ok(data) = surface.data() else {
         return;
     };
-    // cairo ARGB32 stride == pw*4；直接整块上传（ZPixmap，深度取窗口深度）。
-    // X TrueColor 32/24 小端为 BGRA，与 cairo ARGB32 内存序一致。
-    if stride == pw * 4 {
+
+    // 每次请求可带的字节数（留出 PutImage 头部余量）。
+    let max_req = conn.setup().maximum_request_length as usize * 4;
+    let budget = max_req.saturating_sub(64).max(stride as usize);
+    let rows_per_chunk = (budget / stride as usize).max(1) as i32;
+
+    let mut y = 0i32;
+    while y < ph {
+        let rows = rows_per_chunk.min(ph - y);
+        let start = (y * stride) as usize;
+        let end = ((y + rows) * stride) as usize;
         let _ = conn.put_image(
             ImageFormat::Z_PIXMAP,
             st.xid,
             st.gc,
             pw as u16,
-            ph as u16,
+            rows as u16,
             0,
-            0,
+            y as i16,
             0,
             st.depth,
-            &data[..],
+            &data[start..end],
         );
-        let _ = conn.flush();
+        y += rows;
     }
+    let _ = conn.flush();
 }
 
 /// 设置应用图标（X11 用 _NET_WM_ICON，后续实现）。

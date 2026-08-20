@@ -54,12 +54,16 @@ pub fn application_localizer() -> Option<Localizer> {
 use flexui_macos::run_multi as backend_run_multi;
 #[cfg(target_os = "windows")]
 use flexui_windows::run_multi as backend_run_multi;
+#[cfg(target_os = "linux")]
+use flexui_linux::run_multi as backend_run_multi;
 
 /// 设置应用图标。macOS 用于 Dock/应用切换器；Windows 的 EXE 图标由构建资源提供。
 pub fn set_application_icon(bytes: &[u8]) {
     #[cfg(target_os = "macos")]
     flexui_macos::set_application_icon(bytes);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    flexui_linux::set_application_icon(bytes);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let _ = bytes;
 }
 
@@ -328,7 +332,7 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
 }
 
 /// 启动多个窗口，共享同一个平台事件循环。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub fn run_multi(windows: Vec<NewWindow>) {
     backend_run_multi(windows);
 }
@@ -350,7 +354,7 @@ impl<W: WindowImpl> Window<W> {
     }
 
     /// 启动：加载皮肤 → 建窗 → 初始化生命周期 → 进主事件循环（阻塞）。
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     pub fn run(self) {
         let spec = match build_window(self.imp) {
             Ok(spec) => spec,

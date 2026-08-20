@@ -395,6 +395,7 @@ version = "0.0.1"
 dependencies = [
  "flexui-core",
  "flexui-i18n",
+ "flexui-linux",
  "flexui-macos",
  "flexui-resource",
  "flexui-windows",
