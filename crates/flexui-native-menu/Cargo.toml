@@ -6,5 +6,9 @@ edition = "2021"
 [dependencies]
 flexui-core = { workspace = true }
 flexui-svg = { workspace = true }
-muda = { workspace = true }
 image = { workspace = true }
+
+# muda 在 Linux 上需要 GTK 且此适配层仅服务 macOS/Windows 原生菜单，
+# 故仅在非 Linux 目标引入；Linux 后端用自绘的 Cairo 菜单，无需本 crate。
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+muda = { workspace = true }

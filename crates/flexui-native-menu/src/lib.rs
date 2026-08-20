@@ -1,4 +1,8 @@
 //! FlexUI 原生菜单模型到 AppKit/Win32 菜单对象的内部适配层。
+//!
+//! 基于 muda，仅服务 macOS/Windows；Linux 后端用自绘 Cairo 菜单，本 crate 在
+//! Linux 上编译为空壳（不引入 muda/GTK），以便 `cargo build --workspace` 通过。
+#![cfg(not(target_os = "linux"))]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

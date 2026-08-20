@@ -8,11 +8,14 @@ flexui-gfx = { workspace = true }
 flexui-core = { workspace = true }
 flexui-svg = { workspace = true }
 flexui-native-menu = { workspace = true }
+
+# objc2 生态是 macOS 系统 API 的 Rust 绑定，仅在为 macOS 目标编译时引入；
+# 非 macOS 平台本 crate 编译为空（配合 lib.rs 的 #![cfg(target_os = "macos")]），
+# 因此 `cargo build --workspace` 在 Linux/Windows 上不会拉入 objc2。
+[target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 objc2-app-kit = { workspace = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 core-graphics = "0.24"
 core-text = "21"

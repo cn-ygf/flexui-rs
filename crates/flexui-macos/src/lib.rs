@@ -2,6 +2,10 @@
 //!
 //! AppKit（NSApplication/NSWindow）+ 自定义 NSView 承载 flexui 控件树。
 //! `run` 由上层 Window 驱动调用，传入控件树、分发器与窗口委托。
+//!
+//! 仅在 macOS 目标下编译；其它平台为空壳（不引入 objc2/CoreGraphics），
+//! 以便 `cargo build --workspace` 在 Linux/Windows 上通过。
+#![cfg(target_os = "macos")]
 
 mod canvas;
 mod clipboard;
