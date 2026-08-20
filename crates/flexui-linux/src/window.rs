@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use cairo::{Format, ImageSurface};
 use flexui_core::{
-    layout_node, paint_tree_in_rect, Dispatcher, Event, MouseButton, NewWindow, Node, Point, Rect,
-    Size, WindowCtx, WindowDelegate, WindowEvent, WindowHandle,
+    layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton, NewWindow, Node,
+    OverlayRequest, Point, Rect, Size, WindowCtx, WindowDelegate, WindowEvent, WindowHandle,
 };
 use flexui_core::event::Mods;
 
@@ -139,6 +139,25 @@ fn intern(conn: &RustConnection, name: &[u8]) -> Option<u32> {
     conn.intern_atom(false, name).ok()?.reply().ok().map(|r| r.atom)
 }
 
+/// 把 WindowCtx 收集的浮层请求交给分发器打开（下拉/上下文菜单等）。
+fn open_overlay_request(disp: &mut Dispatcher, request: OverlayRequest) {
+    if let Some(entries) = request.entries {
+        disp.open_styled_menu_entries(
+            request.anchor,
+            entries,
+            request.style.unwrap_or_default(),
+            request.selected_name,
+        );
+    } else {
+        disp.open_styled_menu(
+            request.anchor,
+            request.items,
+            request.style,
+            request.selected_name,
+        );
+    }
+}
+
 /// 启动应用（多窗口）：建窗口、进共享事件循环。
 pub fn run_multi(windows: Vec<NewWindow>) {
     let (conn, screen_num) = x11rb::connect(None).expect("连接 X server 失败（需 DISPLAY）");
@@ -253,8 +272,18 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
     st.delegate.on_before_init(&mut ctx);
     st.delegate.on_init(&mut ctx);
     st.delegate.on_initialized(&mut ctx);
+    let overlay_reqs = ctx.take_overlay_requests();
+    let anim_reqs = ctx.take_anim_requests();
     let inval = ctx.take_invalidation();
+    drop(ctx);
     st.disp.invalidate(inval);
+    for req in overlay_reqs {
+        open_overlay_request(&mut st.disp, req);
+    }
+    for a in anim_reqs {
+        st.disp
+            .animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+    }
     let _ = st.disp.take_redraw();
     st.layout_dirty |= st.disp.take_layout();
 }
@@ -582,8 +611,7 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
     let contexts = st.disp.take_context_clicks();
     let control_events = st.disp.take_control_events();
 
-    let mut close_requested = false;
-    if !acts.is_empty()
+    let (close_requested, inval, overlay_reqs, anim_reqs) = if !acts.is_empty()
         || !doubles.is_empty()
         || !contexts.is_empty()
         || !control_events.is_empty()
@@ -619,19 +647,31 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
                 _ => {}
             }
         }
-        let inval = ctx.take_invalidation();
-        close_requested = handle.close_requested;
-        st.disp.invalidate(inval);
+        let o = ctx.take_overlay_requests();
+        let a = ctx.take_anim_requests();
+        let i = ctx.take_invalidation();
+        (handle.close_requested, i, o, a)
+    } else {
+        (false, Invalidation::None, Vec::new(), Vec::new())
+    };
+    st.disp.invalidate(inval);
+    if close_requested {
+        close_window(conn, st);
+        return;
+    }
+    // 委托里请求的浮层菜单 / 属性动画 → 交分发器。
+    for req in overlay_reqs {
+        open_overlay_request(&mut st.disp, req);
+    }
+    for a in anim_reqs {
+        st.disp
+            .animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
     }
 
     st.layout_dirty |= st.disp.take_layout();
     let need = st.disp.take_redraw();
     let dirty = st.disp.take_dirty();
-    if close_requested {
-        close_window(conn, st);
-        return;
-    }
-    // 整窗重绘：脏区(如滚动/hover)、需重绘、或需重排都触发。
+    // 整窗重绘：脏区(如滚动/hover/浮层)、需重绘、或需重排都触发。
     if need || st.layout_dirty || dirty.is_some() {
         render(conn, st);
     }
@@ -645,29 +685,40 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
     let tasks = st.disp.drain_ui_tasks();
     let control_events = st.disp.take_control_events();
     if !msgs.is_empty() || !tasks.is_empty() || !control_events.is_empty() {
-        let mut handle = LinuxWindowHandle::new(conn, st.xid);
-        let localizer = st.localizer.clone();
-        let mut ctx = WindowCtx::with_proxy_and_localizer(
-            st.root.as_mut(),
-            &mut handle,
-            st.disp.proxy(),
-            localizer,
-        );
-        for task in tasks {
-            task(&mut ctx);
-        }
-        for m in &msgs {
-            st.delegate.on_message(m, &mut ctx);
-        }
-        for (name, event) in &control_events {
-            st.delegate.on_control_event(name, event, &mut ctx);
-        }
-        let inval = ctx.take_invalidation();
-        let close_requested = handle.close_requested;
+        let (close_requested, inval, overlay_reqs, anim_reqs) = {
+            let mut handle = LinuxWindowHandle::new(conn, st.xid);
+            let localizer = st.localizer.clone();
+            let mut ctx = WindowCtx::with_proxy_and_localizer(
+                st.root.as_mut(),
+                &mut handle,
+                st.disp.proxy(),
+                localizer,
+            );
+            for task in tasks {
+                task(&mut ctx);
+            }
+            for m in &msgs {
+                st.delegate.on_message(m, &mut ctx);
+            }
+            for (name, event) in &control_events {
+                st.delegate.on_control_event(name, event, &mut ctx);
+            }
+            let o = ctx.take_overlay_requests();
+            let a = ctx.take_anim_requests();
+            let i = ctx.take_invalidation();
+            (handle.close_requested, i, o, a)
+        };
         st.disp.invalidate(inval);
         if close_requested {
             close_window(conn, st);
             return;
+        }
+        for req in overlay_reqs {
+            open_overlay_request(&mut st.disp, req);
+        }
+        for a in anim_reqs {
+            st.disp
+                .animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
         }
     }
     st.layout_dirty |= st.disp.take_layout();
