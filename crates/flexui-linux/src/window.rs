@@ -16,8 +16,8 @@ use flexui_core::event::Mods;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    AtomEnum, ConnectionExt as _, CreateGCAux, CreateWindowAux, EventMask, ImageFormat, KeyButMask,
-    PropMode, Window, WindowClass,
+    AtomEnum, ClientMessageEvent, ConnectionExt as _, CreateGCAux, CreateWindowAux, EventMask,
+    ImageFormat, KeyButMask, PropMode, Window, WindowClass,
 };
 use x11rb::protocol::Event as XEvent;
 use x11rb::rust_connection::RustConnection;
@@ -84,15 +84,59 @@ impl WindowHandle for LinuxWindowHandle<'_> {
         self.close_requested = true;
     }
     fn minimize(&mut self) {
-        // X11 最小化 = 发 WM_CHANGE_STATE(IconicState)。简化：暂用 unmap。
-        let _ = self.conn.unmap_window(self.xid);
-        let _ = self.conn.flush();
+        // EWMH/ICCCM：发 WM_CHANGE_STATE(IconicState=3) 给根窗口。
+        let Some(root) = self.conn.setup().roots.first().map(|s| s.root) else {
+            return;
+        };
+        if let Some(atom) = intern(self.conn, b"WM_CHANGE_STATE") {
+            let ev = ClientMessageEvent::new(32, self.xid, atom, [3u32, 0, 0, 0, 0]);
+            let _ = self.conn.send_event(
+                false,
+                root,
+                EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
+                ev,
+            );
+            let _ = self.conn.flush();
+        }
     }
-    fn maximize(&mut self) {}
+    fn maximize(&mut self) {
+        self.set_maximized(true);
+    }
     fn restore(&mut self) {
-        let _ = self.conn.map_window(self.xid);
+        let _ = self.conn.map_window(self.xid); // 取消最小化
+        self.set_maximized(false); // 取消最大化
         let _ = self.conn.flush();
     }
+}
+
+impl LinuxWindowHandle<'_> {
+    /// 通过 _NET_WM_STATE 增/删最大化状态。
+    fn set_maximized(&self, add: bool) {
+        let Some(root) = self.conn.setup().roots.first().map(|s| s.root) else {
+            return;
+        };
+        let (Some(state), Some(vert), Some(horz)) = (
+            intern(self.conn, b"_NET_WM_STATE"),
+            intern(self.conn, b"_NET_WM_STATE_MAXIMIZED_VERT"),
+            intern(self.conn, b"_NET_WM_STATE_MAXIMIZED_HORZ"),
+        ) else {
+            return;
+        };
+        let action = if add { 1u32 } else { 0 }; // _NET_WM_STATE_ADD / REMOVE
+        let ev = ClientMessageEvent::new(32, self.xid, state, [action, vert, horz, 1, 0]);
+        let _ = self.conn.send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
+            ev,
+        );
+        let _ = self.conn.flush();
+    }
+}
+
+/// 取原子（intern_atom 同步）。
+fn intern(conn: &RustConnection, name: &[u8]) -> Option<u32> {
+    conn.intern_atom(false, name).ok()?.reply().ok().map(|r| r.atom)
 }
 
 /// 启动应用（多窗口）：建窗口、进共享事件循环。

@@ -129,7 +129,11 @@ pub mod dialog {
         {
             flexui_windows::show_dialog(kind, opts)
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        {
+            flexui_linux::show_dialog(kind, opts)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             None
         }

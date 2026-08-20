@@ -5,8 +5,10 @@
 
 mod canvas;
 mod clipboard;
+mod dialog;
 mod window;
 
 pub use canvas::CairoCanvas;
 pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_text};
+pub use dialog::show_dialog;
 pub use window::{run_multi, set_application_icon};
