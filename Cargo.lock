@@ -459,6 +459,7 @@ name = "flexui-ffi"
 version = "0.0.1"
 dependencies = [
  "flexui-core",
+ "flexui-linux",
  "flexui-macos",
  "flexui-windows",
  "flexui-xml",

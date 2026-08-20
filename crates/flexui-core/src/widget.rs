@@ -123,6 +123,10 @@ pub enum WidgetPropertyKey {
 }
 
 /// XML/构建器及运行时写入控件专属配置的类型安全入口。
+///
+/// 各变体大小差异较大，但本枚举总是「构造后立即被 `set_property` 消费」的一次性载体，
+/// 不会成批存入集合，故不必为最大变体装箱（装箱只会给每个构造点添麻烦）。
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum WidgetProperty {
     Text(String),

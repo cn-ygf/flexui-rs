@@ -502,8 +502,8 @@ impl Canvas for CairoCanvas {
                 self.blit_sub(&surface, (0.0, 0.0, sw, sh), rect, tint);
             }
             ImageFit::Center => {
-                let x = rect.left() as f32 + (rect.size.width - lw as f32) / 2.0;
-                let y = rect.top() as f32 + (rect.size.height - lh as f32) / 2.0;
+                let x = rect.left() + (rect.size.width - lw as f32) / 2.0;
+                let y = rect.top() + (rect.size.height - lh as f32) / 2.0;
                 self.blit_sub(&surface, (0.0, 0.0, sw, sh), Rect::new(x, y, lw as f32, lh as f32), tint);
             }
             ImageFit::Tile => {

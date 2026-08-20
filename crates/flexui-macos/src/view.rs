@@ -198,11 +198,14 @@ pub struct AppState {
     pub closed: bool,
 }
 
+/// 延后执行的原生回调：在释放 AppState 借用后再回调窗口委托，避免重入。
+type DeferredNativeCallback = Box<dyn FnOnce(&FlexView)>;
+
 pub struct FlexViewIvars {
     state: RefCell<AppState>,
     /// AppKit 会在 hide/show/minimize 等原生调用中同步回调窗口委托；此队列用于避开
     /// 业务回调持有 AppState 可变借用时的重入。
-    deferred_native_callbacks: RefCell<Vec<Box<dyn FnOnce(&FlexView)>>>,
+    deferred_native_callbacks: RefCell<Vec<DeferredNativeCallback>>,
 }
 
 define_class!(

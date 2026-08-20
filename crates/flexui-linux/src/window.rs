@@ -11,7 +11,8 @@ use cairo::{Format, ImageSurface};
 use flexui_core::{
     hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton,
     NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect, Size,
-    TitlebarMode, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent, WindowHandle,
+    TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
+    WindowHandle, WindowPresentation,
 };
 use flexui_core::event::Mods;
 
@@ -324,6 +325,19 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
     }
 }
 
+/// 启动应用（单窗口）。由 facade 的 `Window` 或 C ABI（flexui-ffi）驱动调用。
+pub fn run(config: WindowConfig, root: Node, disp: Dispatcher, delegate: Box<dyn WindowDelegate>) {
+    run_multi(vec![NewWindow {
+        config,
+        root,
+        disp,
+        delegate,
+        presentation: WindowPresentation::Normal,
+        localizer: None,
+        locale_revision: 0,
+    }]);
+}
+
 /// 启动应用（多窗口）：建窗口、进共享事件循环。
 pub fn run_multi(windows: Vec<NewWindow>) {
     let (conn, screen_num) = x11rb::connect(None).expect("连接 X server 失败（需 DISPLAY）");
@@ -614,7 +628,7 @@ fn mods_from_state(state: KeyButMask) -> Mods {
 fn detect_scale(conn: &RustConnection, root: Window) -> f32 {
     if let Ok(v) = std::env::var("GDK_SCALE") {
         if let Ok(n) = v.trim().parse::<f32>() {
-            if n >= 1.0 && n <= 8.0 {
+            if (1.0..=8.0).contains(&n) {
                 return n;
             }
         }

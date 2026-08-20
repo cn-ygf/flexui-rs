@@ -290,83 +290,79 @@ impl<'a> EventCtx<'a> {
             Property::Text(text) => {
                 let found = self.get(name, |_| ()).is_some();
                 self.set_text(name, text);
-                return found;
+                found
             }
             Property::Tooltip(value) => {
-                return self.set_base_property(name, false, move |base| base.tooltip = value)
+                self.set_base_property(name, false, move |base| base.tooltip = value)
             }
             Property::Font(value) => {
-                return self.set_base_property(name, true, move |base| base.font = value)
+                self.set_base_property(name, true, move |base| base.font = value)
             }
             Property::Style(value) => {
-                return self.set_base_property(name, false, move |base| base.style = value)
+                self.set_base_property(name, false, move |base| base.style = value)
             }
-            Property::Variant(value) => {
-                return self.set_base_property(name, false, move |base| {
-                    base.variant = value;
-                    crate::theme::refresh_theme_base(base);
-                })
-            }
-            Property::Classes(value) => {
-                return self.set_base_property(name, false, move |base| {
-                    base.classes = value;
-                    crate::theme::refresh_theme_base(base);
-                })
-            }
+            Property::Variant(value) => self.set_base_property(name, false, move |base| {
+                base.variant = value;
+                crate::theme::refresh_theme_base(base);
+            }),
+            Property::Classes(value) => self.set_base_property(name, false, move |base| {
+                base.classes = value;
+                crate::theme::refresh_theme_base(base);
+            }),
             Property::Width(value) => {
-                return self.set_base_property(name, true, move |base| base.width = value)
+                self.set_base_property(name, true, move |base| base.width = value)
             }
             Property::Height(value) => {
-                return self.set_base_property(name, true, move |base| base.height = value)
+                self.set_base_property(name, true, move |base| base.height = value)
             }
             Property::Padding(value) => {
-                return self.set_base_property(name, true, move |base| base.padding = value)
+                self.set_base_property(name, true, move |base| base.padding = value)
             }
             Property::Margin(value) => {
-                return self.set_base_property(name, true, move |base| base.margin = value)
+                self.set_base_property(name, true, move |base| base.margin = value)
             }
             Property::Spacing(value) => {
-                return self.set_base_property(name, true, move |base| base.spacing = value)
+                self.set_base_property(name, true, move |base| base.spacing = value)
             }
             Property::Flex(value) => {
-                return self.set_base_property(name, true, move |base| base.flex_grow = value)
+                self.set_base_property(name, true, move |base| base.flex_grow = value)
             }
             Property::Position(value) => {
-                return self.set_base_property(name, true, move |base| base.pos = value)
+                self.set_base_property(name, true, move |base| base.pos = value)
             }
             Property::Justify(value) => {
-                return self.set_base_property(name, true, move |base| base.justify = value)
+                self.set_base_property(name, true, move |base| base.justify = value)
             }
             Property::Align(value) => {
-                return self.set_base_property(name, true, move |base| base.align = value)
+                self.set_base_property(name, true, move |base| base.align = value)
             }
             Property::Enabled(value) => {
                 let found = self.get(name, |_| ()).is_some();
                 self.set_enabled(name, value);
-                return found;
+                found
             }
             Property::Visible(value) => {
                 let found = self.get(name, |_| ()).is_some();
                 self.set_visible(name, value);
-                return found;
+                found
             }
             Property::Focusable(value) => {
-                return self.set_base_property(name, false, move |base| base.focusable = value)
+                self.set_base_property(name, false, move |base| base.focusable = value)
             }
             Property::FocusWithin(value) => {
-                return self.set_base_property(name, false, move |base| base.focus_within = value)
+                self.set_base_property(name, false, move |base| base.focus_within = value)
             }
             Property::HitPolicy(value) => {
-                return self.set_base_property(name, false, move |base| base.hit = value)
+                self.set_base_property(name, false, move |base| base.hit = value)
             }
-            Property::Selected(selected) => return self.set_selected(name, selected),
+            Property::Selected(selected) => self.set_selected(name, selected),
             property => {
                 let mut applied = false;
                 self.mutate(name, |w| applied = w.apply_property(property));
                 if applied {
                     self.invalidate(Invalidation::Layout);
                 }
-                return applied;
+                applied
             }
         }
     }

@@ -12,20 +12,15 @@ use crate::anim::AnimProp;
 use crate::style::StyleSpec;
 
 /// 滚动条可见性模式（对齐大厂控件的 auto/always/hidden）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollBarVisibility {
     /// 内容超出视口才显示（默认）。
+    #[default]
     Auto,
     /// 始终显示（内容不足时滑块占满轨道、不可拖）。
     Always,
     /// 从不显示（仍可滚轮 / 程序滚动）。
     Hidden,
-}
-
-impl Default for ScrollBarVisibility {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// 允许滚动的轴。

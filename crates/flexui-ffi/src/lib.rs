@@ -13,14 +13,16 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use flexui_core::{visit_all_mut, MainProxy, WidgetRole, WindowCtx, WindowDelegate, WindowEvent};
 use flexui_xml::{load_str, Context};
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use flexui_core::dialog::{DialogKind, FileDialog};
 
-// 按平台选择后端（编译期二选一）。
+// 按平台选择后端（编译期三选一）。
 #[cfg(target_os = "macos")]
 use flexui_macos as backend;
 #[cfg(target_os = "windows")]
 use flexui_windows as backend;
+#[cfg(target_os = "linux")]
+use flexui_linux as backend;
 
 /// 库版本（主*10000 + 次*100 + 补丁）。
 #[no_mangle]
@@ -356,7 +358,7 @@ impl WindowDelegate for CDelegate {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn run_with_delegate(
     title: *const c_char,
     width: c_int,
@@ -387,7 +389,7 @@ fn run_with_delegate(
 
 /// 用 XML + C 委托启动应用（阻塞）。delegate 为 NULL 时等价于 flex_run_xml。
 /// 0 成功，负数错误码（-1 参数错、-2 XML 失败、-3 panic、-100 无后端）。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_run(
     title: *const c_char,
@@ -414,7 +416,7 @@ pub extern "C" fn flex_run(
 // —— 系统剪贴板 ——
 
 /// 读系统剪贴板文本到 out（含 NUL）；返回长度，空/出错返回 -1。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_clipboard_get_text(out: *mut c_char, out_len: c_int) -> c_int {
     catch_unwind(AssertUnwindSafe(|| match backend::clipboard_get_text() {
@@ -425,7 +427,7 @@ pub extern "C" fn flex_clipboard_get_text(out: *mut c_char, out_len: c_int) -> c
 }
 
 /// 写系统剪贴板文本。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_clipboard_set_text(text: *const c_char) {
     let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
@@ -447,7 +449,7 @@ pub struct FlexFileDialog {
     pub filter_exts: *const c_char,
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn build_fd(opts: *const FlexFileDialog) -> FileDialog {
     let mut fd = FileDialog::new();
     if opts.is_null() {
@@ -478,7 +480,7 @@ fn build_fd(opts: *const FlexFileDialog) -> FileDialog {
     fd
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn dialog_out(
     kind: DialogKind,
     opts: *const FlexFileDialog,
@@ -496,7 +498,7 @@ fn dialog_out(
 }
 
 /// 打开文件对话框，路径写入 out；返回长度，取消/出错 -1。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_dialog_open_file(
     opts: *const FlexFileDialog,
@@ -507,7 +509,7 @@ pub extern "C" fn flex_dialog_open_file(
 }
 
 /// 打开目录对话框。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_dialog_open_directory(
     opts: *const FlexFileDialog,
@@ -518,7 +520,7 @@ pub extern "C" fn flex_dialog_open_directory(
 }
 
 /// 保存文件对话框。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_dialog_save_file(
     opts: *const FlexFileDialog,
@@ -529,7 +531,7 @@ pub extern "C" fn flex_dialog_save_file(
 }
 
 /// 保存到目录对话框。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_dialog_save_directory(
     opts: *const FlexFileDialog,
@@ -542,7 +544,7 @@ pub extern "C" fn flex_dialog_save_directory(
 /// 用 XML 描述启动应用并进入主事件循环（阻塞）。0 成功，负数见错误码。
 ///
 /// 会为所有「有 name 的按钮」自动挂接点击回调（转发到 flex_set_click_callback 注册的函数）。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[no_mangle]
 pub extern "C" fn flex_run_xml(
     title: *const c_char,
@@ -589,7 +591,7 @@ pub extern "C" fn flex_run_xml(
 }
 
 /// 无可用后端平台的占位。
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 #[no_mangle]
 pub extern "C" fn flex_run_xml(
     _title: *const c_char,

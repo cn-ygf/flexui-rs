@@ -16,3 +16,6 @@ flexui-macos = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 flexui-windows = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+flexui-linux = { workspace = true }

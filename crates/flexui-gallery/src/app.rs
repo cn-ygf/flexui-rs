@@ -6,18 +6,10 @@ use flexui::{
 
 use crate::{http_demo, resources, themes, virtual_list_demo};
 
+#[derive(Default)]
 pub(crate) struct GalleryWindow {
     ui: Option<MainProxy>,
     virtual_list: virtual_list_demo::VirtualListDemo,
-}
-
-impl Default for GalleryWindow {
-    fn default() -> Self {
-        Self {
-            ui: None,
-            virtual_list: virtual_list_demo::VirtualListDemo::default(),
-        }
-    }
 }
 
 impl WindowImpl for GalleryWindow {

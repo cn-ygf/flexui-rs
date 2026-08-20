@@ -150,7 +150,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0; 1024];
-            stream.read(&mut request).unwrap();
+            let _ = stream.read(&mut request).unwrap();
             let body = vec![b'x'; MAX_RESPONSE_BYTES + 1];
             write!(
                 stream,
