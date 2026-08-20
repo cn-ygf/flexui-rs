@@ -4,26 +4,20 @@ version = "0.0.1"
 edition = "2021"
 
 # Linux 后端：用系统图形接口，不打包渲染器。
-#   2D 绘图 = Cairo，文字排版/绘制 = Pango（与 macOS 的 CoreGraphics/CoreText、
-#   Windows 的 GDI+/DirectWrite 对应）。cairo-rs / pango / pangocairo 只是系统库的
-#   Rust 绑定，等价于 mac 的 objc2、win 的 windows-sys。
-#   窗口/呈现（阶段2）= X11 (xcb)：把 cairo ImageSurface 的像素 blit 到窗口。
-#
-# 宿主(macOS)装了 cairo/pango 即可本地编译 + 跑渲染单测（C 库 API 与 Linux 一致）。
+#   2D=Cairo、文字=Pango、窗口=X11(x11rb)、剪贴板=arboard、图片=image/flexui-svg。
+#   这些系统/重依赖仅在 target=linux 时引入；crate 代码也 cfg(linux) 门控，
+#   因此 mac/win 上本 crate 编译为空壳，`--workspace` 无需 cairo/pango。
+#   本机(macOS)验证请在 Linux 目标/真机上跑。
 
 [dependencies]
 flexui-gfx = { workspace = true }
 flexui-core = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 flexui-svg = { workspace = true }
 image = { workspace = true }
-
 cairo-rs = "0.20"
 pango = "0.20"
 pangocairo = "0.20"
-
-# X11 窗口：x11rb 是纯 Rust 的 X11 协议实现（直接走协议，无需链接 libxcb），
-# 等价于 mac 直接用 NSWindow、win 直接用 HWND——原生窗口系统，非跨平台封装。
 x11rb = "0.13"
-
-# 系统剪贴板（X11 selection / Wayland data-control）。薄封装，非渲染框架。
 arboard = { version = "3", default-features = false }

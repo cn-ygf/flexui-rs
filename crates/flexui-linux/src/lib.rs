@@ -2,6 +2,9 @@
 //!
 //! 分层：`canvas` 用 Cairo/Pango 实现平台无关的 `flexui_gfx::Canvas`（渲染到内存
 //! ImageSurface）；`window` 用 X11 建窗口、跑事件循环，把像素 blit 到窗口。
+//!
+//! 整个 crate 仅在 Linux 目标下编译；mac/win 上为空壳（不引入 cairo/pango）。
+#![cfg(target_os = "linux")]
 
 mod canvas;
 mod clipboard;

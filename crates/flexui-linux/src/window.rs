@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use cairo::{Format, ImageSurface};
 use flexui_core::{
-    layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton, NativeMenu,
-    NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect, Size, WindowCtx,
-    WindowDelegate, WindowEvent, WindowHandle,
+    hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton,
+    NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect, Size,
+    TitlebarMode, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent, WindowHandle,
 };
 use flexui_core::event::Mods;
 
@@ -40,6 +40,8 @@ struct WinState {
     width: f32,
     height: f32,
     scale: f32,
+    /// 无边框窗口的可拖动区域（点此空白处拖动移窗）。
+    drag_region: WindowDragRegion,
     surface: Option<ImageSurface>,
     images: SharedImageCache,
     /// 回调里 open_window/open_modal 请求的新窗口，事件循环稍后建。
@@ -177,6 +179,9 @@ struct WinFactory {
     visual: u32,
     wm_protocols: u32,
     wm_delete: u32,
+    net_wm_name: u32,
+    utf8_string: u32,
+    motif_hints: u32,
     scale: f32,
 }
 
@@ -210,6 +215,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         &aux,
     );
     let _ = conn.create_gc(gc, xid, &CreateGCAux::new());
+    // 标题：WM_NAME(Latin-1 回退) + _NET_WM_NAME(UTF8_STRING，修中文乱码)。
     let _ = conn.change_property8(
         PropMode::REPLACE,
         xid,
@@ -217,6 +223,15 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         AtomEnum::STRING,
         spec.config.title.as_bytes(),
     );
+    if f.net_wm_name != 0 && f.utf8_string != 0 {
+        let _ = conn.change_property8(
+            PropMode::REPLACE,
+            xid,
+            f.net_wm_name,
+            f.utf8_string,
+            spec.config.title.as_bytes(),
+        );
+    }
     let _ = conn.change_property32(
         PropMode::REPLACE,
         xid,
@@ -224,6 +239,12 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         AtomEnum::ATOM,
         &[f.wm_delete],
     );
+    // 无边框：titlebar != System → 用 _MOTIF_WM_HINTS 去掉 WM 装饰（app 自绘标题栏）。
+    if spec.config.titlebar != TitlebarMode::System && f.motif_hints != 0 {
+        // [flags=MWM_HINTS_DECORATIONS(2), functions, decorations=0(无), input_mode, status]
+        let hints: [u32; 5] = [2, 0, 0, 0, 0];
+        let _ = conn.change_property32(PropMode::REPLACE, xid, f.motif_hints, f.motif_hints, &hints);
+    }
     let _ = conn.map_window(xid);
 
     WinState {
@@ -238,6 +259,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         width: spec.config.width,
         height: spec.config.height,
         scale: f.scale,
+        drag_region: spec.config.drag_region,
         surface: None,
         images: new_image_cache(),
         pending_windows: Vec::new(),
@@ -256,6 +278,9 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         visual: screen.root_visual,
         wm_protocols: intern(&conn, b"WM_PROTOCOLS").unwrap_or(0),
         wm_delete: intern(&conn, b"WM_DELETE_WINDOW").unwrap_or(0),
+        net_wm_name: intern(&conn, b"_NET_WM_NAME").unwrap_or(0),
+        utf8_string: intern(&conn, b"UTF8_STRING").unwrap_or(0),
+        motif_hints: intern(&conn, b"_MOTIF_WM_HINTS").unwrap_or(0),
         scale: detect_scale(&conn, x_root),
     };
 
@@ -424,6 +449,11 @@ fn handle_x_event(
             if let Some(st) = states.get_mut(&e.event) {
                 let pos = logical_pos(st, e.event_x, e.event_y);
                 let mods = mods_from_state(e.state);
+                // 无边框窗口：点在拖动区空白处(非控件、无浮层) → 交 WM 拖动移窗。
+                if e.detail == 1 && is_window_drag(st, pos) {
+                    initiate_move(conn, st.xid, e.root_x, e.root_y, e.detail);
+                    return;
+                }
                 let down = |button| Event::MouseDown { pos, button, mods };
                 match e.detail {
                     1 => dispatch(conn, st, down(MouseButton::Left)),
@@ -474,6 +504,40 @@ fn handle_x_event(
 /// 物理事件坐标 → 逻辑点。
 fn logical_pos(st: &WinState, x: i16, y: i16) -> Point {
     Point::new(x as f32 / st.scale, y as f32 / st.scale)
+}
+
+/// 该点是否应触发窗口拖动：在 drag_region 空白处、未命中控件、且无浮层。
+fn is_window_drag(st: &WinState, pos: Point) -> bool {
+    let WindowDragRegion::Rect(rect) = st.drag_region else {
+        return false;
+    };
+    rect.contains(pos) && !st.disp.has_overlays() && hit_test(st.root.as_ref(), pos).is_none()
+}
+
+/// 交给 WM 做窗口移动（_NET_WM_MOVERESIZE，方向=MOVE）。
+fn initiate_move(conn: &RustConnection, xid: Window, root_x: i16, root_y: i16, button: u8) {
+    let Some(root) = conn.setup().roots.first().map(|s| s.root) else {
+        return;
+    };
+    let Some(atom) = intern(conn, b"_NET_WM_MOVERESIZE") else {
+        return;
+    };
+    // WM 需要接管指针：先松开按下时的隐式抓取。
+    let _ = conn.ungrab_pointer(0u32);
+    // data: [root_x, root_y, direction(_MOVE=8), button, source(app=1)]
+    let ev = ClientMessageEvent::new(
+        32,
+        xid,
+        atom,
+        [root_x as u32, root_y as u32, 8, button as u32, 1],
+    );
+    let _ = conn.send_event(
+        false,
+        root,
+        EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
+        ev,
+    );
+    let _ = conn.flush();
 }
 
 /// X11 修饰键位 → 框架 Mods。
