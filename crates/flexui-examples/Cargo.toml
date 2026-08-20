@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 flexui = { path = "../flexui" }
 image = { workspace = true }
+
+# 系统托盘依赖 GTK（Linux 上 muda/tray-icon 需要），Linux 暂用 stub，不引入。
+[target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = { workspace = true }
 
 [build-dependencies]
