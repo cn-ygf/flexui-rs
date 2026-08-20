@@ -181,7 +181,7 @@ impl CairoCanvas {
             self.cr.mask_surface(surface, -sx0, -sy0).ok();
         } else {
             self.cr.set_source_surface(surface, -sx0, -sy0).ok();
-            self.cr.source().set_filter(Filter::Good);
+            self.cr.source().set_filter(Filter::Best);
             self.cr.paint().ok();
         }
         self.cr.restore().ok();
@@ -195,7 +195,7 @@ impl CairoCanvas {
         self.cr.scale(inv, inv);
         let pattern = SurfacePattern::create(surface);
         pattern.set_extend(cairo::Extend::Repeat);
-        pattern.set_filter(Filter::Good);
+        pattern.set_filter(Filter::Best);
         self.cr.set_source(&pattern).ok();
         self.cr.rectangle(
             0.0,
