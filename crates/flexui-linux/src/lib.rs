@@ -1,8 +1,10 @@
-//! flexui-linux：Linux 平台后端（系统图形接口 Cairo + Pango）。
+//! flexui-linux：Linux 平台后端（系统图形接口 Cairo + Pango，窗口用 X11/x11rb）。
 //!
 //! 分层：`canvas` 用 Cairo/Pango 实现平台无关的 `flexui_gfx::Canvas`（渲染到内存
-//! ImageSurface）；窗口/事件（后续）用 X11 直接把像素 blit 到窗口。
+//! ImageSurface）；`window` 用 X11 建窗口、跑事件循环，把像素 blit 到窗口。
 
 mod canvas;
+mod window;
 
 pub use canvas::CairoCanvas;
+pub use window::{run_multi, set_application_icon};
