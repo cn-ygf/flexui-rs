@@ -19,8 +19,9 @@ use flexui_core::event::Mods;
 use x11rb::connection::Connection;
 use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
 use x11rb::protocol::xproto::{
-    AtomEnum, ClientMessageEvent, ClipOrdering, ConnectionExt as _, CreateGCAux, CreateWindowAux,
-    EventMask, ImageFormat, KeyButMask, PropMode, Rectangle, Window, WindowClass,
+    AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ClipOrdering, ConnectionExt as _,
+    CreateGCAux, CreateWindowAux, Cursor, EventMask, ImageFormat, KeyButMask, PropMode, Rectangle,
+    Window, WindowClass,
 };
 use x11rb::protocol::Event as XEvent;
 use x11rb::rust_connection::RustConnection;
@@ -48,6 +49,10 @@ struct WinState {
     rounded: bool,
     surface: Option<ImageSurface>,
     images: SharedImageCache,
+    /// 预建光标句柄（从 factory 拷入）与当前是否为 I 型，避免每次移动都重设。
+    cursor_arrow: Cursor,
+    cursor_text: Cursor,
+    text_cursor_active: bool,
     /// 回调里 open_window/open_modal 请求的新窗口，事件循环稍后建。
     pending_windows: Vec<NewWindow>,
     open: bool,
@@ -157,6 +162,47 @@ fn intern(conn: &RustConnection, name: &[u8]) -> Option<u32> {
     conn.intern_atom(false, name).ok()?.reply().ok().map(|r| r.atom)
 }
 
+/// 用 X11 "cursor" 字体创建字形光标（如 XC_xterm=152 的 I 型、XC_left_ptr=68 箭头）。
+/// 失败返回 0（调用方按「不设置」处理）。
+fn create_font_cursor(conn: &RustConnection, shape: u16) -> Cursor {
+    let Ok(font) = conn.generate_id() else {
+        return 0;
+    };
+    if conn.open_font(font, b"cursor").is_err() {
+        return 0;
+    }
+    let Ok(cursor) = conn.generate_id() else {
+        let _ = conn.close_font(font);
+        return 0;
+    };
+    // 前景黑、背景白；mask 字形约定为 shape+1。
+    let _ = conn.create_glyph_cursor(
+        cursor, font, font, shape, shape + 1, 0, 0, 0, 0xffff, 0xffff, 0xffff,
+    );
+    let _ = conn.close_font(font);
+    cursor
+}
+
+/// 悬停命中可选中文本 / 输入框时切 I 型光标，否则箭头；仅在状态变化时重设。
+/// 与 macOS `update_cursor` / Windows `WM_SETCURSOR` 处理对位。
+fn update_cursor(conn: &RustConnection, st: &mut WinState, pos: Point) {
+    let want_text = flexui_core::point_wants_text_cursor(st.root.as_ref(), pos);
+    if want_text == st.text_cursor_active {
+        return;
+    }
+    st.text_cursor_active = want_text;
+    let cursor = if want_text {
+        st.cursor_text
+    } else {
+        st.cursor_arrow
+    };
+    if cursor != 0 {
+        let _ = conn
+            .change_window_attributes(st.xid, &ChangeWindowAttributesAux::new().cursor(cursor));
+        let _ = conn.flush();
+    }
+}
+
 /// 用 X Shape 把窗口边界裁成圆角矩形（物理像素）。`pw/ph` 为物理尺寸，`scale` 用于算半径。
 fn apply_rounded_shape(conn: &RustConnection, win: Window, pw: u16, ph: u16, scale: f32) {
     let w = pw as i32;
@@ -234,6 +280,9 @@ struct WinFactory {
     utf8_string: u32,
     motif_hints: u32,
     scale: f32,
+    /// 预建的箭头 / I 型光标（cursor 字体字形），供悬停文本时切换。
+    cursor_arrow: Cursor,
+    cursor_text: Cursor,
 }
 
 /// 按 spec 建一个 X 窗口并组装 WinState（不含 delegate 初始化）。
@@ -302,6 +351,13 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
     if rounded {
         apply_rounded_shape(conn, xid, w, h, f.scale);
     }
+    // 默认箭头光标（悬停文本时在 MotionNotify 里切成 I 型）。
+    if f.cursor_arrow != 0 {
+        let _ = conn.change_window_attributes(
+            xid,
+            &ChangeWindowAttributesAux::new().cursor(f.cursor_arrow),
+        );
+    }
     let _ = conn.map_window(xid);
 
     WinState {
@@ -318,6 +374,9 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         scale: f.scale,
         drag_region: spec.config.drag_region,
         rounded,
+        cursor_arrow: f.cursor_arrow,
+        cursor_text: f.cursor_text,
+        text_cursor_active: false,
         surface: None,
         images: new_image_cache(),
         pending_windows: Vec::new(),
@@ -353,6 +412,9 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         utf8_string: intern(&conn, b"UTF8_STRING").unwrap_or(0),
         motif_hints: intern(&conn, b"_MOTIF_WM_HINTS").unwrap_or(0),
         scale: detect_scale(&conn, x_root),
+        // XC_left_ptr=68（箭头）、XC_xterm=152（I 型），来自 X11 "cursor" 字体。
+        cursor_arrow: create_font_cursor(&conn, 68),
+        cursor_text: create_font_cursor(&conn, 152),
     };
 
     let mut states: HashMap<Window, WinState> = HashMap::new();
@@ -559,6 +621,7 @@ fn handle_x_event(
             if let Some(st) = states.get_mut(&e.event) {
                 let pos = logical_pos(st, e.event_x, e.event_y);
                 dispatch(conn, st, Event::MouseMove { pos });
+                update_cursor(conn, st, pos);
             }
         }
         XEvent::FocusIn(e) => {
