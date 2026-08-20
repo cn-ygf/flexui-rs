@@ -187,7 +187,8 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     }
     conn.flush().unwrap();
 
-    event_loop(&conn, wm_delete, states);
+    let kbd = Keyboard::query(&conn);
+    event_loop(&conn, wm_delete, &kbd, states);
 }
 
 /// 触发 on_before_init / on_init / on_initialized。
@@ -210,7 +211,12 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
 }
 
 /// 共享事件循环：处理 X 事件 + ~60fps 帧节拍。
-fn event_loop(conn: &RustConnection, wm_delete: u32, mut states: HashMap<Window, WinState>) {
+fn event_loop(
+    conn: &RustConnection,
+    wm_delete: u32,
+    kbd: &Keyboard,
+    mut states: HashMap<Window, WinState>,
+) {
     let frame = Duration::from_millis(16);
     let mut last_tick = Instant::now();
 
@@ -226,7 +232,7 @@ fn event_loop(conn: &RustConnection, wm_delete: u32, mut states: HashMap<Window,
         }
         // 处理已到达的 X 事件（非阻塞）。
         while let Ok(Some(ev)) = conn.poll_for_event() {
-            handle_x_event(conn, wm_delete, &mut states, ev);
+            handle_x_event(conn, wm_delete, kbd, &mut states, ev);
         }
         // 帧节拍。
         let now = Instant::now();
@@ -250,10 +256,33 @@ fn event_loop(conn: &RustConnection, wm_delete: u32, mut states: HashMap<Window,
 fn handle_x_event(
     conn: &RustConnection,
     wm_delete: u32,
+    kbd: &Keyboard,
     states: &mut HashMap<Window, WinState>,
     ev: XEvent,
 ) {
     match ev {
+        XEvent::KeyPress(e) => {
+            if let Some(st) = states.get_mut(&e.event) {
+                let mods = mods_from_state(e.state);
+                let keysym = kbd.keysym(e.detail, mods.shift);
+                if let Some(key) = keysym_to_key(keysym) {
+                    dispatch(conn, st, Event::KeyDown { key, mods });
+                } else if !mods.ctrl && !mods.meta {
+                    if let Some(ch) = keysym_to_char(keysym) {
+                        dispatch(conn, st, Event::Char { ch });
+                    }
+                }
+            }
+        }
+        XEvent::KeyRelease(e) => {
+            if let Some(st) = states.get_mut(&e.event) {
+                let mods = mods_from_state(e.state);
+                let keysym = kbd.keysym(e.detail, mods.shift);
+                if let Some(key) = keysym_to_key(keysym) {
+                    dispatch(conn, st, Event::KeyUp { key, mods });
+                }
+            }
+        }
         XEvent::Expose(e) => {
             if let Some(st) = states.get_mut(&e.window) {
                 render(conn, st);
@@ -346,6 +375,75 @@ fn mods_from_state(state: KeyButMask) -> Mods {
         ctrl: state.contains(KeyButMask::CONTROL),
         alt: state.contains(KeyButMask::MOD1),
         meta: state.contains(KeyButMask::MOD4),
+    }
+}
+
+/// 键盘映射：keycode → keysym（含 shift 级）。
+struct Keyboard {
+    min_keycode: u8,
+    per: usize,
+    keysyms: Vec<u32>,
+}
+
+impl Keyboard {
+    fn query(conn: &RustConnection) -> Self {
+        let setup = conn.setup();
+        let min = setup.min_keycode;
+        let count = setup.max_keycode - min + 1;
+        if let Ok(cookie) = conn.get_keyboard_mapping(min, count) {
+            if let Ok(r) = cookie.reply() {
+                return Keyboard {
+                    min_keycode: min,
+                    per: r.keysyms_per_keycode as usize,
+                    keysyms: r.keysyms,
+                };
+            }
+        }
+        Keyboard {
+            min_keycode: min,
+            per: 0,
+            keysyms: Vec::new(),
+        }
+    }
+
+    /// 取某 keycode 在 shift 级的 keysym。
+    fn keysym(&self, keycode: u8, shift: bool) -> u32 {
+        if self.per == 0 || keycode < self.min_keycode {
+            return 0;
+        }
+        let base = (keycode - self.min_keycode) as usize * self.per;
+        let level = if shift && self.per > 1 { 1 } else { 0 };
+        self.keysyms.get(base + level).copied().unwrap_or(0)
+    }
+}
+
+/// keysym → 框架平台无关键码（None=非导航/编辑键）。
+fn keysym_to_key(keysym: u32) -> Option<u32> {
+    use flexui_core::event::keys;
+    Some(match keysym {
+        0xff08 => keys::BACKSPACE,
+        0xff09 => keys::TAB,
+        0xff0d | 0xff8d => keys::ENTER,
+        0xff1b => keys::ESCAPE,
+        0xffff => keys::DELETE,
+        0xff51 => keys::LEFT,
+        0xff53 => keys::RIGHT,
+        0xff52 => keys::UP,
+        0xff54 => keys::DOWN,
+        0xff50 => keys::HOME,
+        0xff57 => keys::END,
+        _ => return None,
+    })
+}
+
+/// keysym → 可输入字符（Latin-1 直映；忽略功能键）。
+fn keysym_to_char(keysym: u32) -> Option<char> {
+    match keysym {
+        0x20..=0x7e => char::from_u32(keysym),
+        0xa0..=0xff => char::from_u32(keysym),
+        // Unicode keysym（0x0100_0000 | codepoint）。
+        0x0100_0000..=0x0110_ffff => char::from_u32(keysym - 0x0100_0000),
+        _ => None,
     }
 }
 
