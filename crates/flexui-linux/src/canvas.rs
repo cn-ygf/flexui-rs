@@ -110,21 +110,35 @@ impl CairoCanvas {
         layout
     }
 
-    /// 取源图对应的 cairo surface（含缓存 + 解码/光栅），返回 (surface, density)。
-    fn image_surface(&self, source: &ImageSource, rect: Rect) -> Option<(ImageSurface, f32)> {
-        use std::sync::Arc;
-        let svg_size = || {
-            let pw = (rect.size.width * self.scale).round().max(1.0) as u32;
-            let ph = (rect.size.height * self.scale).round().max(1.0) as u32;
-            (pw, ph)
+    /// SVG 的光栅物理像素尺寸：Stretch 用目标矩形尺寸；其余(Center/Tile/九宫格)用
+    /// SVG 固有尺寸(viewBox)——与 macOS 一致，避免 Center 时图标被放大到填满。
+    fn svg_raster_size(&self, bytes: &[u8], rect: Rect, fit: &ImageFit) -> (u32, u32) {
+        let logical = if matches!(fit, ImageFit::Stretch) {
+            (rect.size.width.max(1.0), rect.size.height.max(1.0))
+        } else {
+            flexui_svg::intrinsic_size(bytes)
+                .unwrap_or((rect.size.width.max(1.0), rect.size.height.max(1.0)))
         };
+        let pw = (logical.0 * self.scale).round().max(1.0) as u32;
+        let ph = (logical.1 * self.scale).round().max(1.0) as u32;
+        (pw, ph)
+    }
+
+    /// 取源图对应的 cairo surface（含缓存 + 解码/光栅），返回 (surface, density)。
+    fn image_surface(
+        &self,
+        source: &ImageSource,
+        rect: Rect,
+        fit: &ImageFit,
+    ) -> Option<(ImageSurface, f32)> {
+        use std::sync::Arc;
         let key = match source {
             ImageSource::Path(p) | ImageSource::ScaledPath(p, _) => ImageKey::Path(p.clone()),
             ImageSource::Bytes(b) | ImageSource::ScaledBytes(b, _) => {
                 ImageKey::Bytes(Arc::as_ptr(b) as *const u8 as usize)
             }
             ImageSource::Svg(b) => {
-                let (pw, ph) = svg_size();
+                let (pw, ph) = self.svg_raster_size(b, rect, fit);
                 ImageKey::Svg(Arc::as_ptr(b) as *const u8 as usize, pw, ph)
             }
         };
@@ -137,7 +151,7 @@ impl CairoCanvas {
             ImageSource::Bytes(b) => (decode_bytes(b)?, 1.0),
             ImageSource::ScaledBytes(b, d) => (decode_bytes(b)?, *d),
             ImageSource::Svg(b) => {
-                let (pw, ph) = svg_size();
+                let (pw, ph) = self.svg_raster_size(b, rect, fit);
                 let rgba = flexui_svg::rasterize(b, pw, ph)?;
                 (surface_from_premul_rgba(&rgba, pw, ph)?, self.scale)
             }
@@ -461,7 +475,7 @@ impl Canvas for CairoCanvas {
         if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
             return;
         }
-        let Some((surface, density)) = self.image_surface(source, rect) else {
+        let Some((surface, density)) = self.image_surface(source, rect, &fit) else {
             return;
         };
         let sw = surface.width() as f64;

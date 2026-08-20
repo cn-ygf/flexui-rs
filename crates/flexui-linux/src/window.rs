@@ -16,9 +16,10 @@ use flexui_core::{
 use flexui_core::event::Mods;
 
 use x11rb::connection::Connection;
+use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
 use x11rb::protocol::xproto::{
-    AtomEnum, ClientMessageEvent, ConnectionExt as _, CreateGCAux, CreateWindowAux, EventMask,
-    ImageFormat, KeyButMask, PropMode, Window, WindowClass,
+    AtomEnum, ClientMessageEvent, ClipOrdering, ConnectionExt as _, CreateGCAux, CreateWindowAux,
+    EventMask, ImageFormat, KeyButMask, PropMode, Rectangle, Window, WindowClass,
 };
 use x11rb::protocol::Event as XEvent;
 use x11rb::rust_connection::RustConnection;
@@ -42,6 +43,8 @@ struct WinState {
     scale: f32,
     /// 无边框窗口的可拖动区域（点此空白处拖动移窗）。
     drag_region: WindowDragRegion,
+    /// 是否给窗口做圆角（无边框 + system_corners）。
+    rounded: bool,
     surface: Option<ImageSurface>,
     images: SharedImageCache,
     /// 回调里 open_window/open_modal 请求的新窗口，事件循环稍后建。
@@ -153,6 +156,53 @@ fn intern(conn: &RustConnection, name: &[u8]) -> Option<u32> {
     conn.intern_atom(false, name).ok()?.reply().ok().map(|r| r.atom)
 }
 
+/// 用 X Shape 把窗口边界裁成圆角矩形（物理像素）。`pw/ph` 为物理尺寸，`scale` 用于算半径。
+fn apply_rounded_shape(conn: &RustConnection, win: Window, pw: u16, ph: u16, scale: f32) {
+    let w = pw as i32;
+    let h = ph as i32;
+    let r = (10.0 * scale).round() as i32; // 逻辑 10px 圆角
+    if r <= 0 || w <= 0 || h <= 0 {
+        return;
+    }
+    // 逐扫描行算圆角内缩，拼成边界区域。
+    let mut rects: Vec<Rectangle> = Vec::with_capacity(h as usize);
+    for y in 0..h {
+        let inset = corner_inset(y, h, r);
+        let width = (w - 2 * inset).max(0);
+        if width > 0 {
+            rects.push(Rectangle {
+                x: inset as i16,
+                y: y as i16,
+                width: width as u16,
+                height: 1,
+            });
+        }
+    }
+    let _ = conn.shape_rectangles(
+        SO::SET,
+        SK::BOUNDING,
+        ClipOrdering::UNSORTED,
+        win,
+        0,
+        0,
+        &rects,
+    );
+    let _ = conn.flush();
+}
+
+/// 某扫描行因圆角需要的左右内缩像素（四分之一圆）。
+fn corner_inset(y: i32, h: i32, r: i32) -> i32 {
+    let dy = if y < r {
+        (y - r) as f64
+    } else if y >= h - r {
+        (y - (h - r)) as f64
+    } else {
+        return 0;
+    };
+    let rf = r as f64;
+    (rf - (rf * rf - dy * dy).max(0.0).sqrt()).round() as i32
+}
+
 /// 把 WindowCtx 收集的浮层请求交给分发器打开（下拉/上下文菜单等）。
 fn open_overlay_request(disp: &mut Dispatcher, request: OverlayRequest) {
     if let Some(entries) = request.entries {
@@ -239,11 +289,17 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         AtomEnum::ATOM,
         &[f.wm_delete],
     );
-    // 无边框：titlebar != System → 用 _MOTIF_WM_HINTS 去掉 WM 装饰（app 自绘标题栏）。
-    if spec.config.titlebar != TitlebarMode::System && f.motif_hints != 0 {
+    let frameless = spec.config.titlebar != TitlebarMode::System;
+    // 无边框：用 _MOTIF_WM_HINTS 去掉 WM 装饰（app 自绘标题栏）。
+    if frameless && f.motif_hints != 0 {
         // [flags=MWM_HINTS_DECORATIONS(2), functions, decorations=0(无), input_mode, status]
         let hints: [u32; 5] = [2, 0, 0, 0, 0];
         let _ = conn.change_property32(PropMode::REPLACE, xid, f.motif_hints, f.motif_hints, &hints);
+    }
+    // 无边框 + system_corners → 用 X Shape 把窗口裁成圆角。
+    let rounded = frameless && spec.config.system_corners;
+    if rounded {
+        apply_rounded_shape(conn, xid, w, h, f.scale);
     }
     let _ = conn.map_window(xid);
 
@@ -260,6 +316,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         height: spec.config.height,
         scale: f.scale,
         drag_region: spec.config.drag_region,
+        rounded,
         surface: None,
         images: new_image_cache(),
         pending_windows: Vec::new(),
@@ -430,6 +487,9 @@ fn handle_x_event(
                     st.height = h;
                     st.surface = None;
                     st.layout_dirty = true;
+                    if st.rounded {
+                        apply_rounded_shape(conn, st.xid, e.width, e.height, st.scale);
+                    }
                     dispatch(conn, st, Event::WindowResized { width: w, height: h });
                     render(conn, st);
                 }

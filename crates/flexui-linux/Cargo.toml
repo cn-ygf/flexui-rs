@@ -19,5 +19,5 @@ image = { workspace = true }
 cairo-rs = "0.20"
 pango = "0.20"
 pangocairo = "0.20"
-x11rb = "0.13"
+x11rb = { version = "0.13", features = ["shape"] }
 arboard = { version = "3", default-features = false }
