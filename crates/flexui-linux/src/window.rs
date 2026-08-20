@@ -577,13 +577,14 @@ fn render(conn: &RustConnection, st: &mut WinState) {
     if st.surface.is_none() {
         st.surface = ImageSurface::create(Format::ARgb32, pw, ph).ok();
     }
-    let Some(surface) = st.surface.clone() else {
+    if st.surface.is_none() {
         return;
-    };
+    }
 
-    // 布局（需要时）。
+    // 布局（需要时）。CairoCanvas 只在建 Context 的瞬间借用 surface，之后不保留
+    // Rust 借用（Context 在 C 层持有引用），因此可与 st.root 的可变借用并存。
     if st.layout_dirty {
-        let cv = CairoCanvas::new(&surface, st.scale);
+        let cv = CairoCanvas::new(st.surface.as_ref().unwrap(), st.scale);
         layout_node(
             st.root.as_mut(),
             Rect::new(0.0, 0.0, st.width, st.height),
@@ -591,9 +592,10 @@ fn render(conn: &RustConnection, st: &mut WinState) {
         );
         st.layout_dirty = false;
     }
-    // 绘制整树。
+    // 绘制整树。Context 用完即 drop，释放对 surface 的 C 层引用，
+    // 使随后 surface.data() 能拿到独占访问。
     {
-        let mut cv = CairoCanvas::new(&surface, st.scale);
+        let mut cv = CairoCanvas::new(st.surface.as_ref().unwrap(), st.scale);
         paint_tree_in_rect(
             st.root.as_ref(),
             &mut cv,
@@ -602,22 +604,30 @@ fn render(conn: &RustConnection, st: &mut WinState) {
         st.disp.paint_overlays(&mut cv, Size::new(st.width, st.height));
     }
 
-    present(conn, st, &surface, pw, ph);
+    present(conn, st.xid, st.gc, st.depth, st.surface.as_mut().unwrap(), pw, ph);
 }
 
-/// 把 ImageSurface 的像素 PutImage 到窗口。
+/// 把 ImageSurface 的像素 PutImage 到窗口。要求对 surface 独占访问（refcount==1）。
 ///
 /// 单次 PutImage 受 X 最大请求长度限制，整窗缓冲很容易超限，故按水平条带分块上传。
 /// cairo ARGB32 与 X TrueColor 24/32 位小端(BGRA)内存序一致，可直接上传。
-fn present(conn: &RustConnection, st: &WinState, surface: &ImageSurface, pw: i32, ph: i32) {
-    let mut surface = surface.clone();
+fn present(
+    conn: &RustConnection,
+    xid: Window,
+    gc: u32,
+    depth: u8,
+    surface: &mut ImageSurface,
+    pw: i32,
+    ph: i32,
+) {
     surface.flush();
     let stride = surface.stride();
     if stride != pw * 4 {
         return;
     }
-    let Ok(data) = surface.data() else {
-        return;
+    let data = match surface.data() {
+        Ok(d) => d,
+        Err(_) => return,
     };
 
     // 每次请求可带的字节数（留出 PutImage 头部余量）。
@@ -632,14 +642,14 @@ fn present(conn: &RustConnection, st: &WinState, surface: &ImageSurface, pw: i32
         let end = ((y + rows) * stride) as usize;
         let _ = conn.put_image(
             ImageFormat::Z_PIXMAP,
-            st.xid,
-            st.gc,
+            xid,
+            gc,
             pw as u16,
             rows as u16,
             0,
             y as i16,
             0,
-            st.depth,
+            depth,
             &data[start..end],
         );
         y += rows;
