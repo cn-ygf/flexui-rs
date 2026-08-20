@@ -6,6 +6,7 @@
 mod canvas;
 mod clipboard;
 mod dialog;
+mod menu;
 mod window;
 
 pub use canvas::CairoCanvas;

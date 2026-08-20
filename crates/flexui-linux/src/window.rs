@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 
 use cairo::{Format, ImageSurface};
 use flexui_core::{
-    layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton, NewWindow, Node,
-    OverlayRequest, Point, Rect, Size, WindowCtx, WindowDelegate, WindowEvent, WindowHandle,
+    layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton, NativeMenu,
+    NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect, Size, WindowCtx,
+    WindowDelegate, WindowEvent, WindowHandle,
 };
 use flexui_core::event::Mods;
 
@@ -100,6 +101,15 @@ impl WindowHandle for LinuxWindowHandle<'_> {
             );
             let _ = self.conn.flush();
         }
+    }
+    fn popup_native_menu(
+        &mut self,
+        menu: &NativeMenu,
+        anchor: NativeMenuPopupAnchor,
+    ) -> Option<String> {
+        let root = self.conn.setup().roots.first()?.root;
+        let scale = detect_scale(self.conn, root);
+        crate::menu::popup(self.conn, self.xid, anchor, menu, scale)
     }
     fn maximize(&mut self) {
         self.set_maximized(true);
