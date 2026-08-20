@@ -4,28 +4,60 @@
 //! 像素 blit 到 X11 窗口。坐标一律「逻辑点、左上原点、y 向下」——构造时对 context
 //! 施加 `scale`，之后所有绘制都用逻辑坐标；Cairo 原生支持 save/restore/clip。
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use cairo::{Context, Format, ImageSurface, LinearGradient};
+use cairo::{Context, Filter, Format, ImageSurface, LinearGradient, SurfacePattern};
 use flexui_gfx::{
-    Canvas, Color, Corners, Font, ImageFit, ImageSource, LayerHandle, Point, Rect, Size,
+    Canvas, Color, Corners, Font, ImageFit, ImageSource, Insets, LayerHandle, Point, Rect, Size,
     TextBoundary, TextLayout,
 };
+
+/// 解码后位图的缓存键。
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ImageKey {
+    /// 位图：路径 或 字节缓冲地址（按源缓存，绘制时再缩放）。
+    Path(String),
+    Bytes(usize),
+    /// SVG：按源地址 + 目标物理尺寸缓存（尺寸变了要重光栅）。
+    Svg(usize, u32, u32),
+}
+
+/// 缓存的位图：cairo surface + 像素密度（物理像素/逻辑点）。
+pub(crate) struct CachedImage {
+    surface: ImageSurface,
+    density: f32,
+}
+
+/// 跨帧共享的图片缓存（避免每帧重复解码/光栅）。
+pub(crate) type SharedImageCache = Rc<RefCell<HashMap<ImageKey, CachedImage>>>;
+
+/// 建一个空的共享图片缓存（窗口持有、每帧复用）。
+pub(crate) fn new_image_cache() -> SharedImageCache {
+    Rc::new(RefCell::new(HashMap::new()))
+}
 
 /// Cairo 画布：持有绑定到目标 surface 的 context（引用计数，无需生命周期）。
 pub struct CairoCanvas {
     cr: Context,
     /// 像素密度（HiDPI）。绘制用逻辑坐标，context 已按此缩放。
     scale: f32,
+    images: SharedImageCache,
 }
 
 impl CairoCanvas {
-    /// 用一块 ARGB32 ImageSurface 建画布。`scale`=物理像素/逻辑点。
+    /// 用一块 ARGB32 ImageSurface 建画布（自带独立图片缓存，供测试/离屏）。
     pub fn new(surface: &ImageSurface, scale: f32) -> Self {
+        Self::with_images(surface, scale, Rc::new(RefCell::new(HashMap::new())))
+    }
+
+    /// 用共享图片缓存建画布（窗口每帧复用同一份缓存）。
+    pub(crate) fn with_images(surface: &ImageSurface, scale: f32, images: SharedImageCache) -> Self {
         let cr = Context::new(surface).expect("cairo context");
         let s = scale.max(0.01) as f64;
         cr.scale(s, s);
-        Self { cr, scale }
+        Self { cr, scale, images }
     }
 
     /// 建一块逻辑尺寸为 `size`、按 `scale` 放大的离屏 ARGB32 surface。
@@ -68,6 +100,198 @@ impl CairoCanvas {
         layout.set_text(text);
         layout
     }
+
+    /// 取源图对应的 cairo surface（含缓存 + 解码/光栅），返回 (surface, density)。
+    fn image_surface(&self, source: &ImageSource, rect: Rect) -> Option<(ImageSurface, f32)> {
+        use std::sync::Arc;
+        let svg_size = || {
+            let pw = (rect.size.width * self.scale).round().max(1.0) as u32;
+            let ph = (rect.size.height * self.scale).round().max(1.0) as u32;
+            (pw, ph)
+        };
+        let key = match source {
+            ImageSource::Path(p) | ImageSource::ScaledPath(p, _) => ImageKey::Path(p.clone()),
+            ImageSource::Bytes(b) | ImageSource::ScaledBytes(b, _) => {
+                ImageKey::Bytes(Arc::as_ptr(b) as *const u8 as usize)
+            }
+            ImageSource::Svg(b) => {
+                let (pw, ph) = svg_size();
+                ImageKey::Svg(Arc::as_ptr(b) as *const u8 as usize, pw, ph)
+            }
+        };
+        if let Some(c) = self.images.borrow().get(&key) {
+            return Some((c.surface.clone(), c.density));
+        }
+        let (surface, density) = match source {
+            ImageSource::Path(p) => (decode_path(p)?, 1.0),
+            ImageSource::ScaledPath(p, d) => (decode_path(p)?, *d),
+            ImageSource::Bytes(b) => (decode_bytes(b)?, 1.0),
+            ImageSource::ScaledBytes(b, d) => (decode_bytes(b)?, *d),
+            ImageSource::Svg(b) => {
+                let (pw, ph) = svg_size();
+                let rgba = flexui_svg::rasterize(b, pw, ph)?;
+                (surface_from_premul_rgba(&rgba, pw, ph)?, self.scale)
+            }
+        };
+        self.images.borrow_mut().insert(
+            key,
+            CachedImage {
+                surface: surface.clone(),
+                density,
+            },
+        );
+        Some((surface, density))
+    }
+
+    /// 把源图的像素子区 `(sx0,sy0,spw,sph)` 缩放绘制到逻辑目标矩形 `dst`。
+    /// `tint` 为 Some 时用其色 + 源 alpha 重着色（黑图换色）。
+    fn blit_sub(
+        &self,
+        surface: &ImageSurface,
+        src: (f64, f64, f64, f64),
+        dst: Rect,
+        tint: Option<Color>,
+    ) {
+        let (sx0, sy0, spw, sph) = src;
+        if spw <= 0.0 || sph <= 0.0 || dst.size.width <= 0.0 || dst.size.height <= 0.0 {
+            return;
+        }
+        self.cr.save().ok();
+        self.cr.rectangle(
+            dst.left() as f64,
+            dst.top() as f64,
+            dst.size.width as f64,
+            dst.size.height as f64,
+        );
+        self.cr.clip();
+        self.cr.translate(dst.left() as f64, dst.top() as f64);
+        self.cr.scale(dst.size.width as f64 / spw, dst.size.height as f64 / sph);
+        if let Some(c) = tint {
+            self.cr
+                .set_source_rgba(c.r as f64, c.g as f64, c.b as f64, c.a as f64);
+            self.cr.mask_surface(surface, -sx0, -sy0).ok();
+        } else {
+            self.cr.set_source_surface(surface, -sx0, -sy0).ok();
+            self.cr.source().set_filter(Filter::Good);
+            self.cr.paint().ok();
+        }
+        self.cr.restore().ok();
+    }
+
+    /// 平铺绘制（按 density 缩回逻辑尺寸重复）。
+    fn tile(&self, surface: &ImageSurface, rect: Rect, density: f32, _tint: Option<Color>) {
+        let inv = 1.0 / density.max(0.01) as f64;
+        self.cr.save().ok();
+        self.cr.translate(rect.left() as f64, rect.top() as f64);
+        self.cr.scale(inv, inv);
+        let pattern = SurfacePattern::create(surface);
+        pattern.set_extend(cairo::Extend::Repeat);
+        pattern.set_filter(Filter::Good);
+        self.cr.set_source(&pattern).ok();
+        self.cr.rectangle(
+            0.0,
+            0.0,
+            rect.size.width as f64 / inv,
+            rect.size.height as f64 / inv,
+        );
+        self.cr.fill().ok();
+        self.cr.restore().ok();
+    }
+
+    /// 九宫格：四角原尺寸、四边与中间拉伸。`ins` 为源图四边不拉伸边距（逻辑点）。
+    fn nine_patch(
+        &self,
+        surface: &ImageSurface,
+        rect: Rect,
+        density: f32,
+        ins: Insets,
+        tint: Option<Color>,
+    ) {
+        let sw = surface.width() as f64;
+        let sh = surface.height() as f64;
+        let d = density.max(0.01) as f64;
+        // 源图三段（像素）。
+        let (sl, st, sr, sb) = (
+            ins.left as f64 * d,
+            ins.top as f64 * d,
+            ins.right as f64 * d,
+            ins.bottom as f64 * d,
+        );
+        let smid_w = (sw - sl - sr).max(0.0);
+        let smid_h = (sh - st - sb).max(0.0);
+        // 目标三段（逻辑点）：角保持逻辑尺寸(ins)，中间拉伸。
+        let (dl, dt, dr, db) = (
+            ins.left,
+            ins.top,
+            ins.right,
+            ins.bottom,
+        );
+        let dmid_w = (rect.size.width - dl - dr).max(0.0);
+        let dmid_h = (rect.size.height - dt - db).max(0.0);
+        let x0 = rect.left();
+        let x1 = rect.left() + dl;
+        let x2 = rect.right() - dr;
+        let y0 = rect.top();
+        let y1 = rect.top() + dt;
+        let y2 = rect.bottom() - db;
+        // 9 段：(源像素矩形, 目标逻辑矩形)。
+        let cells = [
+            ((0.0, 0.0, sl, st), Rect::new(x0, y0, dl, dt)),
+            ((sl, 0.0, smid_w, st), Rect::new(x1, y0, dmid_w, dt)),
+            ((sw - sr, 0.0, sr, st), Rect::new(x2, y0, dr, dt)),
+            ((0.0, st, sl, smid_h), Rect::new(x0, y1, dl, dmid_h)),
+            ((sl, st, smid_w, smid_h), Rect::new(x1, y1, dmid_w, dmid_h)),
+            ((sw - sr, st, sr, smid_h), Rect::new(x2, y1, dr, dmid_h)),
+            ((0.0, sh - sb, sl, sb), Rect::new(x0, y2, dl, db)),
+            ((sl, sh - sb, smid_w, sb), Rect::new(x1, y2, dmid_w, db)),
+            ((sw - sr, sh - sb, sr, sb), Rect::new(x2, y2, dr, db)),
+        ];
+        for (s, d) in cells {
+            self.blit_sub(surface, s, d, tint);
+        }
+    }
+}
+
+/// 解码磁盘位图为 cairo surface（image crate 解码 → ARGB32 预乘）。
+fn decode_path(path: &str) -> Option<ImageSurface> {
+    let img = image::open(path).ok()?.to_rgba8();
+    surface_from_straight_rgba(img.as_raw(), img.width(), img.height())
+}
+
+/// 解码内存位图为 cairo surface。
+fn decode_bytes(bytes: &[u8]) -> Option<ImageSurface> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    surface_from_straight_rgba(img.as_raw(), img.width(), img.height())
+}
+
+/// 非预乘 RGBA → cairo ARGB32（小端 BGRA、预乘）。
+fn surface_from_straight_rgba(rgba: &[u8], w: u32, h: u32) -> Option<ImageSurface> {
+    let stride = (w * 4) as usize;
+    let mut buf = vec![0u8; stride * h as usize];
+    for i in 0..(w * h) as usize {
+        let o = i * 4;
+        let (r, g, b, a) = (rgba[o] as u16, rgba[o + 1] as u16, rgba[o + 2] as u16, rgba[o + 3]);
+        let a16 = a as u16;
+        buf[o] = (b * a16 / 255) as u8;
+        buf[o + 1] = (g * a16 / 255) as u8;
+        buf[o + 2] = (r * a16 / 255) as u8;
+        buf[o + 3] = a;
+    }
+    ImageSurface::create_for_data(buf, Format::ARgb32, w as i32, h as i32, stride as i32).ok()
+}
+
+/// 预乘 RGBA（SVG 光栅结果）→ cairo ARGB32（仅 R/B 互换）。
+fn surface_from_premul_rgba(rgba: &[u8], w: u32, h: u32) -> Option<ImageSurface> {
+    let stride = (w * 4) as usize;
+    let mut buf = vec![0u8; stride * h as usize];
+    for i in 0..(w * h) as usize {
+        let o = i * 4;
+        buf[o] = rgba[o + 2];
+        buf[o + 1] = rgba[o + 1];
+        buf[o + 2] = rgba[o];
+        buf[o + 3] = rgba[o + 3];
+    }
+    ImageSurface::create_for_data(buf, Format::ARgb32, w as i32, h as i32, stride as i32).ok()
 }
 
 /// flexui Font → Pango 字体描述。字号用绝对像素尺寸（逻辑点）。
@@ -220,12 +444,53 @@ impl Canvas for CairoCanvas {
 
     fn draw_image(
         &mut self,
-        _source: &ImageSource,
-        _rect: Rect,
-        _tint: Option<Color>,
-        _fit: ImageFit,
+        source: &ImageSource,
+        rect: Rect,
+        tint: Option<Color>,
+        fit: ImageFit,
     ) {
-        // 图片解码在后续阶段接入（image crate + SVG 光栅化）。
+        if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
+            return;
+        }
+        let Some((surface, density)) = self.image_surface(source, rect) else {
+            return;
+        };
+        let sw = surface.width() as f64;
+        let sh = surface.height() as f64;
+        if sw <= 0.0 || sh <= 0.0 {
+            return;
+        }
+        // 逻辑源尺寸（位图按 density 缩回逻辑点）。
+        let lw = sw / density as f64;
+        let lh = sh / density as f64;
+
+        self.cr.save().ok();
+        // 裁到目标矩形，避免 Center/Tile/NinePatch 溢出。
+        self.cr.rectangle(
+            rect.left() as f64,
+            rect.top() as f64,
+            rect.size.width as f64,
+            rect.size.height as f64,
+        );
+        self.cr.clip();
+
+        match fit {
+            ImageFit::Stretch => {
+                self.blit_sub(&surface, (0.0, 0.0, sw, sh), rect, tint);
+            }
+            ImageFit::Center => {
+                let x = rect.left() as f32 + (rect.size.width - lw as f32) / 2.0;
+                let y = rect.top() as f32 + (rect.size.height - lh as f32) / 2.0;
+                self.blit_sub(&surface, (0.0, 0.0, sw, sh), Rect::new(x, y, lw as f32, lh as f32), tint);
+            }
+            ImageFit::Tile => {
+                self.tile(&surface, rect, density, tint);
+            }
+            ImageFit::NinePatch(ins) => {
+                self.nine_patch(&surface, rect, density, ins, tint);
+            }
+        }
+        self.cr.restore().ok();
     }
 
     fn save(&mut self) {
@@ -262,7 +527,7 @@ impl Canvas for CairoCanvas {
     ) -> Option<LayerHandle> {
         let surface = Self::new_surface(size, self.scale)?;
         {
-            let mut off = CairoCanvas::new(&surface, self.scale);
+            let mut off = CairoCanvas::with_images(&surface, self.scale, self.images.clone());
             draw(&mut off);
         }
         surface.flush();

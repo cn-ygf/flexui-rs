@@ -24,7 +24,7 @@ use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 
-use crate::canvas::CairoCanvas;
+use crate::canvas::{new_image_cache, CairoCanvas, SharedImageCache};
 
 /// 单个窗口的运行时状态。
 struct WinState {
@@ -40,6 +40,7 @@ struct WinState {
     height: f32,
     scale: f32,
     surface: Option<ImageSurface>,
+    images: SharedImageCache,
     open: bool,
 }
 
@@ -179,6 +180,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
             height: spec.config.height,
             scale: 1.0,
             surface: None,
+            images: new_image_cache(),
             open: true,
         };
         // 初始化回调。
@@ -585,7 +587,7 @@ fn render(conn: &RustConnection, st: &mut WinState) {
     // 布局（需要时）。CairoCanvas 只在建 Context 的瞬间借用 surface，之后不保留
     // Rust 借用（Context 在 C 层持有引用），因此可与 st.root 的可变借用并存。
     if st.layout_dirty {
-        let cv = CairoCanvas::new(st.surface.as_ref().unwrap(), st.scale);
+        let cv = CairoCanvas::with_images(st.surface.as_ref().unwrap(), st.scale, st.images.clone());
         layout_node(
             st.root.as_mut(),
             Rect::new(0.0, 0.0, st.width, st.height),
@@ -596,7 +598,8 @@ fn render(conn: &RustConnection, st: &mut WinState) {
     // 绘制整树。Context 用完即 drop，释放对 surface 的 C 层引用，
     // 使随后 surface.data() 能拿到独占访问。
     {
-        let mut cv = CairoCanvas::new(st.surface.as_ref().unwrap(), st.scale);
+        let mut cv =
+            CairoCanvas::with_images(st.surface.as_ref().unwrap(), st.scale, st.images.clone());
         paint_tree_in_rect(
             st.root.as_ref(),
             &mut cv,

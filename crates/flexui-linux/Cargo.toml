@@ -14,6 +14,8 @@ edition = "2021"
 [dependencies]
 flexui-gfx = { workspace = true }
 flexui-core = { workspace = true }
+flexui-svg = { workspace = true }
+image = { workspace = true }
 
 cairo-rs = "0.20"
 pango = "0.20"

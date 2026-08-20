@@ -464,6 +464,8 @@ dependencies = [
  "cairo-rs",
  "flexui-core",
  "flexui-gfx",
+ "flexui-svg",
+ "image",
  "pango",
  "pangocairo",
  "x11rb",
