@@ -117,13 +117,16 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         .unwrap()
         .atom;
 
+    let scale = detect_scale(&conn, root);
+
     let mut states: HashMap<Window, WinState> = HashMap::new();
 
     for spec in windows {
         let xid = conn.generate_id().unwrap();
         let gc = conn.generate_id().unwrap();
-        let w = spec.config.width.max(1.0) as u16;
-        let h = spec.config.height.max(1.0) as u16;
+        // 窗口按物理像素建：逻辑尺寸 × scale。
+        let w = (spec.config.width * scale).max(1.0) as u16;
+        let h = (spec.config.height * scale).max(1.0) as u16;
         let aux = CreateWindowAux::new().event_mask(
             EventMask::EXPOSURE
                 | EventMask::KEY_PRESS
@@ -178,7 +181,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
             layout_dirty: true,
             width: spec.config.width,
             height: spec.config.height,
-            scale: 1.0,
+            scale,
             surface: None,
             images: new_image_cache(),
             open: true,
@@ -296,8 +299,9 @@ fn handle_x_event(
         }
         XEvent::ConfigureNotify(e) => {
             if let Some(st) = states.get_mut(&e.window) {
-                let w = e.width as f32;
-                let h = e.height as f32;
+                // ConfigureNotify 尺寸是物理像素 → 逻辑尺寸。
+                let w = e.width as f32 / st.scale;
+                let h = e.height as f32 / st.scale;
                 if (w - st.width).abs() > 0.5 || (h - st.height).abs() > 0.5 {
                     st.width = w;
                     st.height = h;
@@ -382,6 +386,41 @@ fn mods_from_state(state: KeyButMask) -> Mods {
         alt: state.contains(KeyButMask::MOD1),
         meta: state.contains(KeyButMask::MOD4),
     }
+}
+
+/// 探测显示缩放：优先 GDK_SCALE 环境变量，其次 X 资源 Xft.dpi（dpi/96），默认 1。
+fn detect_scale(conn: &RustConnection, root: Window) -> f32 {
+    if let Ok(v) = std::env::var("GDK_SCALE") {
+        if let Ok(n) = v.trim().parse::<f32>() {
+            if n >= 1.0 && n <= 8.0 {
+                return n;
+            }
+        }
+    }
+    // RESOURCE_MANAGER 里的 Xft.dpi。
+    if let Ok(cookie) = conn.get_property(
+        false,
+        root,
+        AtomEnum::RESOURCE_MANAGER,
+        AtomEnum::STRING,
+        0,
+        1024 * 16,
+    ) {
+        if let Ok(reply) = cookie.reply() {
+            if let Ok(text) = String::from_utf8(reply.value) {
+                for line in text.lines() {
+                    if let Some(rest) = line.strip_prefix("Xft.dpi:") {
+                        if let Ok(dpi) = rest.trim().parse::<f32>() {
+                            if dpi > 0.0 {
+                                return (dpi / 96.0).clamp(1.0, 8.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    1.0
 }
 
 /// Ctrl+A/C/X/V 剪贴板漏斗。返回是否已处理（处理了就不再当普通按键）。
