@@ -1,0 +1,20 @@
+[package]
+name = "flexui-linux"
+version = "0.0.1"
+edition = "2021"
+
+# Linux 后端：用系统图形接口，不打包渲染器。
+#   2D 绘图 = Cairo，文字排版/绘制 = Pango（与 macOS 的 CoreGraphics/CoreText、
+#   Windows 的 GDI+/DirectWrite 对应）。cairo-rs / pango / pangocairo 只是系统库的
+#   Rust 绑定，等价于 mac 的 objc2、win 的 windows-sys。
+#   窗口/呈现（阶段2）= X11 (xcb)：把 cairo ImageSurface 的像素 blit 到窗口。
+#
+# 宿主(macOS)装了 cairo/pango 即可本地编译 + 跑渲染单测（C 库 API 与 Linux 一致）。
+
+[dependencies]
+flexui-gfx = { workspace = true }
+flexui-core = { workspace = true }
+
+cairo-rs = "0.20"
+pango = "0.20"
+pangocairo = "0.20"

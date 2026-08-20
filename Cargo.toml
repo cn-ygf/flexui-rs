@@ -11,6 +11,7 @@ members = [
     "crates/flexui-xml",
     "crates/flexui-macos",
     "crates/flexui-windows",
+    "crates/flexui-linux",
     "crates/flexui",
     "crates/flexui-examples",
     "crates/flexui-gallery",
@@ -28,6 +29,7 @@ flexui-core = { path = "crates/flexui-core" }
 flexui-xml = { path = "crates/flexui-xml" }
 flexui-macos = { path = "crates/flexui-macos" }
 flexui-windows = { path = "crates/flexui-windows" }
+flexui-linux = { path = "crates/flexui-linux" }
 
 # objc2 生态：仅是 macOS 系统 API 的 Rust 绑定，非第三方渲染/窗口框架
 objc2 = "0.6"
