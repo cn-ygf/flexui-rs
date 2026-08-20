@@ -24,3 +24,6 @@ pangocairo = "0.20"
 # X11 窗口：x11rb 是纯 Rust 的 X11 协议实现（直接走协议，无需链接 libxcb），
 # 等价于 mac 直接用 NSWindow、win 直接用 HWND——原生窗口系统，非跨平台封装。
 x11rb = "0.13"
+
+# 系统剪贴板（X11 selection / Wayland data-control）。薄封装，非渲染框架。
+arboard = { version = "3", default-features = false }

@@ -267,6 +267,10 @@ fn handle_x_event(
             if let Some(st) = states.get_mut(&e.event) {
                 let mods = mods_from_state(e.state);
                 let keysym = kbd.keysym(e.detail, mods.shift);
+                // Ctrl+C/V/X/A：剪贴板漏斗（复制/粘贴/剪切/全选）。
+                if mods.ctrl && !mods.alt && !mods.meta && handle_clipboard(conn, st, keysym) {
+                    return;
+                }
                 if let Some(key) = keysym_to_key(keysym) {
                     dispatch(conn, st, Event::KeyDown { key, mods });
                 } else if !mods.ctrl && !mods.meta {
@@ -377,6 +381,42 @@ fn mods_from_state(state: KeyButMask) -> Mods {
         ctrl: state.contains(KeyButMask::CONTROL),
         alt: state.contains(KeyButMask::MOD1),
         meta: state.contains(KeyButMask::MOD4),
+    }
+}
+
+/// Ctrl+A/C/X/V 剪贴板漏斗。返回是否已处理（处理了就不再当普通按键）。
+fn handle_clipboard(conn: &RustConnection, st: &mut WinState, keysym: u32) -> bool {
+    match keysym {
+        0x61 => {
+            // Ctrl+A 全选
+            st.disp.select_all_focused(st.root.as_mut());
+            render(conn, st);
+            true
+        }
+        0x63 => {
+            // Ctrl+C 复制
+            if let Some(text) = st.disp.copy_selection(st.root.as_mut()) {
+                crate::clipboard::set_text(&text);
+            }
+            true
+        }
+        0x78 => {
+            // Ctrl+X 剪切
+            if let Some(text) = st.disp.cut_selection(st.root.as_mut()) {
+                crate::clipboard::set_text(&text);
+                render(conn, st);
+            }
+            true
+        }
+        0x76 => {
+            // Ctrl+V 粘贴
+            if let Some(text) = crate::clipboard::get_text() {
+                st.disp.paste(st.root.as_mut(), &text);
+                render(conn, st);
+            }
+            true
+        }
+        _ => false,
     }
 }
 
@@ -600,6 +640,7 @@ fn render(conn: &RustConnection, st: &mut WinState) {
     {
         let mut cv =
             CairoCanvas::with_images(st.surface.as_ref().unwrap(), st.scale, st.images.clone());
+        cv.clear(); // 清屏，避免上一帧半透明内容(选区/hover)残影
         paint_tree_in_rect(
             st.root.as_ref(),
             &mut cv,

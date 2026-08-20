@@ -72,6 +72,15 @@ impl CairoCanvas {
             .set_source_rgba(c.r as f64, c.g as f64, c.b as f64, c.a as f64);
     }
 
+    /// 把整块 surface 清为透明（每帧重绘前调用，避免半透明叠加内容残影）。
+    pub(crate) fn clear(&mut self) {
+        let _ = self.cr.save();
+        self.cr.set_operator(cairo::Operator::Clear);
+        let _ = self.cr.paint();
+        self.cr.set_operator(cairo::Operator::Over);
+        let _ = self.cr.restore();
+    }
+
     /// 生成一个圆角矩形路径到当前 context（不描边/填充）。
     fn round_rect_path(&self, rect: Rect, radius: Corners) {
         let cr = &self.cr;

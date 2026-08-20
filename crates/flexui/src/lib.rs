@@ -79,7 +79,11 @@ pub mod clipboard {
         {
             flexui_windows::clipboard_get_text()
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        {
+            flexui_linux::clipboard_get_text()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             None
         }
@@ -95,6 +99,10 @@ pub mod clipboard {
         #[cfg(target_os = "windows")]
         {
             flexui_windows::clipboard_set_text(text);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            flexui_linux::clipboard_set_text(text);
         }
     }
 }

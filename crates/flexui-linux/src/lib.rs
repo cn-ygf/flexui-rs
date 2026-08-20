@@ -4,7 +4,9 @@
 //! ImageSurface）；`window` 用 X11 建窗口、跑事件循环，把像素 blit 到窗口。
 
 mod canvas;
+mod clipboard;
 mod window;
 
 pub use canvas::CairoCanvas;
+pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_text};
 pub use window::{run_multi, set_application_icon};
