@@ -501,12 +501,13 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
 
     st.layout_dirty |= st.disp.take_layout();
     let need = st.disp.take_redraw();
-    let _ = st.disp.take_dirty();
+    let dirty = st.disp.take_dirty();
     if close_requested {
         close_window(conn, st);
         return;
     }
-    if need || st.layout_dirty {
+    // 整窗重绘：脏区(如滚动/hover)、需重绘、或需重排都触发。
+    if need || st.layout_dirty || dirty.is_some() {
         render(conn, st);
     }
 }
@@ -546,8 +547,8 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
     }
     st.layout_dirty |= st.disp.take_layout();
     let need = st.disp.take_redraw();
-    let _ = st.disp.take_dirty();
-    if need || st.layout_dirty {
+    let dirty = st.disp.take_dirty();
+    if need || st.layout_dirty || dirty.is_some() {
         render(conn, st);
     }
 }
