@@ -53,6 +53,8 @@ struct WinState {
     cursor_arrow: Cursor,
     cursor_text: Cursor,
     text_cursor_active: bool,
+    /// 上次左键按下的时间与位置，用于软件判定双击（X11 无原生双击）。
+    last_click: Option<(Instant, Point)>,
     /// 回调里 open_window/open_modal 请求的新窗口，事件循环稍后建。
     pending_windows: Vec<NewWindow>,
     open: bool,
@@ -377,6 +379,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         cursor_arrow: f.cursor_arrow,
         cursor_text: f.cursor_text,
         text_cursor_active: false,
+        last_click: None,
         surface: None,
         images: new_image_cache(),
         pending_windows: Vec::new(),
@@ -592,7 +595,22 @@ fn handle_x_event(
                 }
                 let down = |button| Event::MouseDown { pos, button, mods };
                 match e.detail {
-                    1 => dispatch(conn, st, down(MouseButton::Left)),
+                    1 => {
+                        dispatch(conn, st, down(MouseButton::Left));
+                        // 软件双击判定：与上次左键 ≤400ms 且位置 ≤4px 视为双击。
+                        let now = Instant::now();
+                        let is_double = st.last_click.is_some_and(|(t, p)| {
+                            now.duration_since(t) <= Duration::from_millis(400)
+                                && (p.x - pos.x).abs() <= 4.0
+                                && (p.y - pos.y).abs() <= 4.0
+                        });
+                        if is_double {
+                            dispatch(conn, st, Event::DoubleClick { pos });
+                            st.last_click = None; // 三击不再叠成第二次双击
+                        } else {
+                            st.last_click = Some((now, pos));
+                        }
+                    }
                     2 => dispatch(conn, st, down(MouseButton::Middle)),
                     3 => dispatch(conn, st, down(MouseButton::Right)),
                     4 => dispatch(conn, st, Event::MouseWheel { pos, dx: 0.0, dy: 40.0 }),
