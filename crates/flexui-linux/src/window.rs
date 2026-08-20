@@ -41,6 +41,8 @@ struct WinState {
     scale: f32,
     surface: Option<ImageSurface>,
     images: SharedImageCache,
+    /// 回调里 open_window/open_modal 请求的新窗口，事件循环稍后建。
+    pending_windows: Vec<NewWindow>,
     open: bool,
 }
 
@@ -158,105 +160,105 @@ fn open_overlay_request(disp: &mut Dispatcher, request: OverlayRequest) {
     }
 }
 
+/// 建窗口用的共享参数（供初始窗口与回调里 open_window 复用）。
+struct WinFactory {
+    x_root: Window,
+    depth: u8,
+    visual: u32,
+    wm_protocols: u32,
+    wm_delete: u32,
+    scale: f32,
+}
+
+/// 按 spec 建一个 X 窗口并组装 WinState（不含 delegate 初始化）。
+fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinState {
+    let xid = conn.generate_id().unwrap();
+    let gc = conn.generate_id().unwrap();
+    let w = (spec.config.width * f.scale).max(1.0) as u16;
+    let h = (spec.config.height * f.scale).max(1.0) as u16;
+    let aux = CreateWindowAux::new().event_mask(
+        EventMask::EXPOSURE
+            | EventMask::KEY_PRESS
+            | EventMask::KEY_RELEASE
+            | EventMask::BUTTON_PRESS
+            | EventMask::BUTTON_RELEASE
+            | EventMask::POINTER_MOTION
+            | EventMask::STRUCTURE_NOTIFY
+            | EventMask::FOCUS_CHANGE,
+    );
+    let _ = conn.create_window(
+        COPY_DEPTH_FROM_PARENT,
+        xid,
+        f.x_root,
+        0,
+        0,
+        w,
+        h,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        f.visual,
+        &aux,
+    );
+    let _ = conn.create_gc(gc, xid, &CreateGCAux::new());
+    let _ = conn.change_property8(
+        PropMode::REPLACE,
+        xid,
+        AtomEnum::WM_NAME,
+        AtomEnum::STRING,
+        spec.config.title.as_bytes(),
+    );
+    let _ = conn.change_property32(
+        PropMode::REPLACE,
+        xid,
+        f.wm_protocols,
+        AtomEnum::ATOM,
+        &[f.wm_delete],
+    );
+    let _ = conn.map_window(xid);
+
+    WinState {
+        xid,
+        gc,
+        depth: f.depth,
+        root: spec.root,
+        disp: spec.disp,
+        delegate: spec.delegate,
+        localizer: spec.localizer,
+        layout_dirty: true,
+        width: spec.config.width,
+        height: spec.config.height,
+        scale: f.scale,
+        surface: None,
+        images: new_image_cache(),
+        pending_windows: Vec::new(),
+        open: true,
+    }
+}
+
 /// 启动应用（多窗口）：建窗口、进共享事件循环。
 pub fn run_multi(windows: Vec<NewWindow>) {
     let (conn, screen_num) = x11rb::connect(None).expect("连接 X server 失败（需 DISPLAY）");
     let screen = &conn.setup().roots[screen_num];
-    let root = screen.root;
-    let depth = screen.root_depth;
-    let visual = screen.root_visual;
-
-    // WM_DELETE_WINDOW 协议原子。
-    let wm_protocols = conn
-        .intern_atom(false, b"WM_PROTOCOLS")
-        .unwrap()
-        .reply()
-        .unwrap()
-        .atom;
-    let wm_delete = conn
-        .intern_atom(false, b"WM_DELETE_WINDOW")
-        .unwrap()
-        .reply()
-        .unwrap()
-        .atom;
-
-    let scale = detect_scale(&conn, root);
+    let x_root = screen.root;
+    let factory = WinFactory {
+        x_root,
+        depth: screen.root_depth,
+        visual: screen.root_visual,
+        wm_protocols: intern(&conn, b"WM_PROTOCOLS").unwrap_or(0),
+        wm_delete: intern(&conn, b"WM_DELETE_WINDOW").unwrap_or(0),
+        scale: detect_scale(&conn, x_root),
+    };
 
     let mut states: HashMap<Window, WinState> = HashMap::new();
-
     for spec in windows {
-        let xid = conn.generate_id().unwrap();
-        let gc = conn.generate_id().unwrap();
-        // 窗口按物理像素建：逻辑尺寸 × scale。
-        let w = (spec.config.width * scale).max(1.0) as u16;
-        let h = (spec.config.height * scale).max(1.0) as u16;
-        let aux = CreateWindowAux::new().event_mask(
-            EventMask::EXPOSURE
-                | EventMask::KEY_PRESS
-                | EventMask::KEY_RELEASE
-                | EventMask::BUTTON_PRESS
-                | EventMask::BUTTON_RELEASE
-                | EventMask::POINTER_MOTION
-                | EventMask::STRUCTURE_NOTIFY
-                | EventMask::FOCUS_CHANGE,
-        );
-        conn.create_window(
-            COPY_DEPTH_FROM_PARENT,
-            xid,
-            root,
-            0,
-            0,
-            w,
-            h,
-            0,
-            WindowClass::INPUT_OUTPUT,
-            visual,
-            &aux,
-        )
-        .unwrap();
-        conn.create_gc(gc, xid, &CreateGCAux::new()).unwrap();
-        // 标题。
-        let _ = conn.change_property8(
-            PropMode::REPLACE,
-            xid,
-            AtomEnum::WM_NAME,
-            AtomEnum::STRING,
-            spec.config.title.as_bytes(),
-        );
-        // 参与 WM_DELETE_WINDOW（关闭按钮走 ClientMessage）。
-        let _ = conn.change_property32(
-            PropMode::REPLACE,
-            xid,
-            wm_protocols,
-            AtomEnum::ATOM,
-            &[wm_delete],
-        );
-        conn.map_window(xid).unwrap();
-
-        let mut st = WinState {
-            xid,
-            gc,
-            depth,
-            root: spec.root,
-            disp: spec.disp,
-            delegate: spec.delegate,
-            localizer: spec.localizer,
-            layout_dirty: true,
-            width: spec.config.width,
-            height: spec.config.height,
-            scale,
-            surface: None,
-            images: new_image_cache(),
-            open: true,
-        };
-        // 初始化回调。
+        let mut st = create_win(&conn, &factory, spec);
         run_delegate_init(&conn, &mut st);
-        states.insert(xid, st);
+        states.insert(st.xid, st);
     }
     conn.flush().unwrap();
 
     let kbd = Keyboard::query(&conn);
-    event_loop(&conn, wm_delete, &kbd, states);
+    event_loop(&conn, &factory, &kbd, states);
 }
 
 /// 触发 on_before_init / on_init / on_initialized。
@@ -274,8 +276,10 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
     st.delegate.on_initialized(&mut ctx);
     let overlay_reqs = ctx.take_overlay_requests();
     let anim_reqs = ctx.take_anim_requests();
+    let new_wins = ctx.take_new_windows();
     let inval = ctx.take_invalidation();
     drop(ctx);
+    st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
     for req in overlay_reqs {
         open_overlay_request(&mut st.disp, req);
@@ -291,7 +295,7 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
 /// 共享事件循环：处理 X 事件 + ~60fps 帧节拍。
 fn event_loop(
     conn: &RustConnection,
-    wm_delete: u32,
+    factory: &WinFactory,
     kbd: &Keyboard,
     mut states: HashMap<Window, WinState>,
 ) {
@@ -310,7 +314,7 @@ fn event_loop(
         }
         // 处理已到达的 X 事件（非阻塞）。
         while let Ok(Some(ev)) = conn.poll_for_event() {
-            handle_x_event(conn, wm_delete, kbd, &mut states, ev);
+            handle_x_event(conn, factory.wm_delete, kbd, &mut states, ev);
         }
         // 帧节拍。
         let now = Instant::now();
@@ -323,6 +327,17 @@ fn event_loop(
                     tick_frame(conn, st, dt);
                 }
             }
+        }
+        // 回调里请求的新窗口（open_window/open_modal）→ 建窗接入。
+        let new_specs: Vec<NewWindow> = states
+            .values_mut()
+            .flat_map(|st| st.pending_windows.drain(..))
+            .collect();
+        for spec in new_specs {
+            let mut st = create_win(conn, factory, spec);
+            run_delegate_init(conn, &mut st);
+            render(conn, &mut st);
+            states.insert(st.xid, st);
         }
         // 收掉已关闭窗口。
         states.retain(|_, st| st.open);
@@ -611,7 +626,7 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
     let contexts = st.disp.take_context_clicks();
     let control_events = st.disp.take_control_events();
 
-    let (close_requested, inval, overlay_reqs, anim_reqs) = if !acts.is_empty()
+    let (close_requested, inval, overlay_reqs, anim_reqs, new_wins) = if !acts.is_empty()
         || !doubles.is_empty()
         || !contexts.is_empty()
         || !control_events.is_empty()
@@ -649,11 +664,13 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
         }
         let o = ctx.take_overlay_requests();
         let a = ctx.take_anim_requests();
+        let nw = ctx.take_new_windows();
         let i = ctx.take_invalidation();
-        (handle.close_requested, i, o, a)
+        (handle.close_requested, i, o, a, nw)
     } else {
-        (false, Invalidation::None, Vec::new(), Vec::new())
+        (false, Invalidation::None, Vec::new(), Vec::new(), Vec::new())
     };
+    st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
     if close_requested {
         close_window(conn, st);
@@ -685,7 +702,7 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
     let tasks = st.disp.drain_ui_tasks();
     let control_events = st.disp.take_control_events();
     if !msgs.is_empty() || !tasks.is_empty() || !control_events.is_empty() {
-        let (close_requested, inval, overlay_reqs, anim_reqs) = {
+        let (close_requested, inval, overlay_reqs, anim_reqs, new_wins) = {
             let mut handle = LinuxWindowHandle::new(conn, st.xid);
             let localizer = st.localizer.clone();
             let mut ctx = WindowCtx::with_proxy_and_localizer(
@@ -705,9 +722,11 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
             }
             let o = ctx.take_overlay_requests();
             let a = ctx.take_anim_requests();
+            let nw = ctx.take_new_windows();
             let i = ctx.take_invalidation();
-            (handle.close_requested, i, o, a)
+            (handle.close_requested, i, o, a, nw)
         };
+        st.pending_windows.extend(new_wins);
         st.disp.invalidate(inval);
         if close_requested {
             close_window(conn, st);
