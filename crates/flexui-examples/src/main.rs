@@ -16,5 +16,8 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     flexui::set_application_icon(include_bytes!("../assets/app.icns"));
+    // Linux 用 .ico（image crate 不识别 .icns）→ 设 _NET_WM_ICON 任务栏图标。
+    #[cfg(target_os = "linux")]
+    flexui::set_application_icon(include_bytes!("../assets/app.ico"));
     Window::new(MainWindow::default()).center().run();
 }

@@ -5,6 +5,7 @@
 //! 推进动画、排空后台消息、按需重绘。
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use cairo::{Format, ImageSurface};
@@ -281,6 +282,7 @@ struct WinFactory {
     net_wm_name: u32,
     utf8_string: u32,
     motif_hints: u32,
+    net_wm_icon: u32,
     scale: f32,
     /// 预建的箭头 / I 型光标（cursor 字体字形），供悬停文本时切换。
     cursor_arrow: Cursor,
@@ -341,6 +343,18 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         AtomEnum::ATOM,
         &[f.wm_delete],
     );
+    // 任务栏 / Alt-Tab 图标：_NET_WM_ICON（CARDINAL[]，width,height,ARGB 像素）。
+    if f.net_wm_icon != 0 {
+        if let Some(icon) = APP_ICON.get() {
+            let _ = conn.change_property32(
+                PropMode::REPLACE,
+                xid,
+                f.net_wm_icon,
+                AtomEnum::CARDINAL,
+                icon,
+            );
+        }
+    }
     let frameless = spec.config.titlebar != TitlebarMode::System;
     // 无边框：用 _MOTIF_WM_HINTS 去掉 WM 装饰（app 自绘标题栏）。
     if frameless && f.motif_hints != 0 {
@@ -414,6 +428,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         net_wm_name: intern(&conn, b"_NET_WM_NAME").unwrap_or(0),
         utf8_string: intern(&conn, b"UTF8_STRING").unwrap_or(0),
         motif_hints: intern(&conn, b"_MOTIF_WM_HINTS").unwrap_or(0),
+        net_wm_icon: intern(&conn, b"_NET_WM_ICON").unwrap_or(0),
         scale: detect_scale(&conn, x_root),
         // XC_left_ptr=68（箭头）、XC_xterm=152（I 型），来自 X11 "cursor" 字体。
         cursor_arrow: create_font_cursor(&conn, 68),
@@ -1084,5 +1099,27 @@ fn present(
     let _ = conn.flush();
 }
 
-/// 设置应用图标（X11 用 _NET_WM_ICON，后续实现）。
-pub fn set_application_icon(_bytes: &[u8]) {}
+/// 应用图标的 _NET_WM_ICON 载荷（width, height, ARGB 像素），建窗时写到每个窗口。
+static APP_ICON: OnceLock<Vec<u32>> = OnceLock::new();
+
+/// 设置应用图标：解码图片（png/jpeg/ico）为 _NET_WM_ICON 载荷，建窗时应用。
+/// 与 macOS 设 Dock 图标、Windows 用 .ico 资源对位。
+pub fn set_application_icon(bytes: &[u8]) {
+    if let Some(payload) = build_icon_payload(bytes) {
+        let _ = APP_ICON.set(payload);
+    }
+}
+
+/// 把图片字节解码成 _NET_WM_ICON 载荷：`[width, height, 0xAARRGGBB 像素...]`。
+fn build_icon_payload(bytes: &[u8]) -> Option<Vec<u32>> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    let mut data = Vec::with_capacity(2 + (w * h) as usize);
+    data.push(w);
+    data.push(h);
+    for px in img.pixels() {
+        let [r, g, b, a] = px.0;
+        data.push((a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | b as u32);
+    }
+    Some(data)
+}
