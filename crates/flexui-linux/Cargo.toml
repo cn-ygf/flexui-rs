@@ -22,3 +22,6 @@ pango = "0.20"
 pangocairo = "0.20"
 x11rb = { version = "0.13", features = ["shape"] }
 arboard = { version = "3", default-features = false }
+# XIM 客户端：接系统输入法(ibus/fcitx 经 XIM 桥)做中文合成输入。纯 Rust，走
+# 现有 x11rb 连接，不引入 libX11。
+xim = { version = "0.5", default-features = false, features = ["client", "x11rb-client"] }

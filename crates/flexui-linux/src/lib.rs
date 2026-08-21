@@ -9,6 +9,7 @@
 mod canvas;
 mod clipboard;
 mod dialog;
+mod ime;
 mod menu;
 mod window;
 

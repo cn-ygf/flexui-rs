@@ -10,12 +10,14 @@ use std::time::{Duration, Instant};
 
 use cairo::{Format, ImageSurface};
 use flexui_core::{
-    hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation, MouseButton,
-    NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect, Size,
-    TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
+    find_mut_by_id, hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation,
+    MouseButton, NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect,
+    Size, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
     WindowHandle, WindowPresentation,
 };
 use flexui_core::event::Mods;
+
+use crate::ime::Ime;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
@@ -444,7 +446,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     conn.flush().unwrap();
 
     let kbd = Keyboard::query(&conn);
-    event_loop(&conn, &factory, &kbd, states);
+    event_loop(&conn, &factory, &kbd, states, screen_num);
 }
 
 /// 触发 on_before_init / on_init / on_initialized。
@@ -484,9 +486,14 @@ fn event_loop(
     factory: &WinFactory,
     kbd: &Keyboard,
     mut states: HashMap<Window, WinState>,
+    screen_num: usize,
 ) {
     let frame = Duration::from_millis(16);
     let mut last_tick = Instant::now();
+
+    // XIM 输入法：绑定到主窗口（第一个）。无输入法服务器则为 None，回落直接按键。
+    let main_win = states.keys().next().copied();
+    let mut ime = main_win.and_then(|w| Ime::new(conn, screen_num, w));
 
     // 首帧渲染。
     for st in states.values_mut() {
@@ -500,6 +507,20 @@ fn event_loop(
         }
         // 处理已到达的 X 事件（非阻塞）。
         while let Ok(Some(ev)) = conn.poll_for_event() {
+            if let Some(ime) = ime.as_mut() {
+                // XIM 协议事件：消费并触发回调，随后应用产出的提交/预编辑/转发键。
+                if ime.filter(&ev) {
+                    apply_ime_output(conn, &mut states, kbd, ime);
+                    continue;
+                }
+                // IC 就绪后，按键先转发给输入法（合成结果经后续 XIM 事件回来）。
+                if ime.ready() {
+                    if let XEvent::KeyPress(e) | XEvent::KeyRelease(e) = &ev {
+                        ime.forward_key(e);
+                        continue;
+                    }
+                }
+            }
             handle_x_event(conn, factory.wm_delete, kbd, &mut states, ev);
         }
         // 帧节拍。
@@ -542,19 +563,7 @@ fn handle_x_event(
     match ev {
         XEvent::KeyPress(e) => {
             if let Some(st) = states.get_mut(&e.event) {
-                let mods = mods_from_state(e.state);
-                let keysym = kbd.keysym(e.detail, mods.shift);
-                // Ctrl+C/V/X/A：剪贴板漏斗（复制/粘贴/剪切/全选）。
-                if mods.ctrl && !mods.alt && !mods.meta && handle_clipboard(conn, st, keysym) {
-                    return;
-                }
-                if let Some(key) = keysym_to_key(keysym) {
-                    dispatch(conn, st, Event::KeyDown { key, mods });
-                } else if !mods.ctrl && !mods.meta {
-                    if let Some(ch) = keysym_to_char(keysym) {
-                        dispatch(conn, st, Event::Char { ch });
-                    }
-                }
+                deliver_key_press(conn, st, kbd, e.detail, e.state);
             }
         }
         XEvent::KeyRelease(e) => {
@@ -753,6 +762,80 @@ fn detect_scale(conn: &RustConnection, root: Window) -> f32 {
         }
     }
     1.0
+}
+
+/// 应用一批输入法产出：预编辑串 → marked text；提交串 → 逐字符 Char；转发键 → 照常处理。
+fn apply_ime_output(
+    conn: &RustConnection,
+    states: &mut HashMap<Window, WinState>,
+    kbd: &Keyboard,
+    ime: &mut Ime,
+) {
+    let out = ime.drain();
+    if out.is_empty() {
+        return;
+    }
+    let Some(st) = states.get_mut(&out.window) else {
+        return;
+    };
+    // 预编辑串（合成中、带下划线的临时文字）。
+    if let Some(text) = out.preedit {
+        if set_focused_marked_text(st, text) {
+            st.layout_dirty = true;
+            render(conn, st);
+        }
+    }
+    // 提交串：逐字符发 Char（Edit/Label 按普通输入插入）。
+    for segment in out.commits {
+        for ch in segment.chars() {
+            dispatch(conn, st, Event::Char { ch });
+        }
+    }
+    // 输入法未消费、退回的按键：只处理按下（KeyUp 对文本编辑不关键）。
+    for (keycode, state, is_press) in out.keys {
+        if is_press {
+            deliver_key_press(conn, st, kbd, keycode, KeyButMask::from(state));
+        }
+    }
+}
+
+/// 给当前聚焦控件设置/清除预编辑串（空串=清除）。返回是否有变化。
+fn set_focused_marked_text(st: &mut WinState, text: String) -> bool {
+    let Some(id) = st.disp.focus() else {
+        return false;
+    };
+    let Some(w) = find_mut_by_id(st.root.as_mut(), id) else {
+        return false;
+    };
+    if text.is_empty() {
+        w.clear_marked_text()
+    } else {
+        w.set_marked_text(text)
+    }
+}
+
+/// 交付一次按键（KeyPress 语义）：剪贴板漏斗 → 导航键 KeyDown → 可输入字符 Char。
+/// 直接按键路径与「XIM 未消费而转发回来的按键」共用此逻辑。
+fn deliver_key_press(
+    conn: &RustConnection,
+    st: &mut WinState,
+    kbd: &Keyboard,
+    keycode: u8,
+    state: KeyButMask,
+) {
+    let mods = mods_from_state(state);
+    let keysym = kbd.keysym(keycode, mods.shift);
+    // Ctrl+C/V/X/A：剪贴板漏斗（复制/粘贴/剪切/全选）。
+    if mods.ctrl && !mods.alt && !mods.meta && handle_clipboard(conn, st, keysym) {
+        return;
+    }
+    if let Some(key) = keysym_to_key(keysym) {
+        dispatch(conn, st, Event::KeyDown { key, mods });
+    } else if !mods.ctrl && !mods.meta {
+        if let Some(ch) = keysym_to_char(keysym) {
+            dispatch(conn, st, Event::Char { ch });
+        }
+    }
 }
 
 /// Ctrl+A/C/X/V 剪贴板漏斗。返回是否已处理（处理了就不再当普通按键）。
