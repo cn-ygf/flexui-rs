@@ -1,14 +1,16 @@
 //! Edit：文本输入（选区、复制/剪切/粘贴、IME；单行/多行）。
 
-use std::cell::Cell;
+use std::cell::{Cell, Ref, RefCell};
 
-use flexui_geometry::{Color, Point, Rect, Size};
-use flexui_gfx::{Canvas, TextLayout};
+use flexui_gfx::{Color, Point, Rect, Size};
+use flexui_gfx::{Canvas, Font, LayerHandle, TextLayout};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::anim::AnimProp;
 use crate::common_builders;
 use crate::event::{keys, Event, EventFlow, MouseButton};
 use crate::layout;
+use crate::scroll::{paint_scrollbars, ScrollAxes, ScrollBarStyle, ScrollState};
 use crate::style::{PlaceholderStyleSet, StyleSpec};
 use crate::theme::WidgetKind;
 use crate::widget::{
@@ -20,12 +22,30 @@ const SEL_COLOR: Color = Color::rgba(0.20, 0.45, 0.95, 0.35);
 const PLACEHOLDER_COLOR: Color = Color::rgba(0.50, 0.50, 0.50, 1.0);
 const CARET_WIDTH: f32 = 1.0;
 
-/// 逻辑行缓存；排版、绘制、光标与命中测试共用同一个平台文字布局。
+/// 逻辑行缓存。整形（`layout`）按需惰性生成：只有真正被绘制/命中的行才会调用
+/// 平台整形，避免大文本（如 16KB 响应）在每次重排时对全部行做整形，拖高 CPU。
 struct LineCache {
     start: usize,
     char_len: usize,
+    /// 原始行文本（不含掩码）；惰性整形时再套 `display_slice`。
+    text: String,
     grapheme_boundaries: Vec<usize>,
-    layout: TextLayout,
+    /// 惰性整形结果；None 表示尚未整形。用 `RefCell` 以便 `&self` 的绘制阶段填充。
+    layout: RefCell<Option<TextLayout>>,
+}
+
+/// 静态多行内容的离屏「过扫描带」缓存：把可见区上下各多渲染一屏到离屏位图，
+/// 滚动时只要还在带内就整块 blit，不再逐行重画（滚动大文本时大幅降 CPU）。
+struct BandCache {
+    layer: LayerHandle,
+    /// 带顶部对应的内容坐标 y（= 首行索引 × 行高）。
+    top: f32,
+    /// 带高度（内容坐标）。
+    height: f32,
+    /// 渲染时的内容宽度、像素密度、文本版本；任一变化即失效重建。
+    width: f32,
+    scale: f32,
+    rev: u64,
 }
 
 /// Edit 的持久配置，不污染所有控件共享的 Base。
@@ -39,6 +59,8 @@ pub struct EditConfig {
     pub password_char: char,
     pub max_chars: Option<usize>,
     pub auto_select_all: bool,
+    /// 多行：文本追加后自动滚到底部（日志/聊天场景）。
+    pub auto_scroll: bool,
 }
 
 impl Default for EditConfig {
@@ -53,6 +75,7 @@ impl Default for EditConfig {
             password_char: '\u{2022}',
             max_chars: None,
             auto_select_all: false,
+            auto_scroll: false,
         }
     }
 }
@@ -80,8 +103,20 @@ pub struct Edit {
     line_h: f32,
     /// 缓存是否因文本变更而过期（过期时映射回退到等宽估算）。
     cache_dirty: bool,
-    /// 单行内容向左卷起的逻辑像素。
-    scroll_x: Cell<f32>,
+    /// 统一滚动状态：单行走横向（`offset.x`），多行走纵向（`offset.y`）。
+    /// 用 `Cell` 以便 `&self` 的绘制阶段随光标跟随更新。
+    scroll: Cell<ScrollState>,
+    /// 纵向滚动条外观（多行内容超出视口时绘制）。
+    scrollbar: ScrollBarStyle,
+    /// 文本发生追加/替换、等待下一次 arrange 时跟随到底部（配合 auto_scroll）。
+    append_pending: bool,
+    /// 逐行排版缓存对应的字体；与当前字体一致且 !cache_dirty 时复用 lines，
+    /// 避免大文本在无关布局（兄弟控件变化触发的全树 arrange）时重复整形。
+    shaped_font: Option<Font>,
+    /// 文本/行元数据版本号；每次重建 lines 自增，用于让离屏带缓存失效。
+    content_rev: u64,
+    /// 静态多行内容的离屏带缓存（`&self` 绘制阶段填充，故用 `RefCell`）。
+    band: RefCell<Option<BandCache>>,
     /// 最近一次排版/绘制得到的真实插入点矩形。
     caret_rect: Cell<Option<Rect>>,
 }
@@ -97,7 +132,12 @@ impl Edit {
             placeholder_layout: None,
             line_h: 0.0,
             cache_dirty: true,
-            scroll_x: Cell::new(0.0),
+            scroll: Cell::new(ScrollState::new(ScrollAxes::both())),
+            scrollbar: ScrollBarStyle::default(),
+            append_pending: false,
+            shaped_font: None,
+            content_rev: 0,
+            band: RefCell::new(None),
             caret_rect: Cell::new(None),
         }
     }
@@ -146,6 +186,18 @@ impl Edit {
     }
     pub fn auto_select_all(mut self, on: bool) -> Self {
         self.config.auto_select_all = on;
+        self
+    }
+    /// 多行：文本追加后自动滚到底部。
+    pub fn auto_scroll(mut self, on: bool) -> Self {
+        self.config.auto_scroll = on;
+        self
+    }
+    /// 滚动条可见性模式（auto/always/hidden）。
+    pub fn scrollbar(self, visibility: crate::scroll::ScrollBarVisibility) -> Self {
+        let mut state = self.scroll.get();
+        state.set_visibility(visibility);
+        self.scroll.set(state);
         self
     }
 
@@ -206,13 +258,11 @@ impl Edit {
     }
 
     fn grapheme_char_boundaries(text: &str) -> Vec<usize> {
-        let mut boundaries = text
-            .grapheme_indices(true)
-            .map(|(byte, _)| Self::byte_to_char(text, byte))
-            .collect::<Vec<_>>();
-        let end = text.chars().count();
-        if boundaries.last().copied() != Some(end) {
-            boundaries.push(end);
+        let mut boundaries = vec![0];
+        let mut char_index = 0;
+        for grapheme in text.graphemes(true) {
+            char_index += grapheme.chars().count();
+            boundaries.push(char_index);
         }
         boundaries
     }
@@ -333,6 +383,7 @@ impl Edit {
         self.state.cursor = idx + n;
         self.state.sel_anchor = None;
         self.cache_dirty = true;
+        self.append_pending = true;
         true
     }
 
@@ -365,16 +416,35 @@ impl Edit {
         self.delete_range(idx, self.next_grapheme_boundary(idx));
     }
 
-    /// 行内本地 x → 最近 grapheme 边界列号（0..=行长）。
+    /// 惰性取第 li 行的整形结果：缺失则用 `cv` 现场整形并缓存。仅可见/被命中的行会整形。
+    fn line_layout(&self, cv: &dyn Canvas, li: usize) -> Option<Ref<'_, TextLayout>> {
+        let line = self.lines.get(li)?;
+        if line.layout.borrow().is_none() {
+            let shaped = cv.layout_text(&self.display_slice(&line.text), &self.base.font);
+            *line.layout.borrow_mut() = Some(shaped);
+        }
+        Some(Ref::map(line.layout.borrow(), |slot| slot.as_ref().unwrap()))
+    }
+
+    /// 按等宽估算的列号（未整形时的回退）。
+    fn est_col(&self, local_x: f32) -> usize {
+        ((local_x / (self.base.font.size * 0.6).max(1.0)).round().max(0.0)) as usize
+    }
+
+    /// 行内本地 x → 最近 grapheme 边界列号（0..=行长）。无 Canvas，仅用已整形（可见）行，
+    /// 否则回退等宽估算。
     fn col_at(&self, li: usize, local_x: f32) -> usize {
-        let est = |x: f32| ((x / (self.base.font.size * 0.6).max(1.0)).round().max(0.0)) as usize;
         if self.cache_dirty || li >= self.lines.len() {
-            return est(local_x);
+            return self.est_col(local_x);
         }
         let line = &self.lines[li];
-        let raw = line.layout.closest_char_for_x(local_x);
+        let slot = line.layout.borrow();
+        let Some(layout) = slot.as_ref() else {
+            return self.est_col(local_x).min(line.char_len);
+        };
+        let raw = layout.closest_char_for_x(local_x);
         Self::snap_to_grapheme_boundary(raw, local_x, &line.grapheme_boundaries, |index| {
-            line.layout.x_for_char(index)
+            layout.x_for_char(index)
         })
     }
 
@@ -390,11 +460,12 @@ impl Edit {
     /// 绝对坐标 → 字符索引（多行按 y 定位行，再按 x 定位列）。
     fn hit_index(&self, pos: Point) -> usize {
         let content = layout::content_rect(&self.base);
+        let offset = self.scroll.get().offset();
         let local_x = pos.x - content.left()
             + if self.config.multiline {
                 0.0
             } else {
-                self.scroll_x.get()
+                offset.x
             };
         if !self.config.multiline && !self.cache_dirty {
             if let Some(layout) = &self.display_layout {
@@ -437,7 +508,7 @@ impl Edit {
             return ((local_x / cw).round().max(0.0) as usize).min(self.char_count());
         }
         let li = if self.config.multiline {
-            let rel = (pos.y - content.top()) / self.line_height();
+            let rel = (pos.y - content.top() + offset.y) / self.line_height();
             (rel.floor().max(0.0) as usize).min(self.lines.len() - 1)
         } else {
             0
@@ -466,15 +537,27 @@ impl Edit {
         }
         let (line, col) = self.pos_of(self.state.cursor);
         let target = (line as i32 + dir).clamp(0, self.lines.len() as i32 - 1) as usize;
-        let x = self.lines[line].layout.x_for_char(col);
-        let target_line = &self.lines[target];
-        let raw_target_col = target_line.layout.closest_char_for_x(x);
-        let target_col = Self::snap_to_grapheme_boundary(
-            raw_target_col,
-            x,
-            &target_line.grapheme_boundaries,
-            |index| target_line.layout.x_for_char(index),
-        );
+        let char_w = (self.base.font.size * 0.6).max(1.0);
+        // 当前行 x：优先用已整形结果，否则等宽估算。
+        let x = self.lines[line]
+            .layout
+            .borrow()
+            .as_ref()
+            .map(|l| l.x_for_char(col))
+            .unwrap_or_else(|| col as f32 * char_w);
+        let target_col = {
+            let target_line = &self.lines[target];
+            let slot = target_line.layout.borrow();
+            match slot.as_ref() {
+                Some(layout) => Self::snap_to_grapheme_boundary(
+                    layout.closest_char_for_x(x),
+                    x,
+                    &target_line.grapheme_boundaries,
+                    |index| layout.x_for_char(index),
+                ),
+                None => ((x / char_w).round().max(0.0) as usize).min(target_line.char_len),
+            }
+        };
         let nidx = self.lines[target].start + target_col.min(self.lines[target].char_len);
         self.set_cursor(nidx, extend);
     }
@@ -548,16 +631,55 @@ impl Edit {
             return;
         }
         let sel = self.sel_range();
-        let (cur_line, cur_col) = self.pos_of(self.state.cursor);
+        // 仅在需要画光标时才求光标行（省去未聚焦大文本每帧 O(行数) 的定位）。
+        let draw_caret = self.base.focused && self.base.caret_on;
+        let (cur_line, cur_col) = if draw_caret {
+            self.pos_of(self.state.cursor)
+        } else {
+            (usize::MAX, 0)
+        };
 
-        let mut y = content.top();
-        for (i, line) in self.lines.iter().enumerate() {
+        let offset_y = self.scroll.get().offset().y;
+        // 静态内容（未聚焦、无选区、无 IME 组合）走离屏带缓存：滚动时只 blit。
+        let static_content =
+            !self.base.focused && sel.is_none() && self.state.marked.is_empty();
+        if static_content
+            && self.paint_text_band(cv, content, line_h, offset_y, color).is_some()
+        {
+            let state = self.scroll.get();
+            paint_scrollbars(cv, self.scrollbar_viewport(content), &state, &self.scrollbar, style);
+            return;
+        }
+        cv.save();
+        cv.clip_rect(self.text_clip_rect(content));
+        let line_count = self.lines.len();
+        // 直接算出可见行区间，避免每帧遍历全部行（大日志时 O(总行数)→O(可见行数)）。
+        let (first, last) = if line_h > 0.0 {
+            let first = ((offset_y / line_h).floor() as isize - 1).max(0) as usize;
+            let last = (((offset_y + content.size.height) / line_h).floor() as usize + 1)
+                .min(line_count.saturating_sub(1));
+            (first, last)
+        } else {
+            (0, line_count.saturating_sub(1))
+        };
+        for i in first..=last {
+            if i >= line_count {
+                break;
+            }
+            let y = content.top() - offset_y + i as f32 * line_h;
+            let (ls, char_len) = {
+                let line = &self.lines[i];
+                (line.start, line.char_len)
+            };
+            let Some(layout) = self.line_layout(cv, i) else {
+                continue;
+            };
             if let Some((lo, hi)) = sel {
-                let (ls, le) = (line.start, line.start + line.char_len);
+                let le = ls + char_len;
                 let s = lo.max(ls);
                 let e = hi.min(le);
                 if s < e {
-                    for rect in line.layout.selection_rects(s - ls..e - ls, y, line_h) {
+                    for rect in layout.selection_rects(s - ls..e - ls, y, line_h) {
                         cv.fill_rect(
                             Rect::new(
                                 content.left() + rect.left(),
@@ -572,18 +694,117 @@ impl Edit {
             }
             Self::draw_input_layout(
                 cv,
-                &line.layout,
+                &layout,
                 Rect::new(content.left(), y, content.size.width, line_h),
                 color,
             );
-            if self.base.focused && self.base.caret_on && i == cur_line {
-                let cx = content.left() + line.layout.x_for_char(cur_col) + 1.0;
+            if draw_caret && i == cur_line {
+                let cx = content.left() + layout.x_for_char(cur_col) + 1.0;
                 let cyc = y + (line_h - caret_h) / 2.0;
                 let caret = Rect::new(cx, cyc.max(y), CARET_WIDTH, caret_h);
                 self.caret_rect.set(Some(caret));
                 cv.fill_rect(caret, color);
             }
-            y += line_h;
+        }
+        cv.restore();
+        // 内容超出视口时绘制纵向滚动条：贴控件外缘（base.rect 右缘），
+        // 而非内容区右缘，避免被 padding 推离边框太远。
+        let state = self.scroll.get();
+        paint_scrollbars(cv, self.scrollbar_viewport(content), &state, &self.scrollbar, style);
+    }
+
+    /// 滚动条所用视口：纵向跟随内容区，横向贴控件外缘（含 padding）。
+    fn scrollbar_viewport(&self, content: Rect) -> Rect {
+        Rect::new(
+            content.left(),
+            content.top(),
+            (self.base.rect.right() - content.left()).max(0.0),
+            content.size.height,
+        )
+    }
+
+    /// 用离屏「过扫描带」缓存绘制静态多行文本：带内滚动只 blit，越界或内容变更才重建。
+    /// 返回 `Some` 表示已处理；`None` 表示后端不支持离屏或无内容，调用方退化为逐行绘制。
+    fn paint_text_band(
+        &self,
+        cv: &mut dyn Canvas,
+        content: Rect,
+        line_h: f32,
+        offset_y: f32,
+        color: Color,
+    ) -> Option<()> {
+        let line_count = self.lines.len();
+        if line_h <= 0.0 || line_count == 0 || content.size.width <= 0.0 {
+            return None;
+        }
+        let scale = cv.scale();
+        let vh = content.size.height;
+        let content_h = line_count as f32 * line_h;
+        let vis_top = offset_y;
+        let vis_bottom = (offset_y + vh).min(content_h);
+
+        // 复用条件：同版本/宽度/密度，且带完整覆盖当前可见区间。
+        let reuse = {
+            let band = self.band.borrow();
+            band.as_ref().is_some_and(|b| {
+                b.rev == self.content_rev
+                    && (b.width - content.size.width).abs() < 0.5
+                    && (b.scale - scale).abs() < 0.01
+                    && b.top <= vis_top + 0.5
+                    && b.top + b.height >= vis_bottom - 0.5
+            })
+        };
+
+        if !reuse {
+            // 以可见区为中心上下各扩一屏做过扫描带，按整行对齐。
+            let overscan = vh;
+            let band_first = ((vis_top - overscan) / line_h).floor().max(0.0) as usize;
+            let band_last = (((vis_bottom + overscan) / line_h).ceil() as usize).min(line_count);
+            if band_last <= band_first {
+                return None;
+            }
+            let btop = band_first as f32 * line_h;
+            let bheight = (band_last - band_first) as f32 * line_h;
+            let width = content.size.width;
+            let layer = cv.capture_layer(Size::new(width, bheight), &mut |lc| {
+                self.render_band(lc, band_first, band_last, line_h, width, color);
+            })?;
+            *self.band.borrow_mut() = Some(BandCache {
+                layer,
+                top: btop,
+                height: bheight,
+                width,
+                scale,
+                rev: self.content_rev,
+            });
+        }
+
+        let band = self.band.borrow();
+        let b = band.as_ref()?;
+        // 带顶部内容坐标 b.top → 屏幕 y。
+        let screen_y = content.top() - offset_y + b.top;
+        cv.save();
+        cv.clip_rect(self.text_clip_rect(content));
+        cv.draw_layer(&b.layer, Point::new(content.left(), screen_y));
+        cv.restore();
+        Some(())
+    }
+
+    /// 把 [first,last) 行渲染进离屏画布（带内局部坐标，顶部为 0）。
+    fn render_band(
+        &self,
+        cv: &mut dyn Canvas,
+        first: usize,
+        last: usize,
+        line_h: f32,
+        width: f32,
+        color: Color,
+    ) {
+        for i in first..last {
+            let y = (i - first) as f32 * line_h;
+            if let Some(layout) = self.line_layout(cv, i) {
+                Self::draw_input_layout(cv, &layout, Rect::new(0.0, y, width, line_h), color);
+            }
         }
     }
 
@@ -610,27 +831,35 @@ impl Edit {
     }
 
     fn update_single_line_scroll(&self, caret: f32, total: f32, content: Rect) {
-        let width = content.size.width.max(0.0);
-        if width <= 1.0 || total <= width {
-            self.scroll_x.set(0.0);
-            return;
-        }
-        let mut scroll = self.scroll_x.get();
-        if caret < scroll {
-            scroll = caret;
-        } else if caret + 2.0 > scroll + width {
-            scroll = caret + 2.0 - width;
-        }
-        self.scroll_x
-            .set(scroll.clamp(0.0, (total + 2.0 - width).max(0.0)));
+        let mut state = self.scroll.get();
+        // 单行内容尺寸：宽 = 文本总宽 + 光标留白，高 = 视口高（纵向不滚）。
+        state.set_metrics(
+            Size::new(total + 2.0, content.size.height),
+            content.size,
+        );
+        // 让光标（含 2px 留白）保持在视口内。
+        state.ensure_visible(
+            Rect::new(caret, 0.0, CARET_WIDTH + 2.0, content.size.height),
+            0.0,
+        );
+        self.scroll.set(state);
     }
 
     /// 横向严格裁到内容区；纵向保留控件 padding，避免字体抗锯齿下沿被切掉。
+    /// 多行出现纵向滚动条时，文字右缘不越过滚动条左侧（含 gap 留白）。
     fn text_clip_rect(&self, content: Rect) -> Rect {
+        let mut right = content.right();
+        if self.scroll.get().show_v() {
+            let bar_left = self.base.rect.right()
+                - self.scrollbar.margin
+                - self.scrollbar.width
+                - self.scrollbar.gap;
+            right = right.min(bar_left);
+        }
         Rect::new(
             content.left(),
             self.base.rect.top(),
-            content.size.width,
+            (right - content.left()).max(0.0),
             self.base.rect.size.height,
         )
     }
@@ -660,42 +889,56 @@ impl Widget for Edit {
     }
     fn arrange(&mut self, content: Rect, cv: &dyn Canvas) {
         layout::arrange_stack(&mut self.base, content, cv);
-        let text = self.base.text.clone();
-        let mut lines = Vec::new();
-        let mut start = 0usize;
-        for line in text.split('\n') {
-            let n = line.chars().count();
-            let display_line = self.display_slice(line);
-            lines.push(LineCache {
-                start,
-                char_len: n,
-                grapheme_boundaries: Self::grapheme_char_boundaries(line),
-                layout: cv.layout_text(&display_line, &self.base.font),
-            });
-            start += n + 1; // +1 跳过换行符
+        // 逐行整形只依赖 文本 + 字体 + 掩码配置（Edit 不按宽换行）。这些没变就复用缓存，
+        // 避免大文本在无关的全树布局（如兄弟控件文本变化）里被反复重排，拖高 CPU。
+        let font_changed = self.shaped_font.as_ref() != Some(&self.base.font);
+        if self.cache_dirty || font_changed {
+            // 只建立各行的廉价元数据（不做平台整形）；整形推迟到真正绘制/命中该行时。
+            let text = self.base.text.clone();
+            let mut lines = Vec::new();
+            let mut start = 0usize;
+            for line in text.split('\n') {
+                let n = line.chars().count();
+                lines.push(LineCache {
+                    start,
+                    char_len: n,
+                    text: line.to_string(),
+                    grapheme_boundaries: Self::grapheme_char_boundaries(line),
+                    layout: RefCell::new(None),
+                });
+                start += n + 1; // +1 跳过换行符
+            }
+            self.lines = lines;
+            self.shaped_font = Some(self.base.font.clone());
+            // 文本/行结构变了：作废离屏带缓存。
+            self.content_rev = self.content_rev.wrapping_add(1);
+            *self.band.borrow_mut() = None;
         }
-        self.lines = lines;
         self.line_h = cv.layout_text("Ag", &self.base.font).height();
 
-        let before = self
-            .base
-            .text
-            .chars()
-            .take(self.state.cursor)
-            .collect::<String>();
-        let after = self
-            .base
-            .text
-            .chars()
-            .skip(self.state.cursor)
-            .collect::<String>();
-        let display = format!(
-            "{}{}{}",
-            self.display_slice(&before),
-            self.display_slice(&self.state.marked),
-            self.display_slice(&after)
-        );
-        self.display_layout = Some(cv.layout_text(&display, &self.base.font));
+        self.display_layout = if self.config.multiline {
+            None
+        } else {
+            let before = self
+                .base
+                .text
+                .chars()
+                .take(self.state.cursor)
+                .collect::<String>();
+            let after = self
+                .base
+                .text
+                .chars()
+                .skip(self.state.cursor)
+                .collect::<String>();
+            let display = format!(
+                "{}{}{}",
+                self.display_slice(&before),
+                self.display_slice(&self.state.marked),
+                self.display_slice(&after)
+            );
+            Some(cv.layout_text(&display, &self.base.font))
+        };
         let placeholder_style = self
             .config
             .placeholder_style
@@ -706,15 +949,32 @@ impl Widget for Edit {
         self.cache_dirty = false;
         let content = layout::content_rect(&self.base);
         let (line, col) = self.pos_of(self.state.cursor);
+        // 光标所在行需要精确 x：现场整形该行（单行也走这里）。
         let x = self
-            .lines
-            .get(line)
-            .map(|line| line.layout.x_for_char(col))
+            .line_layout(cv, line)
+            .map(|layout| layout.x_for_char(col))
             .unwrap_or(0.0);
         if self.config.multiline {
+            // 更新纵向滚动度量。
+            let mut state = self.scroll.get();
+            let total_h = self.lines.len() as f32 * self.line_h;
+            state.set_metrics(Size::new(content.size.width, total_h), content.size);
+            if self.base.focused {
+                // 编辑中：光标行保持可见。
+                state.ensure_visible(
+                    Rect::new(x, line as f32 * self.line_h, CARET_WIDTH, self.line_h),
+                    0.0,
+                );
+            } else if self.config.auto_scroll && self.append_pending {
+                // 未聚焦 + 开启自动滚动 + 有新文本：跟随到底部。
+                state.set_offset(state.offset().x, state.max().y);
+            }
+            self.append_pending = false;
+            self.scroll.set(state);
+            let offset_y = state.offset().y;
             self.caret_rect.set(Some(Rect::new(
                 content.left() + x + 1.0,
-                content.top() + line as f32 * self.line_h,
+                content.top() + line as f32 * self.line_h - offset_y,
                 CARET_WIDTH,
                 self.base.font.size,
             )));
@@ -738,7 +998,7 @@ impl Widget for Edit {
                 .unwrap_or(self.line_h.max(self.base.font.size));
             let y = (content.top() + (content.size.height - caret_h) / 2.0).max(content.top());
             self.caret_rect.set(Some(Rect::new(
-                content.left() - self.scroll_x.get() + display_x + 1.0,
+                content.left() - self.scroll.get().offset().x + display_x + 1.0,
                 y,
                 CARET_WIDTH,
                 caret_h,
@@ -753,7 +1013,9 @@ impl Widget for Edit {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::BLACK);
         if self.shows_placeholder() {
-            self.scroll_x.set(0.0);
+            let mut state = self.scroll.get();
+            state.set_offset(0.0, 0.0);
+            self.scroll.set(state);
             let style = self
                 .config
                 .placeholder_style
@@ -819,7 +1081,7 @@ impl Widget for Edit {
         let line_h = text_layout.height();
         let line_y = Self::layout_y(text_layout, content);
         self.update_single_line_scroll(marked_end_w, total_w, content);
-        let origin_x = content.left() - self.scroll_x.get();
+        let origin_x = content.left() - self.scroll.get().offset().x;
         cv.save();
         cv.clip_rect(self.text_clip_rect(content));
         // 选区高亮（组合中不画）：先在文字底下铺一条半透明矩形。
@@ -878,6 +1140,7 @@ impl Widget for Edit {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 let idx = self.hit_index(*pos);
                 self.state.cursor = idx;
@@ -1042,6 +1305,12 @@ impl Widget for Edit {
                 self.normalize_text();
             }
             WidgetProperty::AutoSelectAll(v) => self.config.auto_select_all = v,
+            WidgetProperty::AutoScroll(v) => self.config.auto_scroll = v,
+            WidgetProperty::ScrollBar(v) => {
+                let mut state = self.scroll.get();
+                state.set_visibility(v);
+                self.scroll.set(state);
+            }
             _ => return false,
         }
         true
@@ -1068,6 +1337,12 @@ impl Widget for Edit {
             WidgetPropertyKey::AutoSelectAll => {
                 Some(WidgetProperty::AutoSelectAll(self.config.auto_select_all))
             }
+            WidgetPropertyKey::AutoScroll => {
+                Some(WidgetProperty::AutoScroll(self.config.auto_scroll))
+            }
+            WidgetPropertyKey::ScrollBar => {
+                Some(WidgetProperty::ScrollBar(self.scroll.get().visibility()))
+            }
             _ => None,
         }
     }
@@ -1077,11 +1352,58 @@ impl Widget for Edit {
             self.select_all();
         }
     }
+    fn is_scrollable(&self) -> bool {
+        // 仅多行且内容超出视口时接收滚轮（单行靠光标跟随横向卷动）。
+        self.config.multiline && self.scroll.get().needs_v()
+    }
+    fn scroll_by(&mut self, dx: f32, dy: f32) -> bool {
+        let mut state = self.scroll.get();
+        let changed = state.scroll_by(dx, dy);
+        self.scroll.set(state);
+        changed
+    }
+    fn scroll_offset(&self) -> Option<Point> {
+        Some(self.scroll.get().offset())
+    }
+    fn scrollbar_grab(&self, pos: Point) -> Option<crate::scroll::ScrollGrab> {
+        let content = layout::content_rect(&self.base);
+        let state = self.scroll.get();
+        crate::scroll::thumb_grab(&state, self.scrollbar_viewport(content), &self.scrollbar, pos)
+    }
+    fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
+        let content = layout::content_rect(&self.base);
+        let viewport = self.scrollbar_viewport(content);
+        let mut state = self.scroll.get();
+        let changed =
+            crate::scroll::apply_thumb_drag(&mut state, viewport, &self.scrollbar, pos, grab);
+        self.scroll.set(state);
+        changed
+    }
+    fn scrollbar_contains(&self, pos: Point) -> bool {
+        let content = layout::content_rect(&self.base);
+        let state = self.scroll.get();
+        crate::scroll::scrollbar_region_contains(
+            &state,
+            self.scrollbar_viewport(content),
+            &self.scrollbar,
+            pos,
+        )
+    }
+    fn animation_value(&self, prop: AnimProp) -> Option<f32> {
+        self.scroll.get().axis_value(prop)
+    }
+    fn set_animation_value(&mut self, prop: AnimProp, value: f32) -> bool {
+        let mut state = self.scroll.get();
+        let handled = state.set_axis_value(prop, value);
+        self.scroll.set(state);
+        handled
+    }
     fn set_text_value(&mut self, text: String) {
         self.base.text = text;
         self.state.cursor = self.base.text.chars().count();
         self.state.sel_anchor = None;
         self.state.marked.clear();
+        self.append_pending = true;
         self.normalize_text();
     }
     fn text_input_rect(&self) -> Option<Rect> {
@@ -1122,7 +1444,7 @@ impl TextControl for Edit {}
 mod tests {
     use super::*;
     use crate::layout::layout_node;
-    use flexui_geometry::{Color, Corners, Point, Rect, Size};
+    use flexui_gfx::{Color, Corners, Point, Rect, Size};
     use flexui_gfx::Font;
     use std::cell::RefCell;
 
@@ -1347,6 +1669,151 @@ mod tests {
         assert!(h3 > h1, "三行应比一行高: {h3} vs {h1}");
     }
 
+    #[test]
+    fn 多行_autoscroll追加后跟随底部() {
+        let cv = FakeCanvas;
+        let text = (0..20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // 开启 auto_scroll：设文本后布局，偏移应跟随到底部。
+        let mut e = Edit::new().multiline(true).auto_scroll(true);
+        e.set_text_value(text.clone());
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+        let s = e.scroll.get();
+        assert!(s.max().y > 0.0, "内容应溢出视口");
+        assert!((s.offset().y - s.max().y).abs() < 0.5, "auto_scroll 应跟随到底部");
+        // 关闭 auto_scroll：偏移保持顶部。
+        let mut e2 = Edit::new().multiline(true);
+        e2.set_text_value(text);
+        layout_node(&mut e2, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+        assert_eq!(e2.scroll.get().offset().y, 0.0, "未开启则不跟随");
+    }
+
+    #[test]
+    fn 多行大文本_重复布局复用整形缓存() {
+        struct Counting {
+            calls: Cell<usize>,
+        }
+        impl Canvas for Counting {
+            fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+            fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+            fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+            fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+            fn draw_text(&mut self, _t: &str, _o: Point, _f: &Font, _c: Color) {}
+            fn measure_text(&self, t: &str, f: &Font) -> Size {
+                self.calls.set(self.calls.get() + 1);
+                Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+            }
+        }
+        let cv = Counting {
+            calls: Cell::new(0),
+        };
+        let text = (0..50)
+            .map(|i| format!("line {i} with some content"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut e = Edit::new().multiline(true).text(text);
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 100.0), &cv);
+        let first = cv.calls.get();
+        assert!(first > 0);
+        cv.calls.set(0);
+        // 文本/字体不变，再次布局不应重新整形每一行。
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 100.0), &cv);
+        let second = cv.calls.get();
+        assert!(
+            second * 4 < first,
+            "重复布局应复用整形缓存: first={first} second={second}"
+        );
+    }
+
+    #[test]
+    fn 多行静态_滚动复用离屏带() {
+        struct BandCanvas {
+            captures: Cell<usize>,
+            blits: Cell<usize>,
+        }
+        impl Canvas for BandCanvas {
+            fn fill_rect(&mut self, _r: Rect, _c: Color) {}
+            fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
+            fn fill_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color) {}
+            fn stroke_round_rect(&mut self, _r: Rect, _rad: Corners, _c: Color, _w: f32) {}
+            fn draw_text(&mut self, _t: &str, _o: Point, _f: &Font, _c: Color) {}
+            fn measure_text(&self, t: &str, f: &Font) -> Size {
+                Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
+            }
+            fn scale(&self) -> f32 {
+                2.0
+            }
+            fn capture_layer(
+                &mut self,
+                size: Size,
+                draw: &mut dyn FnMut(&mut dyn Canvas),
+            ) -> Option<LayerHandle> {
+                self.captures.set(self.captures.get() + 1);
+                draw(self);
+                Some(LayerHandle::new(size, 2.0, std::rc::Rc::new(())))
+            }
+            fn draw_layer(&mut self, _layer: &LayerHandle, _origin: Point) {
+                self.blits.set(self.blits.get() + 1);
+            }
+        }
+        let mut cv = BandCanvas {
+            captures: Cell::new(0),
+            blits: Cell::new(0),
+        };
+        let text = (0..200)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut e = Edit::new().multiline(true).text(text); // 未聚焦、无选区 → 静态
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 100.0), &cv);
+        // 首帧：建带一次 + blit 一次。
+        e.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.captures.get(), 1);
+        assert_eq!(cv.blits.get(), 1);
+        // 带内小滚动：只 blit，不重建。
+        assert!(e.scroll_by(0.0, -20.0));
+        e.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.captures.get(), 1, "带内滚动应复用离屏带");
+        assert_eq!(cv.blits.get(), 2);
+        // 猛滚越出带：重建一次。
+        assert!(e.scroll_by(0.0, -5000.0));
+        e.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(cv.captures.get(), 2, "越界滚动应重建带");
+    }
+
+    #[test]
+    fn 多行大文本_只整形可见行() {
+        let mut cv = rec_canvas();
+        let text = (0..200)
+            .map(|i| format!("line number {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut e = Edit::new().multiline(true).text(text);
+        // 视口只容纳少量行。
+        layout_node(&mut e, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+        e.paint_content(&mut cv, &StyleSpec::default());
+        let shaped = e.lines.iter().filter(|l| l.layout.borrow().is_some()).count();
+        assert!(e.lines.len() >= 200);
+        assert!(
+            shaped < 20,
+            "只应整形可见行(+光标行)，实际整形 {shaped} / 共 {} 行",
+            e.lines.len()
+        );
+    }
+
+    #[test]
+    fn 多行不创建整段单行排版缓存() {
+        let cv = FakeCanvas;
+        let mut edit = Edit::new().multiline(true).text("first\nsecond");
+
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 200.0, 80.0), &cv);
+
+        assert!(edit.display_layout.is_none());
+        assert_eq!(edit.lines.len(), 2);
+    }
+
     struct FakeCanvas;
     impl Canvas for FakeCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
@@ -1396,7 +1863,7 @@ mod tests {
         let cv = FakeCanvas;
         let mut e = Edit::new().text("abcdefghij");
         layout_node(&mut e, Rect::new(0.0, 0.0, 40.0, 30.0), &cv);
-        assert!(e.scroll_x.get() > 0.0);
+        assert!(e.scroll.get().offset().x > 0.0);
         let content = layout::content_rect(e.base());
         let caret = e.text_input_rect().unwrap();
         assert!(caret.left() >= content.left() && caret.right() <= content.right() + 2.0);

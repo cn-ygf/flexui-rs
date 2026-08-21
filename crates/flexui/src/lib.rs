@@ -54,12 +54,16 @@ pub fn application_localizer() -> Option<Localizer> {
 use flexui_macos::run_multi as backend_run_multi;
 #[cfg(target_os = "windows")]
 use flexui_windows::run_multi as backend_run_multi;
+#[cfg(target_os = "linux")]
+use flexui_linux::run_multi as backend_run_multi;
 
 /// 设置应用图标。macOS 用于 Dock/应用切换器；Windows 的 EXE 图标由构建资源提供。
 pub fn set_application_icon(bytes: &[u8]) {
     #[cfg(target_os = "macos")]
     flexui_macos::set_application_icon(bytes);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    flexui_linux::set_application_icon(bytes);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let _ = bytes;
 }
 
@@ -75,7 +79,11 @@ pub mod clipboard {
         {
             flexui_windows::clipboard_get_text()
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        {
+            flexui_linux::clipboard_get_text()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             None
         }
@@ -91,6 +99,10 @@ pub mod clipboard {
         #[cfg(target_os = "windows")]
         {
             flexui_windows::clipboard_set_text(text);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            flexui_linux::clipboard_set_text(text);
         }
     }
 }
@@ -117,7 +129,11 @@ pub mod dialog {
         {
             flexui_windows::show_dialog(kind, opts)
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        {
+            flexui_linux::show_dialog(kind, opts)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             None
         }
@@ -184,8 +200,12 @@ pub trait WindowImpl: 'static {
         application_localizer()
     }
 
-    /// 窗口与控件创建完成（≈ InitWindow）：绑事件、预设文本等。
+    /// 平台窗口和控件树已建立、应用初始化逻辑尚未执行。
+    fn on_before_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// 窗口初始化（≈ InitWindow）：绑事件、预设文本或取得 `MainProxy`。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// `on_init` 已执行完成，窗口即将显示首帧。
+    fn on_initialized(&mut self, _ctx: &mut WindowCtx) {}
     /// 某具名控件被点击（≈ Notify）。
     fn on_click(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
     /// 具名控件的 hover、focus、文本、选择和值等语义变化。
@@ -200,14 +220,22 @@ pub trait WindowImpl: 'static {
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下。
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
+    /// 鼠标滚轮（dx/dy 为滚动增量）。滚动容器已先行处理；窗口层可据此做缩放等。
+    fn on_wheel(&mut self, _dx: f32, _dy: f32, _ctx: &mut WindowCtx) {}
     /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 文件拖放到窗口（绝对路径）。
     fn on_drop_files(&mut self, _paths: &[String], _ctx: &mut WindowCtx) {}
-    /// 关闭请求；返回 false 阻止关闭。
+    /// 即将关闭；返回 false 阻止关闭。默认转发旧版 `on_close`。
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.on_close(ctx)
+    }
+    /// 兼容旧版关闭钩子；新代码优先实现 `on_closing`。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true
     }
+    /// 原生窗口已经关闭；此时不能再访问 `WindowCtx`。
+    fn on_closed(&mut self) {}
 }
 
 /// 把 WindowImpl 适配成后端可调用的 WindowDelegate。
@@ -216,8 +244,14 @@ struct ImplDelegate<W: WindowImpl> {
 }
 
 impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
+    fn on_before_init(&mut self, ctx: &mut WindowCtx) {
+        self.imp.on_before_init(ctx);
+    }
     fn on_init(&mut self, ctx: &mut WindowCtx) {
         self.imp.on_init(ctx);
+    }
+    fn on_initialized(&mut self, ctx: &mut WindowCtx) {
+        self.imp.on_initialized(ctx);
     }
     fn on_activate(&mut self, name: &str, ctx: &mut WindowCtx) {
         self.imp.on_click(name, ctx);
@@ -240,14 +274,23 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
     fn on_key(&mut self, key: u32, ctx: &mut WindowCtx) {
         self.imp.on_key(key, ctx);
     }
+    fn on_wheel(&mut self, dx: f32, dy: f32, ctx: &mut WindowCtx) {
+        self.imp.on_wheel(dx, dy, ctx);
+    }
     fn on_message(&mut self, msg: &str, ctx: &mut WindowCtx) {
         self.imp.on_message(msg, ctx);
     }
     fn on_drop_files(&mut self, paths: &[String], ctx: &mut WindowCtx) {
         self.imp.on_drop_files(paths, ctx);
     }
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.imp.on_closing(ctx)
+    }
     fn on_close(&mut self, ctx: &mut WindowCtx) -> bool {
         self.imp.on_close(ctx)
+    }
+    fn on_closed(&mut self) {
+        self.imp.on_closed();
     }
 }
 
@@ -301,7 +344,7 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
 }
 
 /// 启动多个窗口，共享同一个平台事件循环。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub fn run_multi(windows: Vec<NewWindow>) {
     backend_run_multi(windows);
 }
@@ -322,8 +365,8 @@ impl<W: WindowImpl> Window<W> {
         self
     }
 
-    /// 启动：加载皮肤 → 建窗 → on_init → 进主事件循环（阻塞）。
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    /// 启动：加载皮肤 → 建窗 → 初始化生命周期 → 进主事件循环（阻塞）。
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     pub fn run(self) {
         let spec = match build_window(self.imp) {
             Ok(spec) => spec,
@@ -334,5 +377,82 @@ impl<W: WindowImpl> Window<W> {
         };
         // 保留完整 NewWindow，确保主窗口与后续窗口共享本地化环境及其修订号。
         backend_run_multi(vec![spec]);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct TestWindowHandle;
+    impl WindowHandle for TestWindowHandle {
+        fn set_title(&mut self, _title: &str) {}
+        fn close(&mut self) {}
+        fn minimize(&mut self) {}
+        fn maximize(&mut self) {}
+        fn restore(&mut self) {}
+    }
+
+    struct LifecycleWindow {
+        calls: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl WindowImpl for LifecycleWindow {
+        fn skin(&self) -> Skin {
+            Skin::tree(Box::new(Label::new("test")))
+        }
+
+        fn on_before_init(&mut self, _ctx: &mut WindowCtx) {
+            self.calls.borrow_mut().push("before_init");
+        }
+
+        fn on_init(&mut self, _ctx: &mut WindowCtx) {
+            self.calls.borrow_mut().push("init");
+        }
+
+        fn on_initialized(&mut self, _ctx: &mut WindowCtx) {
+            self.calls.borrow_mut().push("initialized");
+        }
+
+        fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
+            self.calls.borrow_mut().push("close_compat");
+            false
+        }
+
+        fn on_closed(&mut self) {
+            self.calls.borrow_mut().push("closed");
+        }
+    }
+
+    #[test]
+    fn 生命周期适配顺序完整且兼容旧关闭钩子() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut delegate = ImplDelegate {
+            imp: LifecycleWindow {
+                calls: calls.clone(),
+            },
+        };
+        let mut root = Label::new("test");
+        let mut window = TestWindowHandle;
+        let mut ctx = WindowCtx::new(&mut root, &mut window);
+
+        delegate.on_before_init(&mut ctx);
+        delegate.on_init(&mut ctx);
+        delegate.on_initialized(&mut ctx);
+        assert!(!delegate.on_closing(&mut ctx));
+        delegate.on_closed();
+
+        assert_eq!(
+            *calls.borrow(),
+            vec![
+                "before_init",
+                "init",
+                "initialized",
+                "close_compat",
+                "closed"
+            ]
+        );
     }
 }

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use flexui_geometry::{Color, Corners};
+use flexui_gfx::{Color, Corners};
 use flexui_gfx::{Font, ImageFit, ImageSource, TextAlign};
 
 use crate::frame_animation::FrameAnimation;
@@ -238,6 +238,16 @@ impl StyleSet {
         Self::default()
     }
 
+    /// 是否有任一槽定义了帧动画（bg/fg）。用于每帧廉价判断，跳过无动画控件的样式解析。
+    pub fn has_frame_animation(&self) -> bool {
+        self.normal.bg_animation.is_some()
+            || self.normal.fg_animation.is_some()
+            || self
+                .slots
+                .values()
+                .any(|s| s.bg_animation.is_some() || s.fg_animation.is_some())
+    }
+
     /// 设置某状态槽。
     pub fn set(&mut self, state: VisualState, spec: StyleSpec) {
         if state == VisualState::default() {
@@ -335,7 +345,11 @@ fn all_visual_states() -> impl Iterator<Item = VisualState> {
 
 fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
     let has_base = state.base != BaseState::Normal;
+    // Pushed 未定义的字段先回退到 Hot（再回退 Normal），避免按下瞬间丢背景/边框。
+    let pushed_hot_fallback =
+        (state.base == BaseState::Pushed).then(|| VisualState::new(BaseState::Hot, false));
     [
+        pushed_hot_fallback,
         has_base.then(|| VisualState::new(state.base, false)),
         state
             .focused
@@ -357,7 +371,7 @@ fn style_layers(state: VisualState) -> impl Iterator<Item = VisualState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui_geometry::Color;
+    use flexui_gfx::Color;
 
     fn spec_bg(c: Color) -> StyleSpec {
         StyleSpec {

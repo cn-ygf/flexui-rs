@@ -1,0 +1,27 @@
+[package]
+name = "flexui-linux"
+version = "0.0.1"
+edition = "2021"
+
+# Linux 后端：用系统图形接口，不打包渲染器。
+#   2D=Cairo、文字=Pango、窗口=X11(x11rb)、剪贴板=arboard、图片=image/flexui-svg。
+#   这些系统/重依赖仅在 target=linux 时引入；crate 代码也 cfg(linux) 门控，
+#   因此 mac/win 上本 crate 编译为空壳，`--workspace` 无需 cairo/pango。
+#   本机(macOS)验证请在 Linux 目标/真机上跑。
+
+[dependencies]
+flexui-gfx = { workspace = true }
+flexui-core = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+flexui-svg = { workspace = true }
+# ico 特性：解码示例的 app.ico 用于 _NET_WM_ICON（png/jpeg 由 workspace 提供）。
+image = { workspace = true, features = ["ico"] }
+cairo-rs = "0.20"
+pango = "0.20"
+pangocairo = "0.20"
+x11rb = { version = "0.13", features = ["shape"] }
+arboard = { version = "3", default-features = false }
+# XIM 客户端：接系统输入法(ibus/fcitx 经 XIM 桥)做中文合成输入。纯 Rust，走
+# 现有 x11rb 连接，不引入 libX11。
+xim = { version = "0.5", default-features = false, features = ["client", "x11rb-client"] }

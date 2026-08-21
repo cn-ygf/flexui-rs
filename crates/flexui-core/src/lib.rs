@@ -12,6 +12,7 @@ pub mod layout;
 pub mod localization;
 pub mod native_menu;
 pub mod paint;
+pub mod scroll;
 pub mod sizing;
 pub mod style;
 pub mod theme;
@@ -22,7 +23,9 @@ pub mod window;
 // 常用类型再导出，方便上层与后端使用。
 pub use anim::{AnimProp, Easing};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
-pub use dispatch::{hit_test, Dispatcher, EventCtx, Invalidation, MainProxy};
+pub use dispatch::{
+    hit_test, point_wants_text_cursor, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
+};
 pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
 pub use layout::{layout_node, Axis};
@@ -32,6 +35,10 @@ pub use native_menu::{
     NativeSubmenu,
 };
 pub use paint::{paint_tree, paint_tree_in_rect};
+pub use scroll::{
+    apply_thumb_drag, paint_scrollbars, scrollbar_region_contains, thumb_grab, thumb_h_rect,
+    thumb_v, ScrollAxes, ScrollAxis, ScrollBarStyle, ScrollBarVisibility, ScrollGrab, ScrollState,
+};
 pub use sizing::{Align, Justify, Sizing};
 pub use style::{
     BaseState, Gradient, PlaceholderStyleSet, PlaceholderStyleSpec, Shadow, StyleSet, StyleSpec,
@@ -49,8 +56,9 @@ pub use widget::{
 pub use widgets::{
     build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
     CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
-    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollBarStyle, ScrollView, Separator, Slider,
-    Switch, TabBox, VBox,
+    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollView, Separator, Slider, Switch, TabBox,
+    VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualListSource,
+    VirtualListSourceRef, VirtualSelectionMode, VirtualSort, VirtualSortDirection,
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
@@ -58,7 +66,7 @@ pub use window::{
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。
-pub use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
+pub use flexui_gfx::{Color, Corners, Insets, Point, Rect, Size};
 pub use flexui_gfx::{image_density_from_path, Canvas, Font, ImageFit, ImageSource, TextAlign};
 pub use flexui_i18n::{
     I18nError, LocalizationValue, LocalizedStringKey, LocalizedStringResource, Localizer,

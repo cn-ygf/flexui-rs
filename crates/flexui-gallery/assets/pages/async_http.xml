@@ -1,0 +1,27 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="20">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Async HTTP" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Fetch on a worker thread, then update controls on the UI thread"
+             fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="URL" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <HBox width="fill" height="40" spacing="10">
+        <Edit name="http_url" text-verbatim="https://example.com/" width="fill" height="40"
+              padding="12 8"/>
+        <Button name="http_go" text-verbatim="转到" variant="primary" width="92" height="40"/>
+      </HBox>
+    </VBox>
+    <VBox width="fill" spacing="10">
+      <HBox width="fill" height="28" align="center">
+        <Label text-verbatim="Response" font-size="16" bold="true" fgcolor="@text-primary"
+               width="fill"/>
+        <Label name="http_status" text-verbatim="Ready" fgcolor="@text-secondary"/>
+      </HBox>
+      <Edit name="http_response" text-verbatim="Response body will appear here."
+            multiline="true" readonly="true" width="fill" height="300" padding="12"/>
+    </VBox>
+  </VBox>
+</ScrollView>

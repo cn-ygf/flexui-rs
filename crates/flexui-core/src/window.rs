@@ -9,7 +9,7 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::widget::Widget;
 use crate::widget::{Node, WidgetProperty, WidgetPropertyKey};
 use crate::{ControlEvent, WindowEvent};
-use flexui_geometry::Rect;
+use flexui_gfx::Rect;
 use flexui_i18n::{LocalizedStringResource, Localizer};
 
 /// 标题栏模式（一期先实现 System；隐藏留控件/无边框见开发计划阶段 3）。
@@ -109,6 +109,14 @@ impl WindowConfig {
 /// 窗口控制句柄（由后端实现）：≈ duilib Window 的 Close/ShowWindow 等。
 pub trait WindowHandle {
     fn set_title(&mut self, title: &str);
+    /// 显示并激活窗口；隐藏或最小化后都可用它恢复到前台。
+    fn show(&mut self) {}
+    /// 隐藏窗口但不销毁，常用于最小化到系统托盘。
+    fn hide(&mut self) {}
+    /// 退出应用事件循环；默认关闭当前窗口，平台后端可覆盖为应用级退出。
+    fn quit(&mut self) {
+        self.close();
+    }
     fn close(&mut self);
     fn minimize(&mut self);
     fn maximize(&mut self);
@@ -128,7 +136,7 @@ pub trait WindowHandle {
 /// 上下文菜单等浮层的打开请求（由 WindowCtx 收集，后端排空后交分发器）。
 pub struct OverlayRequest {
     /// 锚点矩形（右键点位可用 0 尺寸 rect）。
-    pub anchor: flexui_geometry::Rect,
+    pub anchor: flexui_gfx::Rect,
     /// 菜单项 (标签, name)；选中后按 name 经 on_activate 上报。
     pub items: Vec<(String, String)>,
     /// 自定义菜单外观；None 使用框架默认值。
@@ -329,13 +337,13 @@ impl<'a> WindowCtx<'a> {
         });
     }
 
-    /// 取主线程投递句柄（在 on_init 里获取，clone 给工作线程后 `send`）。
+    /// 取 UI 线程投递句柄；可 clone 给线程或 async 任务后调用 `post` 修改属性。
     pub fn main_proxy(&self) -> Option<crate::dispatch::MainProxy> {
         self.proxy.clone()
     }
 
     /// 在 anchor 处弹出上下文菜单；items 为 (标签, name)。选中项经 on_activate 上报。
-    pub fn open_menu(&mut self, anchor: flexui_geometry::Rect, items: Vec<(String, String)>) {
+    pub fn open_menu(&mut self, anchor: flexui_gfx::Rect, items: Vec<(String, String)>) {
         self.overlay_requests.push(OverlayRequest {
             anchor,
             items,
@@ -350,7 +358,7 @@ impl<'a> WindowCtx<'a> {
     /// 在 anchor 处弹出带自定义外观和当前选中项的菜单。
     pub fn open_styled_menu(
         &mut self,
-        anchor: flexui_geometry::Rect,
+        anchor: flexui_gfx::Rect,
         items: Vec<(String, String)>,
         style: crate::widgets::MenuStyle,
         selected_name: Option<String>,
@@ -367,7 +375,7 @@ impl<'a> WindowCtx<'a> {
     /// 在 anchor 处弹出带图标、子菜单和自定义外观的菜单。
     pub fn open_styled_menu_entries(
         &mut self,
-        anchor: flexui_geometry::Rect,
+        anchor: flexui_gfx::Rect,
         entries: Vec<crate::widgets::MenuEntry>,
         style: crate::widgets::MenuStyle,
     ) {
@@ -445,8 +453,12 @@ impl<'a> WindowCtx<'a> {
     pub fn set_value(&mut self, name: &str, value: f32) -> bool {
         self.event_ctx(|ctx| ctx.set_value(name, value))
     }
-    pub fn scroll_position(&mut self, name: &str) -> Option<f32> {
-        self.event_ctx(|ctx| ctx.scroll_position(name))
+    pub fn scroll_offset(&mut self, name: &str) -> Option<flexui_gfx::Point> {
+        self.event_ctx(|ctx| ctx.scroll_offset(name))
+    }
+    /// 让 VirtualList 等惰性数据控件重新读取数据源。
+    pub fn refresh_data(&mut self, name: &str) -> bool {
+        self.event_ctx(|ctx| ctx.refresh_data(name))
     }
     pub fn is_enabled(&mut self, name: &str) -> Option<bool> {
         self.event_ctx(|ctx| ctx.is_enabled(name))
@@ -518,6 +530,18 @@ impl<'a> WindowCtx<'a> {
     pub fn set_title(&mut self, title: &str) {
         self.win.set_title(title);
     }
+    /// 显示并激活当前窗口。
+    pub fn show(&mut self) {
+        self.win.show();
+    }
+    /// 隐藏当前窗口但保持窗口和进程存活。
+    pub fn hide(&mut self) {
+        self.win.hide();
+    }
+    /// 退出整个应用，而不只是关闭当前窗口。
+    pub fn quit(&mut self) {
+        self.win.quit();
+    }
     pub fn close(&mut self) {
         self.win.close();
     }
@@ -542,7 +566,7 @@ impl<'a> WindowCtx<'a> {
             crate::NativeMenuAnchor::Screen(point) => crate::NativeMenuPopupAnchor::Screen(point),
             crate::NativeMenuAnchor::Control(name) => {
                 let rect = self.get(&name, |widget| widget.base().rect)?;
-                crate::NativeMenuPopupAnchor::Window(flexui_geometry::Point::new(
+                crate::NativeMenuPopupAnchor::Window(flexui_gfx::Point::new(
                     rect.left(),
                     rect.bottom(),
                 ))
@@ -555,8 +579,12 @@ impl<'a> WindowCtx<'a> {
 /// 窗口运行期委托（由 facade 的 WindowImpl 适配后传给后端）。
 /// 所有钩子有默认空实现，≈ WindowImplBase 的虚方法。
 pub trait WindowDelegate {
-    /// 窗口与控件创建完成（≈ InitWindow）。
+    /// 平台窗口和控件树已建立、应用初始化逻辑尚未执行。
+    fn on_before_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// 窗口初始化（≈ InitWindow）；适合设置初始属性和注册后台任务。
     fn on_init(&mut self, _ctx: &mut WindowCtx) {}
+    /// `on_init` 已执行完成，窗口即将显示首帧。
+    fn on_initialized(&mut self, _ctx: &mut WindowCtx) {}
     /// 某个具名控件被点击（≈ Notify 的 click）。
     fn on_activate(&mut self, _name: &str, _ctx: &mut WindowCtx) {}
     /// 具名控件的 hover、focus、文本、选择和值等语义变化。
@@ -571,14 +599,23 @@ pub trait WindowDelegate {
     fn on_size(&mut self, _width: f32, _height: f32, _ctx: &mut WindowCtx) {}
     /// 键盘按下（平台无关键码）。
     fn on_key(&mut self, _key: u32, _ctx: &mut WindowCtx) {}
+    /// 鼠标滚轮（dx/dy 为滚动增量，dy>0 通常为向上）。滚动容器已先行处理，这里供
+    /// 窗口层做自定义缩放等（如图片预览滚轮放大缩小）。
+    fn on_wheel(&mut self, _dx: f32, _dy: f32, _ctx: &mut WindowCtx) {}
     /// 后台线程经 `MainProxy` 投递的消息（主线程处理）。
     fn on_message(&mut self, _msg: &str, _ctx: &mut WindowCtx) {}
     /// 文件拖放到窗口（paths 为被拖入的文件/目录绝对路径）。
     fn on_drop_files(&mut self, _paths: &[String], _ctx: &mut WindowCtx) {}
-    /// 关闭请求；返回 false 可阻止关闭。
+    /// 即将关闭；返回 false 可阻止关闭。默认转发旧版 `on_close` 钩子。
+    fn on_closing(&mut self, ctx: &mut WindowCtx) -> bool {
+        self.on_close(ctx)
+    }
+    /// 兼容旧版关闭钩子；新代码优先实现 `on_closing`。
     fn on_close(&mut self, _ctx: &mut WindowCtx) -> bool {
         true
     }
+    /// 原生窗口已经关闭；此时窗口与控件上下文不再可用，只适合释放业务资源。
+    fn on_closed(&mut self) {}
 }
 
 /// 空委托：所有钩子用默认实现。供不需要窗口钩子的底层调用方（FFI/示例）使用。

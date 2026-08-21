@@ -1,6 +1,6 @@
 //! Switch：独立的开关控件，点击切换 selected。
 
-use flexui_geometry::{Color, Corners, Rect, Size};
+use flexui_gfx::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::common_builders;

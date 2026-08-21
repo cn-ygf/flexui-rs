@@ -2,6 +2,10 @@
 //!
 //! AppKit（NSApplication/NSWindow）+ 自定义 NSView 承载 flexui 控件树。
 //! `run` 由上层 Window 驱动调用，传入控件树、分发器与窗口委托。
+//!
+//! 仅在 macOS 目标下编译；其它平台为空壳（不引入 objc2/CoreGraphics），
+//! 以便 `cargo build --workspace` 在 Linux/Windows 上通过。
+#![cfg(target_os = "macos")]
 
 mod canvas;
 mod clipboard;
@@ -240,10 +244,10 @@ pub(crate) fn make_window(
     view.registerForDraggedTypes(&NSArray::from_slice(&[view::filenames_pboard_type()]));
     window.setContentView(Some(&view));
     window.makeFirstResponder(Some(&view));
-    // 视图兼任窗口委托（处理 on_close）。
+    // 视图兼任窗口委托（处理关闭生命周期）。
     window.setDelegate(Some(ProtocolObject::from_ref(&*view)));
 
-    // 窗口/控件就绪后触发 on_init（≈ InitWindow）。
+    // 窗口/控件就绪后触发初始化生命周期。
     let close_requested = view.fire_init(&window);
 
     view.resume_timers();

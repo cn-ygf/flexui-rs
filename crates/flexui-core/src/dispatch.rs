@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use flexui_geometry::{Point, Rect, Size};
+use flexui_gfx::{Point, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::anim::{Anim, AnimProp, Easing};
@@ -15,6 +15,7 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
 use crate::widget::{find_by_id, find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
+use crate::window::WindowCtx;
 
 /// 文本输入停止后保持光标常亮的时间；随后才恢复系统近似周期的闪烁。
 const CARET_BLINK_RESUME_DELAY: Duration = Duration::from_millis(500);
@@ -48,20 +49,63 @@ impl Invalidation {
     }
 }
 
-/// 后台线程 → 主线程投递句柄（Clone + Send + Sync）。
-///
-/// 工作线程持有其克隆，`send` 把字符串消息投递到主线程邮箱；主线程（帧定时回调）
-/// 取走并交窗口委托 `on_message`。
+/// 在窗口 UI 线程执行的任务。
+pub type UiTask = Box<dyn for<'a> FnOnce(&mut WindowCtx<'a>) + Send + 'static>;
+
+#[derive(Default)]
+struct MainMailbox {
+    messages: Vec<String>,
+    tasks: Vec<UiTask>,
+    closed: bool,
+}
+
+/// 后台线程或异步任务 → 窗口 UI 线程投递句柄（Clone + Send + Sync）。
 #[derive(Clone)]
 pub struct MainProxy {
-    queue: Arc<Mutex<Vec<String>>>,
+    mailbox: Arc<Mutex<MainMailbox>>,
 }
 
 impl MainProxy {
-    /// 投递一条消息到主线程（跨线程安全）。
-    pub fn send(&self, msg: impl Into<String>) {
-        if let Ok(mut q) = self.queue.lock() {
-            q.push(msg.into());
+    /// 投递一条消息；窗口 UI 线程会转交 `WindowDelegate::on_message`。
+    /// 窗口已关闭或邮箱不可用时返回 false。
+    pub fn send(&self, msg: impl Into<String>) -> bool {
+        if let Ok(mut mailbox) = self.mailbox.lock() {
+            if mailbox.closed {
+                return false;
+            }
+            mailbox.messages.push(msg.into());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 从线程或 async 任务投递闭包，在所属窗口的 UI 线程修改控件或窗口。
+    ///
+    /// ```ignore
+    /// let ui = ctx.main_proxy().unwrap();
+    /// std::thread::spawn(move || {
+    ///     let result = load_data();
+    ///     ui.post(move |ctx| {
+    ///         ctx.set_text("status", result);
+    ///         ctx.set_enabled("retry", true);
+    ///     });
+    /// });
+    /// ```
+    ///
+    /// 窗口已关闭或邮箱不可用时返回 false。
+    pub fn post<F>(&self, task: F) -> bool
+    where
+        F: for<'a> FnOnce(&mut WindowCtx<'a>) + Send + 'static,
+    {
+        if let Ok(mut mailbox) = self.mailbox.lock() {
+            if mailbox.closed {
+                return false;
+            }
+            mailbox.tasks.push(Box::new(task));
+            true
+        } else {
+            false
         }
     }
 }
@@ -223,8 +267,20 @@ impl<'a> EventCtx<'a> {
         changed
     }
 
-    pub fn scroll_position(&self, name: &str) -> Option<f32> {
-        self.get(name, |w| w.scroll_position()).flatten()
+    pub fn scroll_offset(&self, name: &str) -> Option<Point> {
+        self.get(name, |w| w.scroll_offset()).flatten()
+    }
+
+    /// 让惰性数据控件重新读取数据源，并自动触发布局和重绘。
+    pub fn refresh_data(&mut self, name: &str) -> bool {
+        let mut refreshed = false;
+        let found = self
+            .mutate(name, |widget| refreshed = widget.refresh_data())
+            .is_some();
+        if found && refreshed {
+            self.invalidate(Invalidation::Layout);
+        }
+        found && refreshed
     }
 
     /// 应用控件专属属性；保守地触发布局和整窗重绘。
@@ -234,83 +290,79 @@ impl<'a> EventCtx<'a> {
             Property::Text(text) => {
                 let found = self.get(name, |_| ()).is_some();
                 self.set_text(name, text);
-                return found;
+                found
             }
             Property::Tooltip(value) => {
-                return self.set_base_property(name, false, move |base| base.tooltip = value)
+                self.set_base_property(name, false, move |base| base.tooltip = value)
             }
             Property::Font(value) => {
-                return self.set_base_property(name, true, move |base| base.font = value)
+                self.set_base_property(name, true, move |base| base.font = value)
             }
             Property::Style(value) => {
-                return self.set_base_property(name, false, move |base| base.style = value)
+                self.set_base_property(name, false, move |base| base.style = value)
             }
-            Property::Variant(value) => {
-                return self.set_base_property(name, false, move |base| {
-                    base.variant = value;
-                    crate::theme::refresh_theme_base(base);
-                })
-            }
-            Property::Classes(value) => {
-                return self.set_base_property(name, false, move |base| {
-                    base.classes = value;
-                    crate::theme::refresh_theme_base(base);
-                })
-            }
+            Property::Variant(value) => self.set_base_property(name, false, move |base| {
+                base.variant = value;
+                crate::theme::refresh_theme_base(base);
+            }),
+            Property::Classes(value) => self.set_base_property(name, false, move |base| {
+                base.classes = value;
+                crate::theme::refresh_theme_base(base);
+            }),
             Property::Width(value) => {
-                return self.set_base_property(name, true, move |base| base.width = value)
+                self.set_base_property(name, true, move |base| base.width = value)
             }
             Property::Height(value) => {
-                return self.set_base_property(name, true, move |base| base.height = value)
+                self.set_base_property(name, true, move |base| base.height = value)
             }
             Property::Padding(value) => {
-                return self.set_base_property(name, true, move |base| base.padding = value)
+                self.set_base_property(name, true, move |base| base.padding = value)
             }
             Property::Margin(value) => {
-                return self.set_base_property(name, true, move |base| base.margin = value)
+                self.set_base_property(name, true, move |base| base.margin = value)
             }
             Property::Spacing(value) => {
-                return self.set_base_property(name, true, move |base| base.spacing = value)
+                self.set_base_property(name, true, move |base| base.spacing = value)
             }
             Property::Flex(value) => {
-                return self.set_base_property(name, true, move |base| base.flex_grow = value)
+                self.set_base_property(name, true, move |base| base.flex_grow = value)
             }
             Property::Position(value) => {
-                return self.set_base_property(name, true, move |base| base.pos = value)
+                self.set_base_property(name, true, move |base| base.pos = value)
             }
             Property::Justify(value) => {
-                return self.set_base_property(name, true, move |base| base.justify = value)
+                self.set_base_property(name, true, move |base| base.justify = value)
             }
             Property::Align(value) => {
-                return self.set_base_property(name, true, move |base| base.align = value)
+                self.set_base_property(name, true, move |base| base.align = value)
             }
             Property::Enabled(value) => {
                 let found = self.get(name, |_| ()).is_some();
                 self.set_enabled(name, value);
-                return found;
+                found
             }
             Property::Visible(value) => {
                 let found = self.get(name, |_| ()).is_some();
                 self.set_visible(name, value);
-                return found;
+                found
             }
             Property::Focusable(value) => {
-                return self.set_base_property(name, false, move |base| base.focusable = value)
+                self.set_base_property(name, false, move |base| base.focusable = value)
             }
             Property::FocusWithin(value) => {
-                return self.set_base_property(name, false, move |base| base.focus_within = value)
+                self.set_base_property(name, false, move |base| base.focus_within = value)
             }
             Property::HitPolicy(value) => {
-                return self.set_base_property(name, false, move |base| base.hit = value)
+                self.set_base_property(name, false, move |base| base.hit = value)
             }
-            Property::Selected(selected) => return self.set_selected(name, selected),
+            Property::Selected(selected) => self.set_selected(name, selected),
             property => {
                 let mut applied = false;
                 self.mutate(name, |w| applied = w.apply_property(property));
                 if applied {
                     self.invalidate(Invalidation::Layout);
                 }
-                return applied;
+                applied
             }
         }
     }
@@ -501,7 +553,7 @@ pub struct Overlay {
     /// 点击浮层外部是否关闭（菜单恒为 true）。
     pub dismiss_outside: bool,
     /// 浮层相对窗口边缘的安全边距。
-    pub window_margin: flexui_geometry::Insets,
+    pub window_margin: flexui_gfx::Insets,
     /// 当前层的菜单数据，用于按行展开子菜单。
     pub entries: Vec<crate::widgets::MenuEntry>,
     pub style: crate::widgets::MenuStyle,
@@ -520,6 +572,8 @@ pub struct Dispatcher {
     hover: Option<WidgetId>,
     pressed: Option<WidgetId>,
     focus: Option<WidgetId>,
+    /// 正在拖动的滚动条：目标控件 id + 抓取信息。拖动期间独占鼠标 move/up。
+    scroll_drag: Option<(WidgetId, crate::scroll::ScrollGrab)>,
     /// 最近一次 Edit 交互后恢复闪烁的最早时刻；此前光标保持常亮。
     caret_blink_after: Option<Instant>,
     needs_redraw: bool,
@@ -547,8 +601,8 @@ pub struct Dispatcher {
     tip_ticks: u32,
     /// 进行中的补间动画。
     anims: Vec<Anim>,
-    /// 后台线程投递的消息邮箱（主线程帧回调取走）。
-    mailbox: Arc<Mutex<Vec<String>>>,
+    /// 后台线程投递的消息与 UI 任务邮箱（主线程帧回调取走）。
+    mailbox: Arc<Mutex<MainMailbox>>,
 }
 
 impl Dispatcher {
@@ -557,6 +611,7 @@ impl Dispatcher {
             hover: None,
             pressed: None,
             focus: None,
+            scroll_drag: None,
             caret_blink_after: None,
             needs_redraw: false,
             needs_layout: false,
@@ -572,14 +627,14 @@ impl Dispatcher {
             tooltip: None,
             tip_ticks: 0,
             anims: Vec::new(),
-            mailbox: Arc::new(Mutex::new(Vec::new())),
+            mailbox: Arc::new(Mutex::new(MainMailbox::default())),
         }
     }
 
-    /// 取一个可跨线程投递消息的句柄（发给工作线程）。
+    /// 取一个可跨线程投递消息或 UI 任务的句柄。
     pub fn proxy(&self) -> MainProxy {
         MainProxy {
-            queue: Arc::clone(&self.mailbox),
+            mailbox: Arc::clone(&self.mailbox),
         }
     }
 
@@ -587,8 +642,31 @@ impl Dispatcher {
     pub fn drain_messages(&self) -> Vec<String> {
         self.mailbox
             .lock()
-            .map(|mut q| std::mem::take(&mut *q))
+            .map(|mut mailbox| std::mem::take(&mut mailbox.messages))
             .unwrap_or_default()
+    }
+
+    /// 取走后台线程投递的 UI 任务；平台后端必须在所属窗口 UI 线程执行。
+    pub fn drain_ui_tasks(&self) -> Vec<UiTask> {
+        self.mailbox
+            .lock()
+            .map(|mut mailbox| std::mem::take(&mut mailbox.tasks))
+            .unwrap_or_default()
+    }
+
+    /// 窗口销毁时关闭投递入口，并丢弃尚未执行的消息与任务。
+    pub fn close_main_proxy(&self) {
+        let pending = if let Ok(mut mailbox) = self.mailbox.lock() {
+            mailbox.closed = true;
+            Some((
+                std::mem::take(&mut mailbox.messages),
+                std::mem::take(&mut mailbox.tasks),
+            ))
+        } else {
+            None
+        };
+        // 在锁外析构任务捕获的数据，避免其 Drop 实现再次投递时重入邮箱锁。
+        drop(pending);
     }
 
     /// 是否有进行中的动画（后端据此决定是否驱动帧定时器）。
@@ -777,7 +855,7 @@ impl Dispatcher {
                 desired,
                 window,
                 0.0,
-                flexui_geometry::Insets::default(),
+                flexui_gfx::Insets::default(),
                 crate::widgets::MenuAlignment::Start,
             );
             layout_node(node, rect, &*cv);
@@ -929,6 +1007,7 @@ impl Dispatcher {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 if let Some(level) = self.overlay_level_at(*pos) {
                     let hit = hit_test(self.overlays[level].root.as_ref(), *pos);
@@ -954,9 +1033,9 @@ impl Dispatcher {
                 self.overlay_pressed = None;
                 self.needs_redraw = true;
             }
-            Event::MouseWheel { pos, dy, .. } => {
+            Event::MouseWheel { pos, dx, dy } => {
                 if let Some(level) = self.overlay_level_at(*pos) {
-                    if scroll_tree_at(self.overlays[level].root.as_mut(), *pos, *dy).is_some() {
+                    if scroll_tree_at(self.overlays[level].root.as_mut(), *pos, *dx, *dy).is_some() {
                         self.overlays.truncate(level + 1);
                         self.needs_redraw = true;
                     }
@@ -1227,11 +1306,16 @@ impl Dispatcher {
         }
         match ev {
             Event::MouseMove { pos } => {
+                // 拖动滚动条中：独占鼠标移动，直接更新偏移。
+                if let Some((id, grab)) = self.scroll_drag {
+                    self.drag_scrollbar(root, id, *pos, grab);
+                    return;
+                }
                 let hit = hit_test(root, *pos);
                 self.set_hover(root, hit);
-                // 若正按住某指针型控件（Edit/Slider）：这是一次拖动 → 转发给它。
+                // 若正按住某指针型控件（Edit/Slider）或可选中文本控件：这是一次拖动 → 转发给它。
                 if let Some(id) = self.pressed {
-                    if is_pointer_target(role_of(root, id)) {
+                    if is_pointer_target(role_of(root, id)) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -1239,14 +1323,20 @@ impl Dispatcher {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
+                // 优先命中滚动条滑块：进入拖动，独占后续 move/up（不改焦点/按压）。
+                if let Some((id, grab)) = scrollbar_grab_at(root, *pos) {
+                    self.scroll_drag = Some((id, grab));
+                    return;
+                }
                 let hit = hit_test(root, *pos);
                 let old_focus = self.focus;
                 self.press(root, hit);
-                // 命中指针型控件（Edit/Slider/ListView）：转发按下，让其按坐标定位/选中。
+                // 命中指针型控件（Edit/Slider/ListView）或可选中文本控件：转发按下，让其按坐标定位/选中。
                 if let Some(id) = self.pressed {
                     let role = role_of(root, id);
-                    if is_pointer_target(role) {
+                    if is_pointer_target(role) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                         if old_focus != self.focus && role == Some(WidgetRole::Edit) {
                             visit_mut(root, id, &mut |w| w.focus_gained());
@@ -1264,6 +1354,16 @@ impl Dispatcher {
                 pos,
                 button: MouseButton::Left,
             } => {
+                // 结束滚动条拖动，独占本次抬起。
+                if self.scroll_drag.take().is_some() {
+                    return;
+                }
+                // 指针型控件需要收到抬起事件来结束列宽拖动、文本拖选等内部状态。
+                if let Some(id) = self.pressed {
+                    if is_pointer_target(role_of(root, id)) || selectable_of(root, id) {
+                        self.forward_to_widget(root, id, ev);
+                    }
+                }
                 let hit = hit_test(root, *pos);
                 self.release(root, hit);
             }
@@ -1284,7 +1384,7 @@ impl Dispatcher {
                     if let Some(name) = name_of(root, id) {
                         self.double_clicked.push(name);
                     }
-                    if role_of(root, id) == Some(WidgetRole::Edit) {
+                    if role_of(root, id) == Some(WidgetRole::Edit) || selectable_of(root, id) {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -1298,9 +1398,9 @@ impl Dispatcher {
                     self.forward_to_widget(root, fid, ev);
                 }
             }
-            // 滚轮：滚动光标下最内层可滚动容器。
-            Event::MouseWheel { pos, dy, .. } => {
-                self.scroll_at(root, *pos, *dy);
+            // 滚轮：滚动光标下最内层可滚动容器（双轴）。
+            Event::MouseWheel { pos, dx, dy } => {
+                self.scroll_at(root, *pos, *dx, *dy);
             }
             _ => {}
         }
@@ -1358,12 +1458,34 @@ impl Dispatcher {
         self.emit_control_event(root, id, ControlEvent::FocusChanged(false));
     }
 
+    /// 拖动滚动条滑块：按鼠标位置更新目标控件偏移，脏其整体区域并上报。
+    fn drag_scrollbar(
+        &mut self,
+        root: &mut dyn Widget,
+        id: WidgetId,
+        pos: Point,
+        grab: crate::scroll::ScrollGrab,
+    ) {
+        let mut changed = false;
+        visit_mut(root, id, &mut |w| {
+            changed = w.scrollbar_drag(pos, &grab);
+        });
+        if changed {
+            if let Some(r) = rect_of(root, id) {
+                self.mark_dirty(r);
+            }
+            if let Some(offset) = find_by_id(root, id).and_then(Widget::scroll_offset) {
+                self.emit_control_event(root, id, ControlEvent::ScrollChanged(offset));
+            }
+        }
+    }
+
     /// 滚动光标下最内层可滚动容器 dy 像素（正 dy=内容上滚）。
-    fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dy: f32) {
-        if let Some((id, rect)) = scroll_tree_at(root, pos, dy) {
+    fn scroll_at(&mut self, root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) {
+        if let Some((id, rect)) = scroll_tree_at(root, pos, dx, dy) {
             self.mark_dirty(rect); // 只脏滚动区
-            if let Some(position) = find_by_id(root, id).and_then(Widget::scroll_position) {
-                self.emit_control_event(root, id, ControlEvent::ScrollChanged(position));
+            if let Some(offset) = find_by_id(root, id).and_then(Widget::scroll_offset) {
+                self.emit_control_event(root, id, ControlEvent::ScrollChanged(offset));
             }
         }
     }
@@ -1553,7 +1675,7 @@ impl Dispatcher {
                 anchor,
                 owner: Some(id),
                 dismiss_outside: true,
-                window_margin: flexui_geometry::Insets::default(),
+                window_margin: flexui_gfx::Insets::default(),
                 entries,
                 style,
                 parent_item: None,
@@ -1649,6 +1771,19 @@ impl Dispatcher {
         if before.selection != after.selection {
             self.emit_control_event(root, id, ControlEvent::SelectionChanged(after.selection));
         }
+        if before.selected_rows != after.selected_rows {
+            if let Some(rows) = after.selected_rows {
+                self.emit_control_event(root, id, ControlEvent::RowsSelectionChanged(rows));
+            }
+        }
+        if before.sort != after.sort {
+            self.emit_control_event(root, id, ControlEvent::SortChanged(after.sort));
+        }
+        if before.columns != after.columns {
+            if let Some(columns) = after.columns {
+                self.emit_control_event(root, id, ControlEvent::ColumnsChanged(columns));
+            }
+        }
         if before.value != after.value {
             if let Some(value) = after.value {
                 self.emit_control_event(root, id, ControlEvent::ValueChanged(value));
@@ -1688,7 +1823,10 @@ struct ControlSnapshot {
     selected: bool,
     selection: Option<usize>,
     value: Option<f32>,
-    scroll: Option<f32>,
+    scroll: Option<Point>,
+    selected_rows: Option<Vec<u64>>,
+    sort: Option<crate::widgets::VirtualSort>,
+    columns: Option<Vec<crate::widgets::VirtualColumn>>,
 }
 
 fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> {
@@ -1698,7 +1836,10 @@ fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> 
         selected: widget.base().selected,
         selection: widget.selected_index(),
         value: widget.animation_value(AnimProp::Value),
-        scroll: widget.scroll_position(),
+        scroll: widget.scroll_offset(),
+        selected_rows: widget.selected_rows(),
+        sort: widget.sort_state(),
+        columns: widget.virtual_columns(),
     })
 }
 
@@ -1708,6 +1849,12 @@ fn collect_bound_tabboxes(node: &dyn Widget, group: u32, targets: &mut Vec<Widge
     }
     for child in &node.base().children {
         collect_bound_tabboxes(child.as_ref(), group, targets);
+    }
+}
+
+impl Drop for Dispatcher {
+    fn drop(&mut self) {
+        self.close_main_proxy();
     }
 }
 
@@ -1737,6 +1884,25 @@ pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
     }
 }
 
+/// 该点是否需要文本 I-beam 光标：命中控件是可用的文本框，且不在其滚动条区域。
+/// 供各平台后端统一决定鼠标光标形状（避免每个后端各写一份、且漏掉滚动条）。
+/// 基于 `hit_test`，因此正确穿透 `HitPolicy::Transparent` 浮层。
+pub fn point_wants_text_cursor(root: &dyn Widget, p: Point) -> bool {
+    let Some(id) = hit_test(root, p) else {
+        return false;
+    };
+    fn check(node: &dyn Widget, id: WidgetId, p: Point) -> Option<bool> {
+        let b = node.base();
+        if b.id == id {
+            // 文本框或可选中文本（如可选中的 Label）显示 I 型光标；落在滚动条上 → 箭头。
+            let text_like = b.role == WidgetRole::Edit || b.selectable;
+            return Some(text_like && b.enabled && !node.scrollbar_contains(p));
+        }
+        b.children.iter().find_map(|c| check(c.as_ref(), id, p))
+    }
+    check(root, id, p) == Some(true)
+}
+
 /// 读取控件的可动画属性值。
 /// 写入控件的可动画属性值（带各自的取值约束）。
 /// 计算浮层摆放矩形：优先锚点下方、放不下则上翻；X 夹到窗内；至少 min_width 宽。
@@ -1745,7 +1911,7 @@ fn place_overlay(
     desired: Size,
     window: Size,
     min_width: f32,
-    margin: flexui_geometry::Insets,
+    margin: flexui_gfx::Insets,
     alignment: crate::widgets::MenuAlignment,
 ) -> Rect {
     let available_w = (window.width - margin.horizontal()).max(0.0);
@@ -1783,7 +1949,7 @@ fn place_submenu(
     anchor: Rect,
     desired: Size,
     window: Size,
-    margin: flexui_geometry::Insets,
+    margin: flexui_gfx::Insets,
 ) -> Rect {
     let available_w = (window.width - margin.horizontal()).max(0.0);
     let available_h = (window.height - margin.vertical()).max(0.0);
@@ -1802,7 +1968,21 @@ fn place_submenu(
 }
 
 /// 滚动光标下最深的可滚动控件，返回实际发生变化的视口矩形。
-fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<(WidgetId, Rect)> {
+/// 命中某个可见控件的滚动条滑块则返回（控件 id + 抓取信息）。深度优先取最内层。
+fn scrollbar_grab_at(
+    root: &mut dyn Widget,
+    pos: Point,
+) -> Option<(WidgetId, crate::scroll::ScrollGrab)> {
+    let mut found = None;
+    for_each_visible_mut(root, true, &mut |widget| {
+        if let Some(grab) = widget.scrollbar_grab(pos) {
+            found = Some((widget.base().id, grab));
+        }
+    });
+    found
+}
+
+fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) -> Option<(WidgetId, Rect)> {
     let mut target = None;
     for_each_visible_mut(root, true, &mut |widget| {
         if widget.is_scrollable() && widget.children_viewport().contains(pos) {
@@ -1812,9 +1992,11 @@ fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dy: f32) -> Option<(WidgetI
     let id = target?;
     let mut changed_rect = None;
     visit_mut(root, id, &mut |widget| {
-        let viewport = widget.children_viewport();
-        if widget.scroll_by(dy) {
-            changed_rect = Some(viewport);
+        // 脏区用控件整体矩形：children_viewport 会排除右侧滚动条列，
+        // 只脏内容区会导致滚动条滑块不随内容重绘。
+        let rect = widget.base().rect;
+        if widget.scroll_by(dx, dy) {
+            changed_rect = Some(rect);
         }
     });
     changed_rect.map(|rect| (id, rect))
@@ -1848,6 +2030,11 @@ fn is_pointer_target(role: Option<WidgetRole>) -> bool {
         role,
         Some(WidgetRole::Edit) | Some(WidgetRole::Slider) | Some(WidgetRole::ListView)
     )
+}
+
+/// 该控件是否开启了文本选中（可选中控件也接收鼠标按下/拖动/抬起以驱动选区）。
+fn selectable_of(node: &dyn Widget, id: WidgetId) -> bool {
+    find_by_id(node, id).map(|w| w.base().selectable).unwrap_or(false)
 }
 
 /// 按 id 找控件的角色（用于判断是否文本控件）。
@@ -1924,30 +2111,41 @@ fn tick_frame_animations(
     if !node.base().visible {
         return;
     }
-    let subtree_has_focus = subtree_focused_for_frames(node);
+    // 仅在 focus_within 生效时才需要扫描子树的焦点，避免每帧对整棵树做 O(N²) 遍历。
+    let subtree_has_focus = node.base().focus_within && subtree_focused_for_frames(node);
     let b = node.base_mut();
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
-    let state =
-        crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
-    let style = b.style.resolve_over(&b.theme_style, state);
-    let changed = b
-        .bg_frame_player
-        .tick_state(style.bg_animation.as_ref(), dt)
-        | b.fg_frame_player
-            .tick_state(style.fg_animation.as_ref(), dt)
-        | b.click_bg_frame_player.tick(dt)
-        | b.click_fg_frame_player.tick(dt);
-    if b.bg_frame_player.take_finished() || b.click_bg_frame_player.take_finished() {
-        finished.push((b.id, FrameLayer::Background));
+    // 廉价门控：本控件既没有定义帧动画、也没有正在播放的帧动画时，跳过昂贵的
+    // 样式解析(resolve_over→StyleSpec::clone)。空闲时（大列表尤甚）大幅降低每帧 CPU。
+    let has_anim = b.bg_frame_player.is_active()
+        || b.fg_frame_player.is_active()
+        || b.click_bg_frame_player.is_active()
+        || b.click_fg_frame_player.is_active()
+        || b.style.has_frame_animation()
+        || b.theme_style.has_frame_animation();
+    if has_anim {
+        let state =
+            crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
+        let style = b.style.resolve_over(&b.theme_style, state);
+        let changed = b
+            .bg_frame_player
+            .tick_state(style.bg_animation.as_ref(), dt)
+            | b.fg_frame_player
+                .tick_state(style.fg_animation.as_ref(), dt)
+            | b.click_bg_frame_player.tick(dt)
+            | b.click_fg_frame_player.tick(dt);
+        if b.bg_frame_player.take_finished() || b.click_bg_frame_player.take_finished() {
+            finished.push((b.id, FrameLayer::Background));
+        }
+        if b.fg_frame_player.take_finished() || b.click_fg_frame_player.take_finished() {
+            finished.push((b.id, FrameLayer::Foreground));
+        }
+        if changed {
+            let rect = b.rect;
+            *dirty = Some(dirty.map_or(rect, |current| union_rect(current, rect)));
+        }
     }
-    if b.fg_frame_player.take_finished() || b.click_fg_frame_player.take_finished() {
-        finished.push((b.id, FrameLayer::Foreground));
-    }
-    let rect = b.rect;
     let pass_focus = focus_active && b.focus_within;
-    if changed {
-        *dirty = Some(dirty.map_or(rect, |current| union_rect(current, rect)));
-    }
     let child_count = b.children.len();
     for i in 0..child_count {
         tick_frame_animations(b.children[i].as_mut(), dt, pass_focus, dirty, finished);
@@ -2003,36 +2201,36 @@ mod tests {
         Slider, TabBox, VBox,
     };
     use crate::WidgetProperty;
-    use flexui_geometry::{Rect, Size};
+    use flexui_gfx::{Rect, Size};
     use flexui_gfx::{Canvas, Font};
     use std::cell::Cell;
     use std::rc::Rc;
 
     struct FakeCanvas;
     impl Canvas for FakeCanvas {
-        fn fill_rect(&mut self, _r: Rect, _c: flexui_geometry::Color) {}
-        fn stroke_rect(&mut self, _r: Rect, _c: flexui_geometry::Color, _w: f32) {}
+        fn fill_rect(&mut self, _r: Rect, _c: flexui_gfx::Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: flexui_gfx::Color, _w: f32) {}
         fn fill_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
             _w: f32,
         ) {
         }
         fn draw_text(
             &mut self,
             _t: &str,
-            _o: flexui_geometry::Point,
+            _o: flexui_gfx::Point,
             _f: &Font,
-            _c: flexui_geometry::Color,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
@@ -2054,6 +2252,7 @@ mod tests {
             &Event::MouseDown {
                 pos: p,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2086,10 +2285,55 @@ mod tests {
                 dy: -60.0,
             },
         );
-        assert_eq!(root.scroll_position(), Some(60.0)); // 视口100 内容200 → 可滚到 100，60 有效
-                                                        // 重新布局后首个子应上移 60
+        assert_eq!(root.scroll_offset(), Some(Point::new(0.0, 60.0))); // 视口100 内容200 → 可滚到 100，60 有效
+                                                                       // 脏区须覆盖控件整体（含右侧滚动条列），否则滑块不重绘。
+        let dirty = disp.dirty.expect("滚轮滚动应产生脏区");
+        assert!(
+            dirty.right() >= root.base().rect.right() - 0.01,
+            "脏区右边界须到达控件右缘以重绘滚动条：{dirty:?}"
+        );
+        // 重新布局后首个子应上移 60
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
         assert_eq!(root.base().children[0].base().rect.top(), -60.0);
+    }
+
+    #[test]
+    fn scrollview_拖动滚动条() {
+        let mut root = ScrollView::new()
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0))
+            .push(Panel::new().size(80.0, 40.0)); // 5×40 = 200 内容高，视口 100
+        let cv = FakeCanvas;
+        layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
+
+        let mut disp = Dispatcher::new();
+        // 滑块 x∈[93,98]（宽5、边距2），初始 y∈[0,50]（thumb_h=50）。按在 (95,10)。
+        disp.handle(
+            &mut root,
+            &Event::MouseDown {
+                pos: Point::new(95.0, 10.0),
+                button: MouseButton::Left,
+                mods: Mods::default(),
+            },
+        );
+        // 拖到 y=40：滑块顶=30，行程=50，t=0.6，max=100 → 偏移 60。
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(95.0, 40.0) });
+        let dragged = root.scroll_offset().unwrap().y;
+        assert!((dragged - 60.0).abs() < 0.01, "拖动后偏移应≈60，实为 {dragged}");
+        // 子树立即随拖动上移。
+        assert!((root.base().children[0].base().rect.top() - (-60.0)).abs() < 0.01);
+        // 抬起后结束拖动，再移动不再改变偏移。
+        disp.handle(
+            &mut root,
+            &Event::MouseUp {
+                pos: Point::new(95.0, 40.0),
+                button: MouseButton::Left,
+            },
+        );
+        disp.handle(&mut root, &Event::MouseMove { pos: Point::new(95.0, 80.0) });
+        assert!((root.scroll_offset().unwrap().y - dragged).abs() < 0.01, "抬起后不应再变");
     }
 
     #[test]
@@ -2115,6 +2359,22 @@ mod tests {
         let ctx = disp.take_context_clicks();
         assert_eq!(ctx.len(), 1);
         assert_eq!(ctx[0].0, "b");
+    }
+
+    #[test]
+    fn 光标_滚动条区域用箭头() {
+        use crate::scroll::ScrollBarVisibility;
+        use crate::widgets::Edit;
+        let cv = FakeCanvas;
+        let mut edit = Edit::new()
+            .multiline(true)
+            .scrollbar(ScrollBarVisibility::Always);
+        edit.set_text_value("a\nb\nc\nd\ne\nf\ng\nh".into());
+        layout_node(&mut edit, Rect::new(0.0, 0.0, 120.0, 40.0), &cv);
+        // 文本区 → 文本 I-beam。
+        assert!(point_wants_text_cursor(&edit, Point::new(10.0, 10.0)));
+        // 右缘滚动条区 → 箭头（false）。
+        assert!(!point_wants_text_cursor(&edit, Point::new(115.0, 20.0)));
     }
 
     #[test]
@@ -2153,6 +2413,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(25.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert_eq!(root.cursor(), 3);
@@ -2179,6 +2440,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(25.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
 
@@ -2224,6 +2486,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(0.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2251,6 +2514,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(50.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert!(
@@ -2285,7 +2549,7 @@ mod tests {
             Size::new(40.0, 30.0),
             win,
             50.0,
-            flexui_geometry::Insets::default(),
+            flexui_gfx::Insets::default(),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r.top(), 30.0);
@@ -2296,7 +2560,7 @@ mod tests {
             Size::new(40.0, 30.0),
             win,
             0.0,
-            flexui_geometry::Insets::default(),
+            flexui_gfx::Insets::default(),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r2.top(), 50.0);
@@ -2306,7 +2570,7 @@ mod tests {
             Size::new(40.0, 10.0),
             win,
             0.0,
-            flexui_geometry::Insets::default(),
+            flexui_gfx::Insets::default(),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r3.left(), 160.0);
@@ -2316,7 +2580,7 @@ mod tests {
             Size::new(294.0, 228.0),
             Size::new(580.0, 416.0),
             68.0,
-            flexui_geometry::Insets::new(0.0, 0.0, 14.0, 28.0),
+            flexui_gfx::Insets::new(0.0, 0.0, 14.0, 28.0),
             crate::widgets::MenuAlignment::Start,
         );
         assert_eq!(r4, Rect::new(272.0, 160.0, 294.0, 228.0));
@@ -2354,7 +2618,7 @@ mod tests {
             width: Some(160.0),
             height: Some(100.0),
             row_height: 32.0,
-            panel_padding: flexui_geometry::Insets::all(4.0),
+            panel_padding: flexui_gfx::Insets::all(4.0),
             ..Default::default()
         };
         let items = (0..8)
@@ -2364,7 +2628,7 @@ mod tests {
         disp.open_styled_menu(Rect::new(20.0, 20.0, 80.0, 20.0), items, Some(style), None);
         disp.paint_overlays(&mut FakeCanvas, Size::new(300.0, 300.0));
         let menu_viewport = disp.overlays[0].root.children_viewport();
-        let main_before = root.scroll_position();
+        let main_before = root.scroll_offset();
         disp.handle(
             &mut root,
             &Event::MouseWheel {
@@ -2374,8 +2638,11 @@ mod tests {
             },
         );
         assert!(disp.has_overlays());
-        assert_eq!(disp.overlays[0].root.scroll_position(), Some(32.0));
-        assert_eq!(root.scroll_position(), main_before);
+        assert_eq!(
+            disp.overlays[0].root.scroll_offset(),
+            Some(Point::new(0.0, 32.0))
+        );
+        assert_eq!(root.scroll_offset(), main_before);
     }
 
     #[test]
@@ -2384,7 +2651,7 @@ mod tests {
             width: Some(160.0),
             height: Some(100.0),
             row_height: 32.0,
-            panel_padding: flexui_geometry::Insets::new(10.0, 16.0, 10.0, 16.0),
+            panel_padding: flexui_gfx::Insets::new(10.0, 16.0, 10.0, 16.0),
             ..Default::default()
         };
         let items = (0..5)
@@ -2396,7 +2663,7 @@ mod tests {
             Rect::new(0.0, 0.0, 160.0, 100.0),
             &FakeCanvas,
         );
-        assert!(menu.scroll_by(-20.0));
+        assert!(menu.scroll_by(0.0, -20.0));
         let padding_point = Point::new(20.0, 10.0);
         assert!(menu.base().children[0].base().rect.contains(padding_point));
         assert_ne!(
@@ -2437,6 +2704,7 @@ mod tests {
             &Event::MouseDown {
                 pos: c,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2484,6 +2752,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(280.0, 280.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert!(!disp.has_overlays(), "点外部关闭");
@@ -2520,6 +2789,7 @@ mod tests {
             &Event::MouseDown {
                 pos: c,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2550,6 +2820,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(20.0, 50.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
@@ -2560,13 +2831,58 @@ mod tests {
     fn 主线程邮箱_跨线程投递与取走() {
         let disp = Dispatcher::new();
         let p = disp.proxy();
-        p.send("a");
+        assert!(p.send("a"));
         let p2 = p.clone();
-        std::thread::spawn(move || p2.send("b")).join().unwrap();
+        assert!(std::thread::spawn(move || p2.send("b")).join().unwrap());
         let mut msgs = disp.drain_messages();
         msgs.sort();
         assert_eq!(msgs, vec!["a".to_string(), "b".to_string()]);
         assert!(disp.drain_messages().is_empty(), "取走后清空");
+    }
+
+    #[test]
+    fn 主线程任务_可从工作线程投递并通过窗口上下文修改属性() {
+        struct TestWindow;
+        impl crate::window::WindowHandle for TestWindow {
+            fn set_title(&mut self, _title: &str) {}
+            fn close(&mut self) {}
+            fn minimize(&mut self) {}
+            fn maximize(&mut self) {}
+            fn restore(&mut self) {}
+        }
+
+        let disp = Dispatcher::new();
+        let proxy = disp.proxy();
+        assert!(std::thread::spawn(move || {
+            proxy.post(|ctx| {
+                ctx.set_text("status", "loaded");
+                ctx.set_enabled("status", false);
+            })
+        })
+        .join()
+        .unwrap());
+
+        let mut root = Label::new("waiting").name("status");
+        let mut window = TestWindow;
+        let mut ctx = crate::window::WindowCtx::new(&mut root, &mut window);
+        for task in disp.drain_ui_tasks() {
+            task(&mut ctx);
+        }
+        let invalidation = ctx.take_invalidation();
+        drop(ctx);
+        assert_eq!(root.base().text, "loaded");
+        assert!(!root.base().enabled);
+        assert_eq!(invalidation, Invalidation::Layout);
+        assert!(disp.drain_ui_tasks().is_empty(), "任务只能执行一次");
+    }
+
+    #[test]
+    fn 主线程代理_窗口销毁后拒绝新任务() {
+        let disp = Dispatcher::new();
+        let proxy = disp.proxy();
+        drop(disp);
+        assert!(!proxy.send("late"));
+        assert!(!proxy.post(|ctx| ctx.request_redraw()));
     }
 
     #[test]
@@ -2662,6 +2978,7 @@ mod tests {
             &Event::MouseDown {
                 pos: point,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         dispatcher.handle(
@@ -2741,6 +3058,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(0.0, 20.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         // 全选 + 复制。
@@ -2810,6 +3128,7 @@ mod tests {
             &Event::MouseDown {
                 pos: child,
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.handle(
@@ -2852,6 +3171,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(2.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.select_all_focused(&mut root);
@@ -2976,7 +3296,7 @@ mod tests {
     #[test]
     fn hover_脏区包含所有状态阴影() {
         use crate::style::{BaseState, Shadow, StyleSet, StyleSpec};
-        use flexui_geometry::Color;
+        use flexui_gfx::Color;
 
         let style = StyleSet::new()
             .with_normal(StyleSpec::default())
@@ -3002,7 +3322,8 @@ mod tests {
             },
         );
 
-        assert_eq!(disp.take_dirty(), Some(Rect::new(0.0, 0.0, 208.0, 46.0)));
+        // 按钮固定宽 100 优先于父 Stretch（不再拉伸到 200）；脏区 = 100 + 阴影 dx8 = 108。
+        assert_eq!(disp.take_dirty(), Some(Rect::new(0.0, 0.0, 108.0, 46.0)));
     }
 
     #[test]
@@ -3147,6 +3468,7 @@ mod tests {
             &Event::MouseDown {
                 pos: Point::new(10.0, 10.0),
                 button: MouseButton::Left,
+                mods: Mods::default(),
             },
         );
         disp.take_control_events();

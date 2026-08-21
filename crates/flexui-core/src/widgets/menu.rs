@@ -1,6 +1,6 @@
 //! Menu：浮层菜单项 `MenuItem` 与构建器 `build_menu`（供下拉/右键菜单复用）。
 
-use flexui_geometry::{Color, Corners, Insets, Point, Size};
+use flexui_gfx::{Color, Corners, Insets, Point, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource, TextAlign};
 
 use crate::common_builders;
@@ -295,7 +295,7 @@ impl Widget for MenuItem {
         let content = layout::content_rect(&self.base);
         let color = style.fg_color.unwrap_or(Color::from_u8(230, 235, 245, 255));
         if let Some(icon) = &self.icon {
-            let icon_rect = flexui_geometry::Rect::new(
+            let icon_rect = flexui_gfx::Rect::new(
                 self.base.rect.left() + self.icon_inset,
                 self.base.rect.top() + (self.base.rect.size.height - self.icon_size.height) / 2.0,
                 self.icon_size.width,
@@ -304,7 +304,7 @@ impl Widget for MenuItem {
             cv.draw_image(icon, icon_rect, None, ImageFit::Stretch);
         }
         if self.selected_mark {
-            let mark_rect = flexui_geometry::Rect::new(
+            let mark_rect = flexui_gfx::Rect::new(
                 self.base.rect.left() + 10.0,
                 self.base.rect.top()
                     + (self.base.rect.size.height - self.selected_image_size.height) / 2.0,
@@ -335,7 +335,7 @@ impl Widget for MenuItem {
             true,
         );
         if let Some(indicator) = &self.submenu_indicator {
-            let indicator_rect = flexui_geometry::Rect::new(
+            let indicator_rect = flexui_gfx::Rect::new(
                 self.base.rect.right()
                     - self.submenu_indicator_inset
                     - self.submenu_indicator_size.width,

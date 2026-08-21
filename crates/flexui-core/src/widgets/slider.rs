@@ -2,7 +2,7 @@
 //!
 //! 交互事件（按下/拖动）由分发器转发到本控件（见 dispatch 的指针转发）。
 
-use flexui_geometry::{Color, Corners, Rect, Size};
+use flexui_gfx::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::anim::AnimProp;
@@ -122,6 +122,7 @@ impl Widget for Slider {
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
+                ..
             } => {
                 self.set_value_from_x(pos.x);
                 EventFlow::Consumed

@@ -202,6 +202,11 @@ impl FramePlayer {
         old != self.visible_frame()
     }
 
+    /// 是否有正在（或暂停中）播放的动画。空闲时用于跳过昂贵的每帧样式解析。
+    pub(crate) fn is_active(&self) -> bool {
+        self.animation.is_some()
+    }
+
     pub(crate) fn take_finished(&mut self) -> bool {
         std::mem::take(&mut self.just_finished)
     }

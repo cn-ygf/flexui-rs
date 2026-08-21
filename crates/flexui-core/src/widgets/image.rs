@@ -1,6 +1,6 @@
 //! Image：图片控件。
 
-use flexui_geometry::Size;
+use flexui_gfx::Size;
 use flexui_gfx::{Canvas, ImageSource};
 
 use crate::common_builders;

@@ -1,4 +1,8 @@
 //! FlexUI 原生菜单模型到 AppKit/Win32 菜单对象的内部适配层。
+//!
+//! 基于 muda，仅服务 macOS/Windows；Linux 后端用自绘 Cairo 菜单，本 crate 在
+//! Linux 上编译为空壳（不引入 muda/GTK），以便 `cargo build --workspace` 通过。
+#![cfg(not(target_os = "linux"))]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,6 +17,9 @@ use muda::{
 static NEXT_MENU_ID: AtomicU64 = AtomicU64::new(1);
 
 /// 在有效 NSView 上弹出菜单。位置为视图逻辑坐标；None 使用光标位置。
+///
+/// # Safety
+/// `view` 必须是有效、存活的 `NSView*`（由调用方保证生命周期）；否则 AppKit 侧解引用 UB。
 #[cfg(target_os = "macos")]
 pub unsafe fn popup_for_nsview(
     menu: &NativeMenu,
@@ -29,6 +36,9 @@ pub unsafe fn popup_for_nsview(
 }
 
 /// 在有效 HWND 上弹出菜单。位置为客户区逻辑坐标；None 使用光标位置。
+///
+/// # Safety
+/// `hwnd` 必须是有效、存活的窗口句柄（由调用方保证生命周期）；否则 Win32 侧解引用 UB。
 #[cfg(target_os = "windows")]
 pub unsafe fn popup_for_hwnd(
     menu: &NativeMenu,

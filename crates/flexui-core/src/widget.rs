@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use flexui_geometry::{Insets, Rect, Size};
+use flexui_gfx::{Insets, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageSource};
 
 use crate::anim::AnimProp;
@@ -109,9 +109,24 @@ pub enum WidgetPropertyKey {
     Vertical,
     Thickness,
     BindGroup,
+    ScrollBar,
+    AutoScroll,
+    VirtualColumns,
+    VirtualSource,
+    VirtualSelectionMode,
+    VirtualSelectedRows,
+    HeaderHeight,
+    ShowHeader,
+    Striped,
+    FillLastColumn,
+    Overscan,
 }
 
 /// XML/构建器及运行时写入控件专属配置的类型安全入口。
+///
+/// 各变体大小差异较大，但本枚举总是「构造后立即被 `set_property` 消费」的一次性载体，
+/// 不会成批存入集合，故不必为最大变体装箱（装箱只会给每个构造点添麻烦）。
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum WidgetProperty {
     Text(String),
@@ -137,6 +152,8 @@ pub enum WidgetProperty {
     Placeholder(String),
     PlaceholderStyle(PlaceholderStyleSet),
     Multiline(bool),
+    /// Label 自动换行的最大宽度（像素）；None 表示单行不换行。
+    WrapWidth(Option<f32>),
     ReadOnly(bool),
     NumberOnly(bool),
     Password(bool),
@@ -158,6 +175,22 @@ pub enum WidgetProperty {
     Vertical(bool),
     Thickness(f32),
     BindGroup(Option<u32>),
+    /// 滚动条可见性模式（auto/always/hidden）。
+    ScrollBar(crate::scroll::ScrollBarVisibility),
+    /// 文本追加后自动滚到底部（日志/聊天场景）。
+    AutoScroll(bool),
+    /// 虚拟列表列定义。
+    VirtualColumns(Vec<crate::widgets::VirtualColumn>),
+    /// 虚拟列表惰性数据源。
+    VirtualSource(crate::widgets::VirtualListSourceRef),
+    VirtualSelectionMode(crate::widgets::VirtualSelectionMode),
+    /// 虚拟列表选中行的稳定 ID。
+    VirtualSelectedRows(Vec<u64>),
+    HeaderHeight(f32),
+    ShowHeader(bool),
+    Striped(bool),
+    FillLastColumn(bool),
+    Overscan(usize),
 }
 
 /// 平台文本输入协议需要的只读快照。
@@ -211,6 +244,8 @@ pub struct Base {
     pub pressed: bool,
     pub focused: bool,
     pub focusable: bool,
+    /// 文本是否可选中（拖选 + Cmd+C 复制）；开启时控件也会获得焦点。
+    pub selectable: bool,
     /// 任一后代获得焦点时，本节点及其子树使用 focus 状态样式。
     pub focus_within: bool,
     /// 光标闪烁相位（true=显示），由分发器的 blink 定时切换；Edit 绘制光标用。
@@ -305,6 +340,7 @@ impl Base {
                     | WidgetRole::Edit
                     | WidgetRole::ComboBox
             ),
+            selectable: false,
             visible: true,
             hit: HitPolicy::Solid,
             selected: false,
@@ -453,15 +489,55 @@ pub trait Widget {
         false
     }
 
-    /// 滚动与动画能力。
+    /// 多选列表当前选中的稳定行 ID；非多选控件返回 None。
+    fn selected_rows(&self) -> Option<Vec<u64>> {
+        None
+    }
+
+    /// 可排序数据控件的当前排序状态。
+    fn sort_state(&self) -> Option<crate::widgets::VirtualSort> {
+        None
+    }
+
+    /// 数据表当前列定义；用于列宽拖动后的状态持久化。
+    fn virtual_columns(&self) -> Option<Vec<crate::widgets::VirtualColumn>> {
+        None
+    }
+
+    /// 通知惰性数据控件重新读取数据和布局度量。
+    fn refresh_data(&mut self) -> bool {
+        false
+    }
+
+    /// 滚动与动画能力（双轴）。
     fn is_scrollable(&self) -> bool {
         false
     }
-    fn scroll_by(&mut self, _dy: f32) -> bool {
+    /// 增量滚动（dx 横向、dy 纵向；正值方向与滚轮一致）。返回是否发生变化。
+    fn scroll_by(&mut self, _dx: f32, _dy: f32) -> bool {
         false
     }
-    fn scroll_position(&self) -> Option<f32> {
+    /// 当前滚动偏移（横、纵）。
+    fn scroll_offset(&self) -> Option<flexui_gfx::Point> {
         None
+    }
+    /// 开启「粘底」：此后每次布局都把纵向偏移贴到底部，直到用户手动上滚。
+    /// 适合聊天等追加式列表——新增内容（含图片异步撑高）后仍保持在最底。
+    /// 返回该控件是否支持粘底。
+    fn scroll_to_end(&mut self) -> bool {
+        false
+    }
+    /// 命中滚动条滑块则返回抓取信息（供分发器发起拖动）。默认无滚动条。
+    fn scrollbar_grab(&self, _pos: flexui_gfx::Point) -> Option<crate::scroll::ScrollGrab> {
+        None
+    }
+    /// 按拖动中的鼠标位置更新滚动偏移。返回是否变化。
+    fn scrollbar_drag(&mut self, _pos: flexui_gfx::Point, _grab: &crate::scroll::ScrollGrab) -> bool {
+        false
+    }
+    /// 该点是否落在本控件的滚动条区域（供光标形状判断：滚动条上应显示箭头而非文本光标）。
+    fn scrollbar_contains(&self, _pos: flexui_gfx::Point) -> bool {
+        false
     }
     fn animation_value(&self, _prop: AnimProp) -> Option<f32> {
         None

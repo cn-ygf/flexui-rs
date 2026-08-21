@@ -1,6 +1,6 @@
 //! HBox：横向弹性容器（主轴横向 Flex + flex_grow，交叉轴拉伸）。
 
-use flexui_geometry::{Rect, Size};
+use flexui_gfx::{Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::common_builders;
@@ -21,6 +21,12 @@ impl HBox {
     }
     pub fn spacing(mut self, s: f32) -> Self {
         self.base.spacing = s;
+        self
+    }
+    /// 设置初始选中态（参与样式解析的 selected 维度）。
+    /// 用于可点击富行等：切换选中只需 `ctx.set_selected(name, bool)`，无需重建。
+    pub fn selected(mut self, on: bool) -> Self {
+        self.base.selected = on;
         self
     }
     pub fn push(mut self, child: impl Widget + 'static) -> Self {

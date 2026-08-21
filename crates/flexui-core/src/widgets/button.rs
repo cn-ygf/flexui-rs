@@ -1,6 +1,6 @@
 //! Button：按钮控件（完整 4×2 状态，点击触发回调/通知）。
 
-use flexui_geometry::{Color, Rect, Size};
+use flexui_gfx::{Color, Rect, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource, TextAlign};
 
 use crate::common_builders;
@@ -166,7 +166,7 @@ impl Clickable for Button {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui_geometry::{Corners, Point};
+    use flexui_gfx::{Corners, Point};
     use flexui_gfx::Font;
 
     #[derive(Default)]

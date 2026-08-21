@@ -1,12 +1,16 @@
 use flexui::{
-    load_native_menu_res, ControlEvent, ImageSource, MenuEntry, MenuStyle, NativeMenu,
+    load_native_menu_res, ControlEvent, ImageSource, MainProxy, MenuEntry, MenuStyle, NativeMenu,
     NativeMenuAnchor, NativeMenuItem, NativeSubmenu, Point, ResourceManager, Skin, Theme,
     ThemeMode, WindowCtx, WindowImpl,
 };
 
-use crate::{resources, themes};
+use crate::{http_demo, resources, themes, virtual_list_demo};
 
-pub(crate) struct GalleryWindow;
+#[derive(Default)]
+pub(crate) struct GalleryWindow {
+    ui: Option<MainProxy>,
+    virtual_list: virtual_list_demo::VirtualListDemo,
+}
 
 impl WindowImpl for GalleryWindow {
     fn skin(&self) -> Skin {
@@ -18,21 +22,38 @@ impl WindowImpl for GalleryWindow {
     }
 
     fn on_init(&mut self, ctx: &mut WindowCtx) {
+        self.ui = ctx.main_proxy();
         if ctx
             .theme()
             .is_some_and(|theme| theme.mode == ThemeMode::Dark)
         {
             ctx.set_selected("theme_switch", true);
         }
+        self.virtual_list.init(ctx);
     }
 
     fn on_control_event(&mut self, name: &str, event: &ControlEvent, ctx: &mut WindowCtx) {
-        if let ("theme_switch", ControlEvent::SelectedChanged(dark)) = (name, event) {
-            ctx.set_theme(if *dark { Theme::dark() } else { Theme::light() });
+        match (name, event) {
+            ("theme_switch", ControlEvent::SelectedChanged(dark)) => {
+                ctx.set_theme(if *dark { Theme::dark() } else { Theme::light() });
+            }
+            (virtual_list_demo::CONTROL_NAME, ControlEvent::RowsSelectionChanged(_)) => {
+                self.virtual_list.selection_changed(ctx);
+            }
+            (virtual_list_demo::CONTROL_NAME, ControlEvent::SortChanged(sort)) => {
+                self.virtual_list.sort_changed(sort.clone(), ctx);
+            }
+            (virtual_list_demo::CONTROL_NAME, ControlEvent::ColumnsChanged(columns)) => {
+                self.virtual_list.columns_changed(columns.clone());
+            }
+            _ => {}
         }
     }
 
     fn on_click(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if self.virtual_list.handle_click(name, ctx) {
+            return;
+        }
         match name {
             "apply_bilibili_theme" => {
                 ctx.set_selected("theme_switch", false);
@@ -41,6 +62,13 @@ impl WindowImpl for GalleryWindow {
             "restore_default_theme" => {
                 ctx.set_selected("theme_switch", false);
                 ctx.set_theme(Theme::light());
+            }
+            "http_go" => {
+                if let Some(ui) = self.ui.clone() {
+                    http_demo::start_request(ctx, ui);
+                } else {
+                    ctx.set_text("http_status", "UI thread proxy is unavailable");
+                }
             }
             "open_drawn_menu" => show_drawn_menu(ctx, name),
             "open_xml_native_menu" => {
@@ -72,7 +100,9 @@ impl WindowImpl for GalleryWindow {
     }
 
     fn on_context(&mut self, name: &str, x: f32, y: f32, ctx: &mut WindowCtx) {
-        if name == "native_context_target" {
+        if name == virtual_list_demo::CONTROL_NAME {
+            self.virtual_list.show_context_menu(ctx);
+        } else if name == "native_context_target" {
             show_menu(
                 ctx,
                 &rust_native_menu(),

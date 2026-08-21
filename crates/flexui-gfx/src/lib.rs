@@ -1,14 +1,16 @@
-//! flexui-gfx：平台无关的绘图抽象层（L2）。
+//! flexui-gfx：平台无关的几何与绘图抽象层（L2）。
 //!
-//! 只定义「画什么」的接口 `Canvas` 与字体描述 `Font`，不含任何平台实现。
+//! 定义几何、颜色、字体描述以及「画什么」的接口 `Canvas`，不含任何平台实现。
 //! macOS / Windows 后端各自实现 `Canvas`，上层控件面向本接口自绘，彻底与平台解耦。
+
+mod geometry;
+
+pub use geometry::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
 
 use std::any::Any;
 use std::fmt;
 use std::ops::Range;
 use std::rc::Rc;
-
-use flexui_geometry::{Color, Corners, Insets, Point, Rect, Size};
 
 /// 图片来源：磁盘文件路径 / 内存位图字节 / SVG 字节。
 #[derive(Debug, Clone, PartialEq)]
@@ -315,6 +317,37 @@ impl TextLayout {
     }
 }
 
+/// 离屏图层句柄：把一段内容预渲染成位图，之后可整块 blit（用于滚动等只平移的内容）。
+///
+/// `data` 用不透明的 `Rc<dyn Any>` 承载各后端的位图对象（如 macOS 的 NSImage）。
+#[derive(Clone)]
+pub struct LayerHandle {
+    /// 逻辑尺寸（点）。
+    pub size: Size,
+    /// 渲染时的像素密度（HiDPI 匹配用）。
+    pub scale: f32,
+    data: Rc<dyn Any>,
+}
+
+impl LayerHandle {
+    pub fn new(size: Size, scale: f32, data: Rc<dyn Any>) -> Self {
+        Self { size, scale, data }
+    }
+    /// 取回后端位图对象。
+    pub fn data<T: Any>(&self) -> Option<&T> {
+        self.data.downcast_ref::<T>()
+    }
+}
+
+impl fmt::Debug for LayerHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LayerHandle")
+            .field("size", &self.size)
+            .field("scale", &self.scale)
+            .finish()
+    }
+}
+
 /// 画布抽象：控件自绘时唯一面向的接口。
 ///
 /// 坐标一律使用「逻辑像素、左上原点、y 向下」；缩放(HiDPI)由后端处理。
@@ -417,12 +450,29 @@ pub trait Canvas {
     fn clip_round_rect(&mut self, rect: Rect, _radius: Corners) {
         self.clip_rect(rect);
     }
+
+    /// 当前画布的像素密度（离屏图层匹配用）。
+    fn scale(&self) -> f32 {
+        1.0
+    }
+
+    /// 在离屏位图里渲染一段 `size` 大小的内容（左上原点坐标系与主画布一致），返回可后续
+    /// blit 的句柄。返回 `None` 表示该后端不支持离屏渲染，调用方应退化为直接绘制。
+    fn capture_layer(
+        &mut self,
+        _size: Size,
+        _draw: &mut dyn FnMut(&mut dyn Canvas),
+    ) -> Option<LayerHandle> {
+        None
+    }
+
+    /// 把离屏图层贴回当前画布，左上角在 `origin`（逻辑坐标）。缺省为空。
+    fn draw_layer(&mut self, _layer: &LayerHandle, _origin: Point) {}
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{image_density_from_path, Font, ImageSource, TextBoundary, TextLayout};
-    use flexui_geometry::Size;
+    use super::{image_density_from_path, Font, ImageSource, Size, TextBoundary, TextLayout};
 
     #[test]
     fn font_样式构建() {

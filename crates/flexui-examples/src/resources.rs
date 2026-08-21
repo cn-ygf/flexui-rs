@@ -83,6 +83,10 @@ mod tests {
             .read_string("app.xml")
             .unwrap()
             .contains("<Window"));
+        assert!(resources
+            .read_string("close_prompt.xml")
+            .unwrap()
+            .contains("confirm_close"));
         for page in ["home", "examples", "cloud-play", "cloud-saves"] {
             let xml = resources.read_string(&format!("pages/{page}.xml")).unwrap();
             assert!(xml.contains("page_"));
@@ -191,5 +195,34 @@ mod tests {
             assert_eq!(switch.width, Sizing::Fixed(30.0), "{name} width");
             assert_eq!(switch.height, Sizing::Fixed(16.0), "{name} height");
         }
+    }
+
+    #[test]
+    fn 关闭提示布局尺寸与原版皮肤一致() {
+        let mut window = load_themed_window("close_prompt.xml");
+        let config = window.config.as_ref().unwrap();
+        assert_eq!(config.width, 360.0);
+        assert_eq!(config.height, 210.0);
+
+        layout_node(
+            window.root.as_mut(),
+            Rect::new(0.0, 0.0, 360.0, 210.0),
+            &TestCanvas,
+        );
+        let confirm = find_widget(window.root.as_ref(), "confirm_close")
+            .unwrap()
+            .base();
+        assert_eq!(confirm.width, Sizing::Fixed(120.0));
+        assert_eq!(confirm.height, Sizing::Fixed(36.0));
+        assert_eq!(confirm.resolved_style().border_width, Some(0.0));
+
+        let checkbox = find_widget(window.root.as_ref(), "close_remember")
+            .unwrap()
+            .base();
+        let checkbox_center = checkbox.rect.left() + checkbox.rect.size.width / 2.0;
+        assert!(
+            (checkbox_center - 180.0).abs() < 0.01,
+            "checkbox center: {checkbox_center}"
+        );
     }
 }

@@ -11,7 +11,7 @@ use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent,
+    NSApplication, NSCursor, NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent,
     NSEventModifierFlags, NSTextInputClient, NSView, NSWindow, NSWindowDelegate,
 };
 use objc2_foundation::{
@@ -23,7 +23,7 @@ use objc2_foundation::{
 use flexui_core::event::keys;
 use flexui_core::{
     apply_localizations, find_mut_by_id, layout_node, paint_tree_in_rect, Dispatcher, Event, Mods,
-    MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WidgetRole, WindowCtx, WindowDelegate,
+    MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WindowCtx, WindowDelegate,
     WindowDragRegion, WindowHandle,
 };
 
@@ -124,6 +124,22 @@ impl WindowHandle for MacWindowHandle {
     fn set_title(&mut self, title: &str) {
         self.window.setTitle(&NSString::from_str(title));
     }
+    fn show(&mut self) {
+        if self.window.isMiniaturized() {
+            self.window.deminiaturize(None);
+        }
+        self.window.makeKeyAndOrderFront(None);
+        let app = NSApplication::sharedApplication(self.window.mtm());
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+    }
+    fn hide(&mut self) {
+        self.window.orderOut(None);
+    }
+    fn quit(&mut self) {
+        let app = NSApplication::sharedApplication(self.window.mtm());
+        app.terminate(None);
+    }
     fn close(&mut self) {
         // AppKit 关闭 sheet 时会同步回调窗口委托。这里只记录请求，由外层在释放
         // AppState 的 RefCell 借用后执行，避免重入导致进程因 borrow panic 退出。
@@ -133,12 +149,17 @@ impl WindowHandle for MacWindowHandle {
         self.window.miniaturize(None);
     }
     fn maximize(&mut self) {
-        self.window.zoom(None);
+        if !self.window.isZoomed() {
+            self.window.zoom(None);
+        }
     }
     fn restore(&mut self) {
-        // 还原：若最小化先取消，再 zoom 回普通尺寸。
-        self.window.deminiaturize(None);
-        self.window.zoom(None);
+        if self.window.isMiniaturized() {
+            self.window.deminiaturize(None);
+        }
+        if self.window.isZoomed() {
+            self.window.zoom(None);
+        }
     }
     fn popup_native_menu(
         &mut self,
@@ -169,10 +190,22 @@ pub struct AppState {
     pub drag_region: WindowDragRegion,
     /// owned modal 的 owner；关闭时恢复 owner 输入。
     pub modal_owner: Option<Weak<NSWindow>>,
+    /// 原生窗口状态，用于过滤重复的最小化/最大化/恢复通知。
+    pub minimized: bool,
+    pub maximized: bool,
+    pub fullscreen: bool,
+    /// 防止原生关闭通知异常重复时多次调用 `on_closed`。
+    pub closed: bool,
 }
+
+/// 延后执行的原生回调：在释放 AppState 借用后再回调窗口委托，避免重入。
+type DeferredNativeCallback = Box<dyn FnOnce(&FlexView)>;
 
 pub struct FlexViewIvars {
     state: RefCell<AppState>,
+    /// AppKit 会在 hide/show/minimize 等原生调用中同步回调窗口委托；此队列用于避开
+    /// 业务回调持有 AppState 可变借用时的重入。
+    deferred_native_callbacks: RefCell<Vec<DeferredNativeCallback>>,
 }
 
 define_class!(
@@ -242,7 +275,11 @@ define_class!(
                     return;
                 }
             }
-            self.dispatch(Event::MouseDown { pos, button: MouseButton::Left });
+            self.dispatch(Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                mods: event_mods(event),
+            });
             if event.clickCount() >= 2 {
                 self.dispatch(Event::DoubleClick { pos });
             }
@@ -260,10 +297,12 @@ define_class!(
 
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
+            // 精确滚动（触控板）已是像素增量；鼠标滚轮是行增量，需放大为像素，否则滚动过慢。
+            let factor = if event.hasPreciseScrollingDeltas() { 1.0 } else { 40.0 };
             self.dispatch(Event::MouseWheel {
                 pos: self.point(event),
-                dx: event.scrollingDeltaX() as f32,
-                dy: event.scrollingDeltaY() as f32,
+                dx: event.scrollingDeltaX() as f32 * factor,
+                dy: event.scrollingDeltaY() as f32 * factor,
             });
         }
 
@@ -348,7 +387,7 @@ define_class!(
         }
     }
 
-    // FlexView 同时充当窗口委托，处理关闭请求（on_close）。
+    // FlexView 同时充当窗口委托，处理关闭生命周期。
     unsafe impl NSObjectProtocol for FlexView {}
 
     unsafe impl NSWindowDelegate for FlexView {
@@ -370,6 +409,11 @@ define_class!(
         fn window_will_close(&self, _notification: &objc2_foundation::NSNotification) {
             let (timers, owner) = {
                 let mut state = self.ivars().state.borrow_mut();
+                state.disp.close_main_proxy();
+                if !state.closed {
+                    state.closed = true;
+                    state.delegate.on_closed();
+                }
                 let timers = std::mem::take(&mut state.timers);
                 let owner = state.modal_owner.as_ref().and_then(Weak::load);
                 (timers, owner)
@@ -384,20 +428,26 @@ define_class!(
 
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &objc2_foundation::NSNotification) {
-            self.dispatch(Event::WindowFocusChanged { focused: false });
+            self.run_or_defer_native_callback(|view| {
+                view.dispatch(Event::WindowFocusChanged { focused: false });
+            });
         }
 
         #[unsafe(method(windowDidBecomeKey:))]
         fn window_did_become_key(&self, _notification: &objc2_foundation::NSNotification) {
-            self.dispatch(Event::WindowFocusChanged { focused: true });
+            self.run_or_defer_native_callback(|view| {
+                view.dispatch(Event::WindowFocusChanged { focused: true });
+            });
         }
 
         #[unsafe(method(windowDidResize:))]
         fn window_did_resize(&self, _notification: &objc2_foundation::NSNotification) {
             let bounds = self.bounds();
-            self.dispatch(Event::WindowResized {
-                width: bounds.size.width as f32,
-                height: bounds.size.height as f32,
+            let width = bounds.size.width as f32;
+            let height = bounds.size.height as f32;
+            self.run_or_defer_native_callback(move |view| {
+                view.dispatch(Event::WindowResized { width, height });
+                view.sync_zoom_state();
             });
         }
 
@@ -405,31 +455,69 @@ define_class!(
         fn window_did_move(&self, _notification: &objc2_foundation::NSNotification) {
             if let Some(window) = self.window() {
                 let origin = window.frame().origin;
-                self.fire_window_event(flexui_core::WindowEvent::Moved {
-                    x: origin.x as f32,
-                    y: origin.y as f32,
+                let x = origin.x as f32;
+                let y = origin.y as f32;
+                self.run_or_defer_native_callback(move |view| {
+                    view.fire_window_event(flexui_core::WindowEvent::Moved { x, y });
                 });
             }
         }
 
         #[unsafe(method(windowDidMiniaturize:))]
         fn window_did_miniaturize(&self, _notification: &objc2_foundation::NSNotification) {
-            self.fire_window_event(flexui_core::WindowEvent::Minimized);
+            self.run_or_defer_native_callback(|view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let changed = !state.minimized;
+                state.minimized = true;
+                drop(state);
+                if changed {
+                    view.fire_window_event(flexui_core::WindowEvent::Minimized);
+                }
+            });
         }
 
         #[unsafe(method(windowDidDeminiaturize:))]
         fn window_did_deminiaturize(&self, _notification: &objc2_foundation::NSNotification) {
-            self.fire_window_event(flexui_core::WindowEvent::Restored);
+            let zoomed = self.window().is_some_and(|window| window.isZoomed());
+            self.run_or_defer_native_callback(move |view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let changed = state.minimized;
+                state.minimized = false;
+                state.maximized = zoomed;
+                drop(state);
+                if changed {
+                    view.fire_window_event(flexui_core::WindowEvent::Restored);
+                }
+            });
         }
 
         #[unsafe(method(windowDidEnterFullScreen:))]
         fn window_did_enter_full_screen(&self, _notification: &objc2_foundation::NSNotification) {
-            self.fire_window_event(flexui_core::WindowEvent::Maximized);
+            self.run_or_defer_native_callback(|view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let changed = !state.maximized;
+                state.fullscreen = true;
+                state.maximized = true;
+                drop(state);
+                if changed {
+                    view.fire_window_event(flexui_core::WindowEvent::Maximized);
+                }
+            });
         }
 
         #[unsafe(method(windowDidExitFullScreen:))]
         fn window_did_exit_full_screen(&self, _notification: &objc2_foundation::NSNotification) {
-            self.fire_window_event(flexui_core::WindowEvent::Restored);
+            let zoomed = self.window().is_some_and(|window| window.isZoomed());
+            self.run_or_defer_native_callback(move |view| {
+                let mut state = view.ivars().state.borrow_mut();
+                let restored = state.fullscreen && !zoomed;
+                state.fullscreen = false;
+                state.maximized = zoomed;
+                drop(state);
+                if restored {
+                    view.fire_window_event(flexui_core::WindowEvent::Restored);
+                }
+            });
         }
     }
 
@@ -573,22 +661,6 @@ pub(crate) fn filenames_pboard_type() -> &'static objc2_app_kit::NSPasteboardTyp
 }
 
 /// 命中测试：光标下最上层控件是否为文本输入（Edit）。用于切换 I-beam 光标。
-fn point_over_edit(root: &dyn Widget, p: Point) -> bool {
-    fn topmost(node: &dyn Widget, p: Point) -> Option<bool> {
-        let b = node.base();
-        if !b.visible || !b.rect.contains(p) {
-            return None;
-        }
-        for c in b.children.iter().rev() {
-            if let Some(r) = topmost(c.as_ref(), p) {
-                return Some(r);
-            }
-        }
-        Some(b.role == WidgetRole::Edit && b.enabled)
-    }
-    topmost(root, p) == Some(true)
-}
-
 fn apply_close_request(window: &NSWindow) {
     if let Some(owner) = window.sheetParent() {
         owner.endSheet(window);
@@ -652,6 +724,28 @@ fn command_to_key(name: &[u8]) -> Option<(u32, bool)> {
 }
 
 impl FlexView {
+    /// 普通 Zoom 不会触发全屏通知，通过 resize 后的 `isZoomed` 补齐状态事件。
+    fn sync_zoom_state(&self) {
+        let Some(window) = self.window() else { return };
+        let zoomed = window.isZoomed();
+        let event = {
+            let mut state = self.ivars().state.borrow_mut();
+            if state.fullscreen || state.minimized || state.maximized == zoomed {
+                None
+            } else {
+                state.maximized = zoomed;
+                Some(if zoomed {
+                    flexui_core::WindowEvent::Maximized
+                } else {
+                    flexui_core::WindowEvent::Restored
+                })
+            }
+        };
+        if let Some(event) = event {
+            self.fire_window_event(event);
+        }
+    }
+
     fn fire_window_event(&self, event: flexui_core::WindowEvent) {
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
@@ -663,18 +757,54 @@ impl FlexView {
             layout_dirty,
             ..
         } = &mut *st;
+        let mut overlays = Vec::new();
+        let mut anims = Vec::new();
+        let mut new_windows = Vec::new();
+        let mut close_requested = false;
         if let Some(window) = window.as_ref() {
             let mut handle = MacWindowHandle::new(window.clone());
-            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
+            let mut ctx = WindowCtx::with_proxy_and_localizer(
+                root.as_mut(),
+                &mut handle,
+                disp.proxy(),
+                localizer,
+            );
             delegate.on_window_event(&event, &mut ctx);
+            overlays = ctx.take_overlay_requests();
+            anims = ctx.take_anim_requests();
+            new_windows = ctx.take_new_windows();
             disp.invalidate(ctx.take_invalidation());
+            close_requested = handle.take_close_request();
+        }
+        let opened = !overlays.is_empty();
+        if !close_requested {
+            for request in overlays {
+                open_overlay_request(disp, request);
+            }
+            for request in anims {
+                disp.animate(
+                    root.as_mut(),
+                    &request.name,
+                    request.prop,
+                    request.to,
+                    request.dur_secs,
+                    request.easing,
+                );
+            }
         }
         let redraw = disp.take_redraw();
         let layout = disp.take_layout();
         *layout_dirty |= layout;
         let dirty = disp.take_dirty();
         drop(st);
-        if redraw || layout {
+        if close_requested {
+            if let Some(window) = window.as_ref() {
+                self.request_close(window);
+            }
+            return;
+        }
+        self.create_windows(new_windows);
+        if redraw || layout || opened {
             self.setNeedsDisplay(true);
         } else if let Some(rect) = dirty {
             self.setNeedsDisplayInRect(to_nsrect(rect));
@@ -703,16 +833,24 @@ impl FlexView {
                 layout_dirty: true,
                 drag_region: environment.drag_region,
                 modal_owner: environment.modal_owner,
+                minimized: false,
+                maximized: false,
+                fullscreen: false,
+                closed: false,
             }),
+            deferred_native_callbacks: RefCell::new(Vec::new()),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    /// 关闭请求 → 窗口委托 on_close，返回是否允许关闭。
+    /// 关闭请求 → 窗口委托 on_closing，返回是否允许关闭。
     pub fn fire_close(&self) -> (bool, bool) {
         let window = self.window();
+        let Some(win) = window else {
+            return (true, false);
+        };
         let mut st = self.ivars().state.borrow_mut();
         let localizer = st.localizer.clone();
         let AppState {
@@ -722,31 +860,51 @@ impl FlexView {
             layout_dirty,
             ..
         } = &mut *st;
-        if let Some(win) = window {
-            let mut handle = MacWindowHandle::new(win);
-            let mut ctx = WindowCtx::with_localizer(root.as_mut(), &mut handle, localizer);
-            let allow = delegate.on_close(&mut ctx);
-            disp.invalidate(ctx.take_invalidation());
-            let close_requested = handle.take_close_request();
-            if !allow {
-                let redraw = disp.take_redraw();
-                let layout = disp.take_layout();
-                *layout_dirty |= layout;
-                let dirty = disp.take_dirty();
-                drop(st);
-                if redraw || layout {
-                    self.setNeedsDisplay(true);
-                } else if let Some(rect) = dirty {
-                    self.setNeedsDisplayInRect(to_nsrect(rect));
-                }
-            }
-            (allow, close_requested)
-        } else {
-            (true, false)
+        let mut handle = MacWindowHandle::new(win);
+        let mut ctx = WindowCtx::with_proxy_and_localizer(
+            root.as_mut(),
+            &mut handle,
+            disp.proxy(),
+            localizer,
+        );
+        let allow = delegate.on_closing(&mut ctx);
+        let overlays = ctx.take_overlay_requests();
+        let anims = ctx.take_anim_requests();
+        let new_windows = ctx.take_new_windows();
+        disp.invalidate(ctx.take_invalidation());
+        let close_requested = handle.take_close_request();
+        if allow || close_requested {
+            return (allow, close_requested);
         }
+
+        for request in overlays {
+            open_overlay_request(disp, request);
+        }
+        for request in anims {
+            disp.animate(
+                root.as_mut(),
+                &request.name,
+                request.prop,
+                request.to,
+                request.dur_secs,
+                request.easing,
+            );
+        }
+        let redraw = disp.take_redraw();
+        let layout = disp.take_layout();
+        *layout_dirty |= layout;
+        let dirty = disp.take_dirty();
+        drop(st);
+        self.create_windows(new_windows);
+        if redraw || layout {
+            self.setNeedsDisplay(true);
+        } else if let Some(rect) = dirty {
+            self.setNeedsDisplayInRect(to_nsrect(rect));
+        }
+        (allow, close_requested)
     }
 
-    /// 窗口创建后触发 on_init（≈ duilib InitWindow）。
+    /// 依次触发初始化前、初始化和初始化完成钩子。
     pub fn fire_init(&self, window: &Retained<NSWindow>) -> bool {
         let mut handle = MacWindowHandle::new(window.clone());
         let mut st = self.ivars().state.borrow_mut();
@@ -763,7 +921,9 @@ impl FlexView {
             disp.proxy(),
             localizer,
         );
+        delegate.on_before_init(&mut ctx);
         delegate.on_init(&mut ctx);
+        delegate.on_initialized(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
         let new_wins = ctx.take_new_windows();
@@ -885,6 +1045,7 @@ impl FlexView {
 
     /// 帧定时回调：推进动画、派发后台线程消息，并按需重绘。
     fn fire_frame(&self) {
+        self.drain_deferred_native_callbacks();
         let window = self.window();
         let mut st = self.ivars().state.borrow_mut();
         let localizer_for_ctx = st.localizer.clone();
@@ -908,15 +1069,18 @@ impl FlexView {
             layout_dirty,
             ..
         } = &mut *st;
-        disp.tick_anims(root.as_mut(), 0.016);
+        if window.as_ref().is_some_and(|window| window.isVisible()) {
+            disp.tick_anims(root.as_mut(), 0.016);
+        }
         let msgs = disp.drain_messages();
+        let tasks = disp.drain_ui_tasks();
         let control_events = disp.take_control_events();
         let mut anim_reqs = Vec::new();
         let mut ov_reqs = Vec::new();
         let mut new_wins = Vec::new();
         let mut invalidation = flexui_core::Invalidation::None;
         let mut close_requested = false;
-        if !msgs.is_empty() || !control_events.is_empty() {
+        if !tasks.is_empty() || !msgs.is_empty() || !control_events.is_empty() {
             if let Some(win) = window.as_ref() {
                 let mut handle = MacWindowHandle::new(win.clone());
                 let mut ctx = WindowCtx::with_proxy_and_localizer(
@@ -925,6 +1089,9 @@ impl FlexView {
                     disp.proxy(),
                     localizer_for_ctx.clone(),
                 );
+                for task in tasks {
+                    task(&mut ctx);
+                }
                 for m in &msgs {
                     delegate.on_message(m, &mut ctx);
                 }
@@ -964,17 +1131,38 @@ impl FlexView {
         }
     }
 
+    /// AppKit 窗口委托可能在 WindowHandle 调用栈内同步重入。状态空闲时立即执行，
+    /// 否则推迟到下一帧，避免同一个 RefCell 再次可变借用导致进程 panic。
+    fn run_or_defer_native_callback(&self, callback: impl FnOnce(&FlexView) + 'static) {
+        let state_available = self.ivars().state.try_borrow_mut().is_ok();
+        if state_available {
+            callback(self);
+        } else {
+            self.ivars()
+                .deferred_native_callbacks
+                .borrow_mut()
+                .push(Box::new(callback));
+        }
+    }
+
+    fn drain_deferred_native_callbacks(&self) {
+        let callbacks = std::mem::take(&mut *self.ivars().deferred_native_callbacks.borrow_mut());
+        for callback in callbacks {
+            callback(self);
+        }
+    }
+
     fn point(&self, event: &NSEvent) -> flexui_core::Point {
         let win = event.locationInWindow();
         let p = self.convertPoint_fromView(win, None);
         flexui_core::Point::new(p.x as f32, p.y as f32)
     }
 
-    /// 悬停在文本控件上时切换为 I-beam 光标，否则箭头。
+    /// 悬停在文本控件上时切换为 I-beam 光标，否则箭头（滚动条上用箭头）。
     fn update_cursor(&self, p: Point) {
         let over = {
             let st = self.ivars().state.borrow();
-            point_over_edit(st.root.as_ref(), p)
+            flexui_core::point_wants_text_cursor(st.root.as_ref(), p)
         };
         if over {
             NSCursor::IBeamCursor().set();
@@ -1000,6 +1188,12 @@ impl FlexView {
         }
         disp.handle(root.as_mut(), &ev);
         let window_event = flexui_core::WindowEvent::from_event(&ev);
+        // 滚轮增量（滚动容器已先行处理，这里再回传窗口层做缩放等自定义）。
+        let wheel = if let Event::MouseWheel { dx, dy, .. } = &ev {
+            Some((*dx, *dy))
+        } else {
+            None
+        };
         let acts = disp.take_activations();
         let doubles = disp.take_double_clicks();
         let contexts = disp.take_context_clicks();
@@ -1015,6 +1209,7 @@ impl FlexView {
             || !contexts.is_empty()
             || !control_events.is_empty()
             || window_event.is_some()
+            || wheel.is_some()
         {
             if let Some(win) = window.as_ref() {
                 let mut handle = MacWindowHandle::new(win.clone());
@@ -1031,6 +1226,9 @@ impl FlexView {
                 }
                 for (name, event) in &control_events {
                     delegate.on_control_event(name, event, &mut ctx);
+                }
+                if let Some((dx, dy)) = wheel {
+                    delegate.on_wheel(dx, dy, &mut ctx);
                 }
                 if let Some(event) = &window_event {
                     delegate.on_window_event(event, &mut ctx);
@@ -1082,6 +1280,9 @@ impl FlexView {
 
     /// 光标闪烁定时回调：切换焦点控件 caret 相位；顺带驱动 Tooltip 延时显示。
     fn fire_blink(&self) {
+        if !self.window().is_some_and(|window| window.isVisible()) {
+            return;
+        }
         let mut st = self.ivars().state.borrow_mut();
         let AppState { root, disp, .. } = &mut *st;
         let rect = disp.blink(root.as_mut());

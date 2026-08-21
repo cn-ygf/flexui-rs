@@ -1,6 +1,6 @@
 //! Separator：分隔条（细线，横向或纵向）。
 
-use flexui_geometry::{Color, Rect, Size};
+use flexui_gfx::{Color, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::common_builders;

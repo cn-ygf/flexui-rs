@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use flexui_geometry::{Color, Corners};
+use flexui_gfx::{Color, Corners};
 use flexui_gfx::TextAlign;
 
 use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
@@ -34,6 +34,7 @@ pub enum WidgetKind {
     Slider,
     ComboBox,
     ListView,
+    VirtualList,
     ScrollView,
     Separator,
     MenuItem,
@@ -502,6 +503,31 @@ impl Theme {
                     border_color: Some(p.border),
                     border_width: Some(1.0),
                     corner_radius: Some(Corners::all(4.0)),
+                    scrollbar_color: Some(p.text_secondary),
+                    ..Default::default()
+                })
+                .with_state(
+                    BaseState::Disabled,
+                    StyleSpec {
+                        bg_color: Some(p.fill_disabled),
+                        fg_color: Some(p.text_disabled),
+                        border_color: Some(p.border_light),
+                        ..Default::default()
+                    },
+                ),
+        );
+        self.set_builtin_component_style(
+            WidgetKind::VirtualList,
+            "default",
+            StyleSet::new()
+                .with_normal(StyleSpec {
+                    bg_color: Some(p.fill),
+                    fg_color: Some(p.text_regular),
+                    border_color: Some(p.border),
+                    border_width: Some(1.0),
+                    corner_radius: Some(Corners::all(4.0)),
+                    accent_color: Some(p.brand),
+                    selection_color: Some(with_alpha(p.brand, 48)),
                     scrollbar_color: Some(p.text_secondary),
                     ..Default::default()
                 })

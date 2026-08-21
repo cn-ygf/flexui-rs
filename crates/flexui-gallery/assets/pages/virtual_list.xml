@@ -1,0 +1,28 @@
+<VBox width="fill" height="fill" padding="24" spacing="12" bgcolor="@page">
+  <VBox width="fill" spacing="4">
+    <Label text-verbatim="Virtual list" font-size="24" bold="true" fgcolor="@text-primary"/>
+    <Label text-verbatim="Production-scale table with lazy data, stable selection, sorting and resizable columns"
+           fgcolor="@text-secondary"/>
+  </VBox>
+  <HBox width="fill" height="36" spacing="8">
+    <Button name="virtual_add_column" text-verbatim="Add column" width="104" height="36"
+            variant="primary"/>
+    <Button name="virtual_remove_column" text-verbatim="Remove column" width="124" height="36"/>
+    <Button name="virtual_add_rows" text-verbatim="Add 1,000 rows" width="126" height="36"/>
+    <Button name="virtual_delete_selected" text-verbatim="Delete selected" width="132" height="36"
+            enabled="false"/>
+    <Button name="virtual_density" text-verbatim="Compact" width="94" height="36"/>
+    <Button name="virtual_reset" text-verbatim="Reset" width="76" height="36"/>
+  </HBox>
+  <Label name="virtual_status" text-verbatim="100,000 rows" width="fill" height="24"
+         fgcolor="@text-secondary"/>
+  <VirtualList name="virtual_table" width="fill" height="fill" row-height="36"
+               header-height="40" overscan="4" selection-mode="multiple" striped="true"
+               fill-last-column="true" scrollbar="auto">
+    <Column key="id" title-verbatim="ID" width="84" align="right"/>
+    <Column key="service" title-verbatim="Service" width="190" min-width="120" max-width="420" flex="1"/>
+    <Column key="region" title-verbatim="Region" width="112"/>
+    <Column key="status" title-verbatim="Status" width="104"/>
+    <Column key="requests" title-verbatim="Requests" width="124" align="right"/>
+  </VirtualList>
+</VBox>

@@ -115,6 +115,31 @@ fn main() {
 }
 ```
 
+### UI 线程投递与窗口生命周期
+
+`MainProxy` 不绑定具体 async runtime。初始化时取得并克隆句柄，在线程或异步任务完成后
+调用 `post`；闭包会在所属窗口的 UI 线程执行，`WindowCtx` 的属性接口会自动触发重绘或
+重新布局。
+
+```rust
+fn on_init(&mut self, ctx: &mut WindowCtx) {
+    let ui = ctx.main_proxy().expect("window proxy");
+    std::thread::spawn(move || {
+        let result = load_data();
+        ui.post(move |ctx| {
+            ctx.set_text("status", result);
+            ctx.set_enabled("retry", true);
+        });
+    });
+}
+```
+
+在 Tokio、async-std 或其他执行器中，也可以在 `.await` 之后调用同一个 `post`，FlexUI
+不强制依赖某个异步运行时。窗口钩子的顺序为 `on_before_init` → `on_init` →
+`on_initialized` → `on_closing` → `on_closed`。`on_closing` 返回 `false` 可以取消关闭；
+`on_closed` 不提供 `WindowCtx`，因为原生窗口此时已经销毁。最小化、最大化和恢复统一通过
+`on_window_event` 上报为 `WindowEvent::Minimized`、`Maximized` 和 `Restored`。
+
 当前在其他工作区中可以通过路径依赖引入门面 crate：
 
 ```toml
@@ -165,7 +190,7 @@ XML 不是必选项，但很适合贴图界面以及设计与业务代码分离�
 | `flexui-core` | 控件树、布局、事件、样式、主题和动画 |
 | `flexui-xml` | XML 解析、Include、绑定和窗口文档 |
 | `flexui-macos` / `flexui-windows` | 原生窗口、输入和绘制后端 |
-| `flexui-gfx` / `flexui-geometry` | 画布接口与几何基础类型 |
+| `flexui-gfx` | 画布接口与几何基础类型 |
 | `flexui-resource` / `flexui-svg` | 资源提供器与 SVG 光栅化 |
 | `flexui-i18n` | 多语言词典、回退和复数规则 |
 | `flexui-native-menu` | 跨平台系统弹出菜单 |

@@ -9,8 +9,8 @@ use std::ptr::{null, null_mut};
 use flexui_core::event::keys;
 use flexui_core::{
     apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
-    Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WidgetRole,
-    WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
+    Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
+    WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -67,6 +67,8 @@ const DEFAULT_DRAG_STRIP: f32 = 40.0;
 const WM_APP_RESTORE_REDRAW: u32 = WM_APP + 2;
 /// 一个窗口切换语言时通知同线程的全部 flexui 窗口。
 const WM_APP_LOCALE_CHANGED: u32 = WM_APP + 3;
+/// 应用级退出时绕过各窗口关闭确认并销毁全部原生窗口。
+const WM_APP_FORCE_CLOSE: u32 = WM_APP + 4;
 
 thread_local! {
     /// 所有窗口都由同一 UI 线程创建，注册表用于跨普通窗口和 owned tool window 广播环境变化。
@@ -144,6 +146,29 @@ struct WinWindowHandle {
 impl WindowHandle for WinWindowHandle {
     fn set_title(&mut self, title: &str) {
         unsafe { SetWindowTextW(self.hwnd, wide(title).as_ptr()) };
+    }
+    fn show(&mut self) {
+        unsafe {
+            if IsIconic(self.hwnd) != 0 {
+                ShowWindow(self.hwnd, SW_RESTORE);
+            } else {
+                ShowWindow(self.hwnd, SW_SHOW);
+            }
+            SetForegroundWindow(self.hwnd);
+        }
+    }
+    fn hide(&mut self) {
+        unsafe {
+            ShowWindow(self.hwnd, SW_HIDE);
+        }
+    }
+    fn quit(&mut self) {
+        let windows = THREAD_WINDOWS.with(|windows| windows.borrow().clone());
+        for window in windows {
+            unsafe {
+                PostMessageW(window, WM_APP_FORCE_CLOSE, 0, 0);
+            }
+        }
     }
     fn close(&mut self) {
         unsafe { PostMessageW(self.hwnd, WM_CLOSE, 0, 0) };
@@ -438,7 +463,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     SetTimer(hwnd, 1, 530, None);
     SetTimer(hwnd, 2, 16, None);
 
-    // on_init（可能请求打开新窗口/浮层/动画）。
+    // 初始化生命周期钩子（可能请求打开新窗口/浮层/动画）。
     let new_wins = {
         let st = &mut *state;
         let mut handle = WinWindowHandle { hwnd };
@@ -448,7 +473,9 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
             st.disp.proxy(),
             st.localizer.clone(),
         );
+        st.delegate.on_before_init(&mut ctx);
         st.delegate.on_init(&mut ctx);
+        st.delegate.on_initialized(&mut ctx);
         let overlays = ctx.take_overlay_requests();
         let anims = ctx.take_anim_requests();
         let nw = ctx.take_new_windows();
@@ -630,13 +657,38 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
 /// 派发没有对应 core `Event` 的原生窗口状态事件。
 unsafe fn fire_window_event(hwnd: HWND, st: &mut AppState, event: flexui_core::WindowEvent) {
     let mut handle = WinWindowHandle { hwnd };
-    let mut ctx = WindowCtx::with_localizer(st.root.as_mut(), &mut handle, st.localizer.clone());
+    let mut ctx = WindowCtx::with_proxy_and_localizer(
+        st.root.as_mut(),
+        &mut handle,
+        st.disp.proxy(),
+        st.localizer.clone(),
+    );
     st.delegate.on_window_event(&event, &mut ctx);
+    let overlays = ctx.take_overlay_requests();
+    let anims = ctx.take_anim_requests();
+    let new_windows = ctx.take_new_windows();
     st.disp.invalidate(ctx.take_invalidation());
+    let opened = !overlays.is_empty();
+    for request in overlays {
+        open_overlay_request(&mut st.disp, request);
+    }
+    for request in anims {
+        st.disp.animate(
+            st.root.as_mut(),
+            &request.name,
+            request.prop,
+            request.to,
+            request.dur_secs,
+            request.easing,
+        );
+    }
+    for window in new_windows {
+        create_window(window, hwnd);
+    }
     let layout = st.disp.take_layout();
     let redraw = st.disp.take_redraw();
     let dirty = st.disp.take_dirty();
-    if layout || redraw {
+    if layout || redraw || opened {
         st.layout_dirty |= layout;
         InvalidateRect(hwnd, null(), 0);
     } else if let Some(rect) = dirty {
@@ -864,7 +916,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let dpi = GetDpiForWindow(hwnd);
                 let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
                 let logical = Point::new(p.x as f32 / scale, p.y as f32 / scale);
-                let cursor = if point_over_edit((*state).root.as_ref(), logical) {
+                let cursor = if flexui_core::point_wants_text_cursor((*state).root.as_ref(), logical)
+                {
                     IDC_IBEAM
                 } else {
                     IDC_ARROW
@@ -921,6 +974,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 Event::MouseDown {
                     pos: mouse_pos(hwnd, lparam),
                     button: MouseButton::Left,
+                    mods: Mods {
+                        shift: GetKeyState(VK_SHIFT as i32) < 0,
+                        ctrl: GetKeyState(VK_CONTROL as i32) < 0,
+                        ..Default::default()
+                    },
                 },
             );
             0
@@ -1162,8 +1220,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_SIZE => {
             if wparam == SIZE_MINIMIZED as usize {
                 if !state.is_null() {
+                    let changed = !(*state).minimized;
                     (*state).minimized = true;
-                    fire_window_event(hwnd, &mut *state, flexui_core::WindowEvent::Minimized);
+                    if changed {
+                        fire_window_event(hwnd, &mut *state, flexui_core::WindowEvent::Minimized);
+                    }
                 }
                 // 最小化会携带 0 x 0 客户区，不能用它破坏当前布局。
                 // 丢弃系统在最小化过程中生成的无效区，恢复时直接复用稳定帧。
@@ -1186,9 +1247,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let was_maximized = st.maximized;
                     st.minimized = false;
                     st.maximized = wparam == SIZE_MAXIMIZED as usize;
-                    let state_event = if st.maximized && !was_maximized {
+                    let state_event = if restored {
+                        Some(flexui_core::WindowEvent::Restored)
+                    } else if st.maximized && !was_maximized {
                         Some(flexui_core::WindowEvent::Maximized)
-                    } else if (restored || was_maximized) && !st.maximized {
+                    } else if was_maximized && !st.maximized {
                         Some(flexui_core::WindowEvent::Restored)
                     } else {
                         None
@@ -1244,16 +1307,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let st = &mut *state;
                 if wparam == 2 {
                     let locale_changed = refresh_localizations(hwnd, st);
-                    if !st.minimized {
+                    if !st.minimized && IsWindowVisible(hwnd) != 0 {
                         st.disp.tick_anims(st.root.as_mut(), 0.016);
                     }
                     let msgs = st.disp.drain_messages();
+                    let tasks = st.disp.drain_ui_tasks();
                     let control_events = st.disp.take_control_events();
                     let mut anim_reqs = Vec::new();
                     let mut ov_reqs = Vec::new();
                     let mut new_wins = Vec::new();
                     let mut invalidation = flexui_core::Invalidation::None;
-                    if !msgs.is_empty() || !control_events.is_empty() {
+                    if !tasks.is_empty() || !msgs.is_empty() || !control_events.is_empty() {
                         let mut handle = WinWindowHandle { hwnd };
                         let mut ctx = WindowCtx::with_proxy_and_localizer(
                             st.root.as_mut(),
@@ -1261,6 +1325,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             st.disp.proxy(),
                             st.localizer.clone(),
                         );
+                        for task in tasks {
+                            task(&mut ctx);
+                        }
                         for m in &msgs {
                             st.delegate.on_message(m, &mut ctx);
                         }
@@ -1302,7 +1369,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     } else if let Some(rect) = dirty {
                         InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
                     }
-                } else if !st.minimized {
+                } else if !st.minimized && IsWindowVisible(hwnd) != 0 {
                     let blink = st.disp.blink(st.root.as_mut());
                     st.disp.tooltip_tick(st.root.as_mut());
                     let layout = st.disp.take_layout();
@@ -1323,6 +1390,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_APP_FORCE_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        }
         // 模态 owner 重新启用时保证应用共享环境已应用；disabled 窗口可能延迟处理普通消息。
         WM_ENABLE if wparam != 0 => {
             if !state.is_null() && refresh_localizations(hwnd, &mut *state) {
@@ -1337,18 +1408,38 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         {
             0
         }
-        // 关闭请求 → 窗口委托 on_close；返回 false 阻止关闭。
+        // 关闭请求 → 窗口委托 on_closing；返回 false 阻止关闭。
         WM_CLOSE => {
-            let allow = if !state.is_null() {
+            let (allow, new_windows) = if !state.is_null() {
                 let st = &mut *state;
                 let mut handle = WinWindowHandle { hwnd };
                 let root = &mut st.root;
                 let delegate = &mut st.delegate;
-                let mut ctx =
-                    WindowCtx::with_localizer(root.as_mut(), &mut handle, st.localizer.clone());
-                let allow = delegate.on_close(&mut ctx);
+                let mut ctx = WindowCtx::with_proxy_and_localizer(
+                    root.as_mut(),
+                    &mut handle,
+                    st.disp.proxy(),
+                    st.localizer.clone(),
+                );
+                let allow = delegate.on_closing(&mut ctx);
+                let overlays = ctx.take_overlay_requests();
+                let anims = ctx.take_anim_requests();
+                let new_windows = ctx.take_new_windows();
                 st.disp.invalidate(ctx.take_invalidation());
                 if !allow {
+                    for request in overlays {
+                        open_overlay_request(&mut st.disp, request);
+                    }
+                    for request in anims {
+                        st.disp.animate(
+                            st.root.as_mut(),
+                            &request.name,
+                            request.prop,
+                            request.to,
+                            request.dur_secs,
+                            request.easing,
+                        );
+                    }
                     let layout = st.disp.take_layout();
                     let redraw = st.disp.take_redraw();
                     let dirty = st.disp.take_dirty();
@@ -1359,10 +1450,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
                     }
                 }
-                allow
+                (allow, new_windows)
             } else {
-                true
+                (true, Vec::new())
             };
+            if !allow {
+                for window in new_windows {
+                    create_window(window, hwnd);
+                }
+            }
             if allow {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             } else {
@@ -1442,6 +1538,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_DESTROY => {
             if !state.is_null() {
                 let owner = (*state).modal_owner;
+                (*state).disp.close_main_proxy();
+                (*state).delegate.on_closed();
                 THREAD_WINDOWS
                     .with(|windows| windows.borrow_mut().retain(|window| *window != hwnd));
                 drop(Box::from_raw(state));
@@ -1463,22 +1561,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 }
 
 /// 命中最上层可交互控件，判断当前位置是否应显示文本输入光标。
-fn point_over_edit(root: &dyn Widget, point: Point) -> bool {
-    let Some(hit) = hit_test(root, point) else {
-        return false;
-    };
-    fn is_enabled_edit(node: &dyn Widget, id: flexui_core::WidgetId) -> Option<bool> {
-        if node.base().id == id {
-            return Some(node.base().role == WidgetRole::Edit && node.base().enabled);
-        }
-        node.base()
-            .children
-            .iter()
-            .find_map(|child| is_enabled_edit(child.as_ref(), id))
-    }
-    is_enabled_edit(root, hit) == Some(true)
-}
-
 /// WM_PAINT 期间：双缓冲 + DPI 缩放绘制整棵控件树。
 ///
 /// 先画到 32bpp 离屏位图（抗锯齿/ClearType 在位图上效果最佳），再整块 blit 到窗口，
@@ -1593,10 +1675,16 @@ mod cursor_tests {
         edit.base_mut().rect = Rect::new(20.0, 20.0, 120.0, 36.0);
         root.base_mut().children.push(Box::new(edit));
 
-        assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
-        assert!(!point_over_edit(&root, Point::new(180.0, 80.0)));
+        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
+        assert!(!flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(180.0, 80.0)
+        ));
         root.base_mut().children[0].base_mut().enabled = false;
-        assert!(!point_over_edit(&root, Point::new(30.0, 30.0)));
+        assert!(!flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(30.0, 30.0)
+        ));
     }
 
     #[test]
@@ -1613,6 +1701,6 @@ mod cursor_tests {
         overlay.base_mut().hit = HitPolicy::Transparent;
         root.base_mut().children.push(Box::new(overlay));
 
-        assert!(point_over_edit(&root, Point::new(30.0, 30.0)));
+        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
     }
 }

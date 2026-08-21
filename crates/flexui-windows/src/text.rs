@@ -5,7 +5,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-use flexui_geometry::{Color, Point, Rect, Size};
+use flexui_gfx::{Color, Point, Rect, Size};
 use flexui_gfx::{Font, TextBoundary, TextLayout};
 use windows::core::{implement, Ref, Result as WinResult, BOOL, HSTRING};
 use windows::Win32::Foundation::{E_FAIL, E_NOTIMPL, RECT};

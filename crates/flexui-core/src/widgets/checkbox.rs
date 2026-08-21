@@ -1,6 +1,6 @@
 //! CheckBox：勾选框（点击切换 selected）。
 
-use flexui_geometry::Size;
+use flexui_gfx::Size;
 use flexui_gfx::Canvas;
 
 use crate::common_builders;

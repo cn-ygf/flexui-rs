@@ -4,7 +4,7 @@
 //! - VBox/HBox：主轴顺序排列 + `flex_grow` 分配剩余空间，交叉轴拉伸。
 //! - 所有节点的 `rect` 最终是窗口逻辑坐标下的绝对矩形，供绘制与命中测试直接使用。
 
-use flexui_geometry::{Insets, Rect, Size};
+use flexui_gfx::{Insets, Rect, Size};
 use flexui_gfx::Canvas;
 
 use crate::sizing::{Align, Justify, Sizing};
@@ -195,9 +195,12 @@ pub fn arrange_axis(b: &mut Base, axis: Axis, content: Rect, cv: &dyn Canvas) {
         } else {
             main_of(axis, desired[i])
         };
-        // 交叉轴尺寸与偏移（Stretch 填满，其余按 align 对齐）。
+        // 交叉轴尺寸与偏移。固定交叉轴尺寸优先级高于父容器 Stretch：
+        // 显式设了 width/height 的子控件不被拉伸，仅按 align 摆放（Stretch 视作 Start 左/上对齐）。
         let cross_avail = (cross_of_size(axis, content.size) - cross_margin(axis, m)).max(0.0);
-        let cross_fill = align == Align::Stretch || cross_sizing(axis, child.base()).is_fill();
+        let cross_child = cross_sizing(axis, child.base());
+        let cross_fixed = matches!(cross_child, Sizing::Fixed(_));
+        let cross_fill = !cross_fixed && (align == Align::Stretch || cross_child.is_fill());
         let (cross_size, cross_off) = if cross_fill {
             (cross_avail, 0.0)
         } else {
@@ -315,29 +318,29 @@ mod tests {
     /// 测试用假画布：文字度量按固定字宽估算，避免依赖平台。
     struct FakeCanvas;
     impl Canvas for FakeCanvas {
-        fn fill_rect(&mut self, _r: Rect, _c: flexui_geometry::Color) {}
-        fn stroke_rect(&mut self, _r: Rect, _c: flexui_geometry::Color, _w: f32) {}
+        fn fill_rect(&mut self, _r: Rect, _c: flexui_gfx::Color) {}
+        fn stroke_rect(&mut self, _r: Rect, _c: flexui_gfx::Color, _w: f32) {}
         fn fill_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
-            _c: flexui_geometry::Color,
+            _rad: flexui_gfx::Corners,
+            _c: flexui_gfx::Color,
             _w: f32,
         ) {
         }
         fn draw_text(
             &mut self,
             _t: &str,
-            _o: flexui_geometry::Point,
+            _o: flexui_gfx::Point,
             _f: &Font,
-            _c: flexui_geometry::Color,
+            _c: flexui_gfx::Color,
         ) {
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
@@ -358,9 +361,10 @@ mod tests {
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 400.0), &cv);
         let c = &root.base().children;
-        assert_eq!(c[0].base().rect, Rect::new(0.0, 0.0, 200.0, 30.0));
+        // 固定宽度优先于父 Stretch：保持 100 宽，左对齐（不再被拉伸到 200）。
+        assert_eq!(c[0].base().rect, Rect::new(0.0, 0.0, 100.0, 30.0));
         // 第二个：y = 30 + spacing 10 = 40
-        assert_eq!(c[1].base().rect, Rect::new(0.0, 40.0, 200.0, 50.0));
+        assert_eq!(c[1].base().rect, Rect::new(0.0, 40.0, 100.0, 50.0));
     }
 
     #[test]
@@ -400,7 +404,7 @@ mod tests {
     #[test]
     fn padding_收缩内容区() {
         let mut root = Panel::new();
-        root.base_mut().padding = flexui_geometry::Insets::all(10.0);
+        root.base_mut().padding = flexui_gfx::Insets::all(10.0);
         root.base_mut().children.push(Box::new(Panel::new()));
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
@@ -415,7 +419,7 @@ mod tests {
     fn padding_每边不同_收缩内容区() {
         let mut root = Panel::new();
         // 左5 上10 右15 下20
-        root.base_mut().padding = flexui_geometry::Insets::new(5.0, 10.0, 15.0, 20.0);
+        root.base_mut().padding = flexui_gfx::Insets::new(5.0, 10.0, 15.0, 20.0);
         root.base_mut().children.push(Box::new(Panel::new()));
         let cv = FakeCanvas;
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 100.0), &cv);
@@ -438,7 +442,7 @@ mod tests {
         let c = root.base().children[0].base().rect;
         assert_eq!(c.top(), 10.0); // 上 margin
         assert_eq!(c.left(), 5.0); // 左 margin
-        assert_eq!(c.size.width, 80.0); // 100 - 左5 - 右15（Stretch）
+        assert_eq!(c.size.width, 50.0); // 固定宽 50 优先于 Stretch，不被拉伸
     }
 
     // —— 阶段2 新增：Sizing / 对齐 / margin / 绝对定位 ——
@@ -523,8 +527,8 @@ mod tests {
         layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 200.0), &cv);
         let c = root.base().children[0].base().rect;
         assert_eq!(c.top(), 10.0); // 上 margin
-        assert_eq!(c.left(), 10.0); // 左 margin（Stretch 但去掉左右 margin）
-        assert_eq!(c.size.width, 80.0); // 100 - 左右各10
+        assert_eq!(c.left(), 10.0); // 左 margin
+        assert_eq!(c.size.width, 50.0); // 固定宽 50 优先于 Stretch，不被拉伸
     }
 
     #[test]

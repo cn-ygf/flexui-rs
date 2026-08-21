@@ -25,6 +25,7 @@ mod slider;
 mod switch;
 mod tabbox;
 mod vbox;
+mod virtual_list;
 
 pub use button::Button;
 pub use checkbox::CheckBox;
@@ -47,8 +48,12 @@ pub use slider::Slider;
 pub use switch::Switch;
 pub use tabbox::TabBox;
 pub use vbox::VBox;
+pub use virtual_list::{
+    VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualListSource,
+    VirtualListSourceRef, VirtualSelectionMode, VirtualSort, VirtualSortDirection,
+};
 
-use flexui_geometry::{Color, Corners, Rect};
+use flexui_gfx::{Color, Corners, Rect};
 use flexui_gfx::{Canvas, TextAlign};
 
 use crate::paint::draw_aligned_text;
@@ -133,34 +138,34 @@ macro_rules! common_builders {
             }
             /// 四边内边距（统一）。
             pub fn padding(mut self, p: f32) -> Self {
-                self.base.padding = flexui_geometry::Insets::all(p);
+                self.base.padding = flexui_gfx::Insets::all(p);
                 self
             }
             /// 内边距：水平(左右) + 垂直(上下)。
             pub fn padding_xy(mut self, horizontal: f32, vertical: f32) -> Self {
                 self.base.padding =
-                    flexui_geometry::Insets::new(horizontal, vertical, horizontal, vertical);
+                    flexui_gfx::Insets::new(horizontal, vertical, horizontal, vertical);
                 self
             }
             /// 内边距：分别指定 左/上/右/下。
             pub fn padding_ltrb(mut self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
-                self.base.padding = flexui_geometry::Insets::new(left, top, right, bottom);
+                self.base.padding = flexui_gfx::Insets::new(left, top, right, bottom);
                 self
             }
             /// 四边外边距（统一）。
             pub fn margin(mut self, m: f32) -> Self {
-                self.base.margin = flexui_geometry::Insets::all(m);
+                self.base.margin = flexui_gfx::Insets::all(m);
                 self
             }
             /// 外边距：水平(左右) + 垂直(上下)。
             pub fn margin_xy(mut self, horizontal: f32, vertical: f32) -> Self {
                 self.base.margin =
-                    flexui_geometry::Insets::new(horizontal, vertical, horizontal, vertical);
+                    flexui_gfx::Insets::new(horizontal, vertical, horizontal, vertical);
                 self
             }
             /// 外边距：分别指定 左/上/右/下。
             pub fn margin_ltrb(mut self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
-                self.base.margin = flexui_geometry::Insets::new(left, top, right, bottom);
+                self.base.margin = flexui_gfx::Insets::new(left, top, right, bottom);
                 self
             }
             /// 绝对定位（相对父内容区左上角；用于 Box 容器内）。
@@ -211,6 +216,15 @@ macro_rules! common_builders {
             /// 是否可用（disabled 状态）。
             pub fn enabled(mut self, e: bool) -> Self {
                 self.base.enabled = e;
+                self
+            }
+            /// 文本是否可选中（拖选 + Cmd+C 复制）。开启即让控件可获得焦点。
+            /// 目前 Label 已实现选区行为，其它有 `base.text` 的控件后续可复用同一机制。
+            pub fn selectable(mut self, on: bool) -> Self {
+                self.base.selectable = on;
+                if on {
+                    self.base.focusable = true;
+                }
                 self
             }
             /// 命中策略（穿透/不穿透）。

@@ -4,7 +4,7 @@
 //! → 边框 → 子控件(裁剪)。控件本身只需实现 `paint_content`，即可自动获得
 //! 4×2 状态下的分状态样式渲染（对应需求 C3）。
 
-use flexui_geometry::{Corners, Rect};
+use flexui_gfx::{Corners, Rect};
 use flexui_gfx::Canvas;
 
 use crate::widget::Widget;
@@ -176,11 +176,11 @@ fn is_zero_corners(c: Corners) -> bool {
 }
 
 /// 把颜色的 alpha 乘以透明度系数（op=1 原样返回）。
-fn dim(c: flexui_geometry::Color, op: f32) -> flexui_geometry::Color {
+fn dim(c: flexui_gfx::Color, op: f32) -> flexui_gfx::Color {
     if op >= 1.0 {
         c
     } else {
-        flexui_geometry::Color::rgba(c.r, c.g, c.b, c.a * op)
+        flexui_gfx::Color::rgba(c.r, c.g, c.b, c.a * op)
     }
 }
 
@@ -192,11 +192,11 @@ pub fn draw_aligned_text(
     text: &str,
     content: Rect,
     font: &flexui_gfx::Font,
-    color: flexui_geometry::Color,
+    color: flexui_gfx::Color,
     align: flexui_gfx::TextAlign,
     elide: bool,
 ) {
-    use flexui_geometry::Point;
+    use flexui_gfx::Point;
     use flexui_gfx::TextAlign;
     if text.is_empty() {
         return;
@@ -250,7 +250,7 @@ mod tests {
     use crate::layout::layout_node;
     use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
     use crate::widgets::{Button, Panel, VBox};
-    use flexui_geometry::{Color, Rect, Size};
+    use flexui_gfx::{Color, Rect, Size};
     use flexui_gfx::{Canvas, Font};
 
     /// 记录绘制调用的假画布，用于断言绘制管线行为。
@@ -259,7 +259,7 @@ mod tests {
         fills: Vec<(Rect, Color)>,
         strokes: Vec<Color>,
         texts: Vec<String>,
-        round_clips: Vec<(Rect, flexui_geometry::Corners)>,
+        round_clips: Vec<(Rect, flexui_gfx::Corners)>,
     }
     impl Canvas for Recorder {
         fn fill_rect(&mut self, r: Rect, c: Color) {
@@ -268,25 +268,25 @@ mod tests {
         fn stroke_rect(&mut self, _r: Rect, c: Color, _w: f32) {
             self.strokes.push(c);
         }
-        fn fill_round_rect(&mut self, r: Rect, _rad: flexui_geometry::Corners, c: Color) {
+        fn fill_round_rect(&mut self, r: Rect, _rad: flexui_gfx::Corners, c: Color) {
             self.fills.push((r, c));
         }
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
-            _rad: flexui_geometry::Corners,
+            _rad: flexui_gfx::Corners,
             c: Color,
             _w: f32,
         ) {
             self.strokes.push(c);
         }
-        fn draw_text(&mut self, t: &str, _o: flexui_geometry::Point, _f: &Font, _c: Color) {
+        fn draw_text(&mut self, t: &str, _o: flexui_gfx::Point, _f: &Font, _c: Color) {
             self.texts.push(t.to_string());
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)
         }
-        fn clip_round_rect(&mut self, rect: Rect, radius: flexui_geometry::Corners) {
+        fn clip_round_rect(&mut self, rect: Rect, radius: flexui_gfx::Corners) {
             self.round_clips.push((rect, radius));
         }
     }
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn 圆角控件_裁剪图片内容与子树() {
-        let radius = flexui_geometry::Corners::all(8.0);
+        let radius = flexui_gfx::Corners::all(8.0);
         let panel = Panel::new()
             .style(StyleSet::new().with_normal(StyleSpec {
                 corner_radius: Some(radius),

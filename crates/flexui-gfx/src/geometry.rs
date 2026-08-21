@@ -1,7 +1,7 @@
-//! flexui-geometry：平台无关的几何与颜色基础类型（L2）。
+//! 平台无关的几何与颜色基础类型。
 //!
 //! 统一使用「逻辑像素、左上原点、y 向下」的坐标系；平台后端负责把这里的类型
-//! 转换成各自的原生类型（如 macOS 的 NSRect），上层控件只依赖本 crate。
+//! 转换成各自的原生类型（如 macOS 的 NSRect），上层控件通过 `flexui-gfx` 使用。
 
 /// 二维点。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

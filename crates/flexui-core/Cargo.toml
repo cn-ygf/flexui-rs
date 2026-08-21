@@ -4,7 +4,6 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-flexui-geometry = { workspace = true }
 flexui-gfx = { workspace = true }
 flexui-i18n = { workspace = true }
 unicode-segmentation = "1.12"
