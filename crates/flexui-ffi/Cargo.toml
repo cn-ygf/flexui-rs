@@ -11,6 +11,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 flexui-core = { workspace = true }
 flexui-xml = { workspace = true }
 
+# cbindgen 仅用于「测试守住 include/flexui.h 与源码同步」，不进产物。
+[dev-dependencies]
+cbindgen = "0.27"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 flexui-macos = { workspace = true }
 

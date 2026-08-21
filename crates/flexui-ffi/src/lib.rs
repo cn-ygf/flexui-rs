@@ -10,7 +10,10 @@ use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use flexui_core::{visit_all_mut, MainProxy, WidgetRole, WindowCtx, WindowDelegate, WindowEvent};
+use flexui_core::{
+    visit_all_mut, ControlEvent, MainProxy, WidgetProperty, WidgetRole, WindowCtx, WindowDelegate,
+    WindowEvent,
+};
 use flexui_xml::{load_str, Context};
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -66,7 +69,10 @@ thread_local! {
 
 /// 注册全局点击回调：任意「有 name 的按钮」被点击时回调 `cb(name, user)`。
 #[no_mangle]
-pub extern "C" fn flex_set_click_callback(cb: Option<ClickFn>, user: *mut c_void) {
+pub extern "C" fn flex_set_click_callback(
+    cb: Option<extern "C" fn(name: *const c_char, user: *mut c_void)>,
+    user: *mut c_void,
+) {
     CLICK_CB.with(|c| {
         *c.borrow_mut() = cb.map(|f| (f, user as usize));
     });
@@ -187,15 +193,298 @@ pub extern "C" fn flex_ctx_close(ctx: *mut c_void) {
     }));
 }
 
+// —— 值 / 选择 / 可见性等状态读写（补全 WindowCtx 覆盖）——
+
+/// 设置进度条 / 滑块等控件的数值。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_value(ctx: *mut c_void, name: *const c_char, value: f32) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) {
+            ctx.set_value(n, value);
+        }
+    }));
+}
+
+/// 读控件数值到 *out；返回 1=已取到，0=未找到/出错。
+#[no_mangle]
+pub extern "C" fn flex_ctx_get_value(ctx: *mut c_void, name: *const c_char, out: *mut f32) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return 0;
+        };
+        match (out.is_null(), ctx.value(n)) {
+            (false, Some(v)) => {
+                *out = v;
+                1
+            }
+            _ => 0,
+        }
+    }))
+    .unwrap_or(0)
+}
+
+/// 设置 CheckBox / Radio 等的选中态。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_selected(ctx: *mut c_void, name: *const c_char, selected: c_int) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) {
+            ctx.set_selected(n, selected != 0);
+        }
+    }));
+}
+
+/// 设置下拉 / 分段等的选中项索引（负数忽略）。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_selected_index(ctx: *mut c_void, name: *const c_char, index: c_int) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) {
+            if index >= 0 {
+                ctx.set_selected_index(n, index as usize);
+            }
+        }
+    }));
+}
+
+/// 读选中项索引到 *out；返回 1=已取到，0=未找到。
+#[no_mangle]
+pub extern "C" fn flex_ctx_get_selected_index(
+    ctx: *mut c_void,
+    name: *const c_char,
+    out: *mut c_int,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return 0;
+        };
+        match (out.is_null(), ctx.selected_index(n)) {
+            (false, Some(i)) => {
+                *out = i as c_int;
+                1
+            }
+            _ => 0,
+        }
+    }))
+    .unwrap_or(0)
+}
+
+/// 设置控件可见性。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_visible(ctx: *mut c_void, name: *const c_char, visible: c_int) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) {
+            ctx.set_visible(n, visible != 0);
+        }
+    }));
+}
+
+/// 读控件可见性：1=可见，0=隐藏，-1=未找到。
+#[no_mangle]
+pub extern "C" fn flex_ctx_is_visible(ctx: *mut c_void, name: *const c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return -1;
+        };
+        match ctx.is_visible(n) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// 读控件可用性：1=可用，0=禁用，-1=未找到。
+#[no_mangle]
+pub extern "C" fn flex_ctx_is_enabled(ctx: *mut c_void, name: *const c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return -1;
+        };
+        match ctx.is_enabled(n) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// 设置输入框占位提示文本。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_placeholder(
+    ctx: *mut c_void,
+    name: *const c_char,
+    text: *const c_char,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n), Some(t)) = (ctx_from(ctx), cstr(name), cstr(text)) {
+            ctx.set_property(n, WidgetProperty::Placeholder(t.to_string()));
+        }
+    }));
+}
+
+/// 通知数据源控件（列表 / 虚拟列表）刷新数据；返回 1=已处理，0=未找到。
+#[no_mangle]
+pub extern "C" fn flex_ctx_refresh_data(ctx: *mut c_void, name: *const c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return 0;
+        };
+        ctx.refresh_data(n) as c_int
+    }))
+    .unwrap_or(0)
+}
+
+// —— 动态子节点：从 XML 片段增删 ——
+
+/// 解析一段 XML 片段并追加为具名容器的子节点；返回 1=成功，0=未找到容器/解析失败。
+#[no_mangle]
+pub extern "C" fn flex_ctx_add_child_xml(
+    ctx: *mut c_void,
+    name: *const c_char,
+    xml: *const c_char,
+) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n), Some(x)) = (ctx_from(ctx), cstr(name), cstr(xml)) else {
+            return 0;
+        };
+        let build_ctx = Context::new();
+        let Ok(res) = load_str(x, &build_ctx) else {
+            return 0;
+        };
+        ctx.add_child(n, res.root) as c_int
+    }))
+    .unwrap_or(0)
+}
+
+/// 清空具名容器的所有子节点；返回 1=已处理，0=未找到。
+#[no_mangle]
+pub extern "C" fn flex_ctx_clear_children(ctx: *mut c_void, name: *const c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
+            return 0;
+        };
+        ctx.clear_children(n).is_some() as c_int
+    }))
+    .unwrap_or(0)
+}
+
+// —— 窗口控制 ——
+
+/// 显示窗口。
+#[no_mangle]
+pub extern "C" fn flex_ctx_show(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.show();
+        }
+    }));
+}
+
+/// 隐藏窗口。
+#[no_mangle]
+pub extern "C" fn flex_ctx_hide(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.hide();
+        }
+    }));
+}
+
+/// 最小化窗口。
+#[no_mangle]
+pub extern "C" fn flex_ctx_minimize(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.minimize();
+        }
+    }));
+}
+
+/// 最大化窗口。
+#[no_mangle]
+pub extern "C" fn flex_ctx_maximize(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.maximize();
+        }
+    }));
+}
+
+/// 还原窗口（取消最小/最大化）。
+#[no_mangle]
+pub extern "C" fn flex_ctx_restore(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.restore();
+        }
+    }));
+}
+
+/// 退出整个应用（结束事件循环）。
+#[no_mangle]
+pub extern "C" fn flex_ctx_quit(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.quit();
+        }
+    }));
+}
+
+/// 请求整窗重绘。
+#[no_mangle]
+pub extern "C" fn flex_ctx_request_redraw(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.request_redraw();
+        }
+    }));
+}
+
+/// 请求重新布局。
+#[no_mangle]
+pub extern "C" fn flex_ctx_request_layout(ctx: *mut c_void) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let Some(ctx) = ctx_from(ctx) {
+            ctx.request_layout();
+        }
+    }));
+}
+
+// —— 国际化 ——
+
+/// 切换界面语言（BCP-47，如 "zh-CN"/"en"）；返回 1=成功，0=失败。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_locale(ctx: *mut c_void, locale: *const c_char) -> c_int {
+    catch_unwind(AssertUnwindSafe(|| unsafe {
+        let (Some(ctx), Some(loc)) = (ctx_from(ctx), cstr(locale)) else {
+            return 0;
+        };
+        ctx.set_locale(loc).is_ok() as c_int
+    }))
+    .unwrap_or(0)
+}
+
+/// 把具名控件的文本绑定到某本地化资源键（随语言切换自动更新）。
+#[no_mangle]
+pub extern "C" fn flex_ctx_set_localized_text(
+    ctx: *mut c_void,
+    name: *const c_char,
+    resource_key: *const c_char,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
+        if let (Some(ctx), Some(n), Some(key)) = (ctx_from(ctx), cstr(name), cstr(resource_key)) {
+            ctx.set_localized_text(n, key);
+        }
+    }));
+}
+
 // —— UI 线程投递：句柄可由初始化回调取得，再移动到工作线程使用 ——
 
 /// C 侧持有的不透明 UI 线程投递句柄。
 pub struct FlexMainProxy {
     proxy: MainProxy,
 }
-
-/// UI 线程任务回调；ctx 仅在本次回调期间有效。
-pub type FlexUiTaskFn = extern "C" fn(ctx: *mut c_void, user: *mut c_void);
 
 /// 从窗口回调取得 UI 线程投递句柄；调用方负责用 `flex_main_proxy_free` 释放。
 #[no_mangle]
@@ -227,7 +516,7 @@ pub extern "C" fn flex_main_proxy_clone(proxy: *const FlexMainProxy) -> *mut Fle
 #[no_mangle]
 pub extern "C" fn flex_main_proxy_post(
     proxy: *const FlexMainProxy,
-    task: Option<FlexUiTaskFn>,
+    task: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
     user: *mut c_void,
 ) -> c_int {
     catch_unwind(AssertUnwindSafe(|| unsafe {
@@ -263,6 +552,19 @@ pub const FLEX_WINDOW_MINIMIZED: c_int = 1;
 pub const FLEX_WINDOW_MAXIMIZED: c_int = 2;
 pub const FLEX_WINDOW_RESTORED: c_int = 3;
 
+/// C 侧控件事件类型编号（用于 `FlexDelegate::on_control_event`）。
+/// 各类型用到 on_control_event 的哪些参数：
+///   HOVER/PRESSED/FOCUS/SELECTED → i0=0/1；SELECTION → i0=索引(无=-1)；
+///   TEXT → text；VALUE → f0；SCROLL → f0=横偏移, f1=纵偏移。
+pub const FLEX_CTRL_HOVER_CHANGED: c_int = 1;
+pub const FLEX_CTRL_PRESSED_CHANGED: c_int = 2;
+pub const FLEX_CTRL_FOCUS_CHANGED: c_int = 3;
+pub const FLEX_CTRL_TEXT_CHANGED: c_int = 4;
+pub const FLEX_CTRL_SELECTED_CHANGED: c_int = 5;
+pub const FLEX_CTRL_SELECTION_CHANGED: c_int = 6;
+pub const FLEX_CTRL_VALUE_CHANGED: c_int = 7;
+pub const FLEX_CTRL_SCROLL_CHANGED: c_int = 8;
+
 /// C 侧窗口委托：各钩子为可空函数指针，ctx 仅在回调期间有效。
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -271,9 +573,29 @@ pub struct FlexDelegate {
     pub on_init: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
     pub on_initialized: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void)>,
     pub on_click: Option<extern "C" fn(name: *const c_char, ctx: *mut c_void, user: *mut c_void)>,
+    /// 通用控件事件（复选框勾选、滑块/进度值变化、文本变化、下拉选择、滚动等）。
+    /// `ev_type` 见 `FLEX_CTRL_*`；按类型读取 i0/f0/f1/text（其余为 0/NULL）。
+    pub on_control_event: Option<
+        extern "C" fn(
+            name: *const c_char,
+            ev_type: c_int,
+            i0: c_int,
+            f0: f32,
+            f1: f32,
+            text: *const c_char,
+            ctx: *mut c_void,
+            user: *mut c_void,
+        ),
+    >,
+    pub on_double_click:
+        Option<extern "C" fn(name: *const c_char, ctx: *mut c_void, user: *mut c_void)>,
     pub on_context: Option<
         extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void),
     >,
+    /// 窗口尺寸变化（逻辑像素）。
+    pub on_size: Option<extern "C" fn(width: f32, height: f32, ctx: *mut c_void, user: *mut c_void)>,
+    /// 按键（导航/功能键的平台无关键码）。
+    pub on_key: Option<extern "C" fn(key: c_int, ctx: *mut c_void, user: *mut c_void)>,
     pub on_window_state: Option<extern "C" fn(state: c_int, ctx: *mut c_void, user: *mut c_void)>,
     /// 返回非 0 允许关闭，0 阻止关闭。
     pub on_closing: Option<extern "C" fn(ctx: *mut c_void, user: *mut c_void) -> c_int>,
@@ -316,6 +638,89 @@ impl WindowDelegate for CDelegate {
             if let Ok(name) = CString::new(name) {
                 callback(name.as_ptr(), ctx as *mut _ as *mut c_void, self.user_ptr());
             }
+        }
+    }
+
+    fn on_control_event(&mut self, name: &str, event: &ControlEvent, ctx: &mut WindowCtx) {
+        let Some(callback) = self.d.on_control_event else {
+            return;
+        };
+        let Ok(cname) = CString::new(name) else {
+            return;
+        };
+        // 把 ControlEvent 摊平成 (ev_type, i0, f0, f1, text)；虚拟列表专属事件本轮不导出。
+        let ev_type;
+        let mut i0: c_int = 0;
+        let mut f0 = 0.0;
+        let mut f1 = 0.0;
+        let mut text: Option<CString> = None;
+        match event {
+            ControlEvent::HoverChanged(v) => {
+                ev_type = FLEX_CTRL_HOVER_CHANGED;
+                i0 = *v as c_int;
+            }
+            ControlEvent::PressedChanged(v) => {
+                ev_type = FLEX_CTRL_PRESSED_CHANGED;
+                i0 = *v as c_int;
+            }
+            ControlEvent::FocusChanged(v) => {
+                ev_type = FLEX_CTRL_FOCUS_CHANGED;
+                i0 = *v as c_int;
+            }
+            ControlEvent::TextChanged(s) => {
+                ev_type = FLEX_CTRL_TEXT_CHANGED;
+                text = CString::new(s.as_str()).ok();
+            }
+            ControlEvent::SelectedChanged(v) => {
+                ev_type = FLEX_CTRL_SELECTED_CHANGED;
+                i0 = *v as c_int;
+            }
+            ControlEvent::SelectionChanged(idx) => {
+                ev_type = FLEX_CTRL_SELECTION_CHANGED;
+                i0 = idx.map(|i| i as c_int).unwrap_or(-1);
+            }
+            ControlEvent::ValueChanged(v) => {
+                ev_type = FLEX_CTRL_VALUE_CHANGED;
+                f0 = *v;
+            }
+            ControlEvent::ScrollChanged(p) => {
+                ev_type = FLEX_CTRL_SCROLL_CHANGED;
+                f0 = p.x;
+                f1 = p.y;
+            }
+            // 虚拟列表多选/排序/列变化、帧动画结束等本轮不导出到 C。
+            _ => return,
+        }
+        let text_ptr = text.as_ref().map_or(std::ptr::null(), |t| t.as_ptr());
+        callback(
+            cname.as_ptr(),
+            ev_type,
+            i0,
+            f0,
+            f1,
+            text_ptr,
+            ctx as *mut _ as *mut c_void,
+            self.user_ptr(),
+        );
+    }
+
+    fn on_double_click(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_double_click {
+            if let Ok(name) = CString::new(name) {
+                callback(name.as_ptr(), ctx as *mut _ as *mut c_void, self.user_ptr());
+            }
+        }
+    }
+
+    fn on_size(&mut self, width: f32, height: f32, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_size {
+            callback(width, height, ctx as *mut _ as *mut c_void, self.user_ptr());
+        }
+    }
+
+    fn on_key(&mut self, key: u32, ctx: &mut WindowCtx) {
+        if let Some(callback) = self.d.on_key {
+            callback(key as c_int, ctx as *mut _ as *mut c_void, self.user_ptr());
         }
     }
 
@@ -541,10 +946,11 @@ pub extern "C" fn flex_dialog_save_directory(
     dialog_out(DialogKind::SaveDirectory, opts, out, out_len)
 }
 
-/// 用 XML 描述启动应用并进入主事件循环（阻塞）。0 成功，负数见错误码。
+/// 用 XML 描述启动应用并进入主事件循环（阻塞）。0 成功，负数见错误码
+/// （-1 参数错、-2 XML 失败、-3 panic、-100 该平台无后端）。
 ///
 /// 会为所有「有 name 的按钮」自动挂接点击回调（转发到 flex_set_click_callback 注册的函数）。
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+/// 内部按平台 cfg 二选一，保证 C 头文件里只有一份声明。
 #[no_mangle]
 pub extern "C" fn flex_run_xml(
     title: *const c_char,
@@ -552,54 +958,50 @@ pub extern "C" fn flex_run_xml(
     height: c_int,
     xml: *const c_char,
 ) -> c_int {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let (Some(title), Some(xml)) = (unsafe { cstr(title) }, unsafe { cstr(xml) }) else {
-            return -1;
-        };
-        let ctx = Context::new();
-        let res = match load_str(xml, &ctx) {
-            Ok(r) => r,
-            Err(_) => return -2,
-        };
-        let mut root = res.root;
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let (Some(title), Some(xml)) = (unsafe { cstr(title) }, unsafe { cstr(xml) }) else {
+                return -1;
+            };
+            let ctx = Context::new();
+            let res = match load_str(xml, &ctx) {
+                Ok(r) => r,
+                Err(_) => return -2,
+            };
+            let mut root = res.root;
 
-        // 为有 name 的按钮挂接点击回调（C 侧通过 name 区分）。
-        visit_all_mut(root.as_mut(), &mut |w| {
-            let b = w.base_mut();
-            if b.role == WidgetRole::Button {
-                if let Some(name) = b.name.clone() {
-                    b.on_click = Some(Box::new(move |_ctx: &mut flexui_core::EventCtx| {
-                        fire_click(&name)
-                    }));
+            // 为有 name 的按钮挂接点击回调（C 侧通过 name 区分）。
+            visit_all_mut(root.as_mut(), &mut |w| {
+                let b = w.base_mut();
+                if b.role == WidgetRole::Button {
+                    if let Some(name) = b.name.clone() {
+                        b.on_click = Some(Box::new(move |_ctx: &mut flexui_core::EventCtx| {
+                            fire_click(&name)
+                        }));
+                    }
                 }
+            });
+
+            let mut disp = flexui_core::Dispatcher::new();
+            for (group, tabbox) in res.bindings {
+                disp.bind_tab(group, tabbox);
             }
-        });
-
-        let mut disp = flexui_core::Dispatcher::new();
-        for (group, tabbox) in res.bindings {
-            disp.bind_tab(group, tabbox);
-        }
-        backend::run(
-            flexui_core::WindowConfig::new(title, width as f32, height as f32),
-            root,
-            disp,
-            Box::new(flexui_core::NoopDelegate),
-        );
-        0
-    }));
-    result.unwrap_or(-3)
-}
-
-/// 无可用后端平台的占位。
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-#[no_mangle]
-pub extern "C" fn flex_run_xml(
-    _title: *const c_char,
-    _width: c_int,
-    _height: c_int,
-    _xml: *const c_char,
-) -> c_int {
-    -100 // 该平台后端未实现
+            backend::run(
+                flexui_core::WindowConfig::new(title, width as f32, height as f32),
+                root,
+                disp,
+                Box::new(flexui_core::NoopDelegate),
+            );
+            0
+        }));
+        result.unwrap_or(-3)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let _ = (title, width, height, xml);
+        -100 // 该平台后端未实现
+    }
 }
 
 #[cfg(test)]
@@ -699,7 +1101,11 @@ mod tests {
                 on_init: Some(init),
                 on_initialized: Some(initialized),
                 on_click: None,
+                on_control_event: None,
+                on_double_click: None,
                 on_context: None,
+                on_size: None,
+                on_key: None,
                 on_window_state: Some(window_state),
                 on_closing: Some(closing),
                 on_closed: Some(closed),
@@ -721,5 +1127,61 @@ mod tests {
             *calls.lock().unwrap(),
             vec![1, 2, 3, FLEX_WINDOW_MAXIMIZED + 10, 20, 21]
         );
+    }
+
+    /// 记录 on_control_event 摊平后的 (ev_type, i0, f0, 文本) 供断言。
+    static CTRL_LOG: Mutex<Vec<(c_int, c_int, f32, String)>> = Mutex::new(Vec::new());
+
+    extern "C" fn control_event(
+        _name: *const c_char,
+        ev_type: c_int,
+        i0: c_int,
+        f0: f32,
+        _f1: f32,
+        text: *const c_char,
+        _ctx: *mut c_void,
+        _user: *mut c_void,
+    ) {
+        let text = unsafe { cstr(text) }.unwrap_or("").to_string();
+        CTRL_LOG.lock().unwrap().push((ev_type, i0, f0, text));
+    }
+
+    #[test]
+    fn ffi控件事件摊平映射() {
+        CTRL_LOG.lock().unwrap().clear();
+        let mut delegate = CDelegate {
+            d: FlexDelegate {
+                on_before_init: None,
+                on_init: None,
+                on_initialized: None,
+                on_click: None,
+                on_control_event: Some(control_event),
+                on_double_click: None,
+                on_context: None,
+                on_size: None,
+                on_key: None,
+                on_window_state: None,
+                on_closing: None,
+                on_closed: None,
+            },
+            user: std::ptr::null_mut::<c_void>() as usize,
+        };
+        let mut root = Label::new("test");
+        let mut window = TestWindow;
+        let mut ctx = WindowCtx::new(&mut root, &mut window);
+
+        delegate.on_control_event("chk", &ControlEvent::SelectedChanged(true), &mut ctx);
+        delegate.on_control_event("sld", &ControlEvent::ValueChanged(0.5), &mut ctx);
+        delegate.on_control_event("ed", &ControlEvent::TextChanged("hi".into()), &mut ctx);
+        delegate.on_control_event("cbo", &ControlEvent::SelectionChanged(None), &mut ctx);
+        // 虚拟列表事件不导出到 C，不应回调。
+        delegate.on_control_event("vl", &ControlEvent::RowsSelectionChanged(vec![1]), &mut ctx);
+
+        let log = CTRL_LOG.lock().unwrap();
+        assert_eq!(log.len(), 4, "只应回调 4 个已导出的事件");
+        assert_eq!((log[0].0, log[0].1), (FLEX_CTRL_SELECTED_CHANGED, 1));
+        assert_eq!((log[1].0, log[1].2), (FLEX_CTRL_VALUE_CHANGED, 0.5));
+        assert_eq!((log[2].0, log[2].3.as_str()), (FLEX_CTRL_TEXT_CHANGED, "hi"));
+        assert_eq!((log[3].0, log[3].1), (FLEX_CTRL_SELECTION_CHANGED, -1));
     }
 }
