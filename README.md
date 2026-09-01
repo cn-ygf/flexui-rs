@@ -180,8 +180,8 @@ State prefixes can be combined, for example `hot-bgcolor`, `focus-bordercolor`, 
 | Native menus | AppKit menu | Win32 menu | X11 override-redirect menu |
 | Clipboard, IME, file dialogs | Supported | Supported | Supported |
 | Custom/system title bars | Supported | Supported | Supported |
-| File drag and drop | Supported | Supported | Planned |
-| System tray example | Supported | Supported | Planned |
+| File drag and drop | Supported | Supported | Supported (Xdnd/XWayland) |
+| System tray example | Supported | Supported | Supported (StatusNotifierItem) |
 
 ## Workspace Layout
 

@@ -9,13 +9,13 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use cairo::{Format, ImageSurface};
+use flexui_core::event::Mods;
 use flexui_core::{
     find_mut_by_id, hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation,
     MouseButton, NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect,
     Size, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
     WindowHandle, WindowPresentation,
 };
-use flexui_core::event::Mods;
 
 use crate::ime::Ime;
 
@@ -29,9 +29,10 @@ use x11rb::protocol::xproto::{
 use x11rb::protocol::Event as XEvent;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
-use x11rb::COPY_DEPTH_FROM_PARENT;
+use x11rb::{COPY_DEPTH_FROM_PARENT, CURRENT_TIME};
 
 use crate::canvas::{new_image_cache, CairoCanvas, SharedImageCache};
+use crate::xdnd::{XdndAtoms, XdndOutcome, XdndTarget};
 
 /// 单个窗口的运行时状态。
 struct WinState {
@@ -60,6 +61,8 @@ struct WinState {
     last_click: Option<(Instant, Point)>,
     /// 回调里 open_window/open_modal 请求的新窗口，事件循环稍后建。
     pending_windows: Vec<NewWindow>,
+    /// Xdnd 文件拖放目标状态。
+    xdnd: XdndTarget,
     open: bool,
 }
 
@@ -93,6 +96,24 @@ impl WindowHandle for LinuxWindowHandle<'_> {
     }
     fn show(&mut self) {
         let _ = self.conn.map_window(self.xid);
+        // 从托盘恢复时同时请求窗口管理器激活窗口，避免只映射却仍留在后台。
+        if let (Some(root), Some(active)) = (
+            self.conn.setup().roots.first().map(|screen| screen.root),
+            intern(self.conn, b"_NET_ACTIVE_WINDOW"),
+        ) {
+            let event = ClientMessageEvent::new(
+                32,
+                self.xid,
+                active,
+                [1, CURRENT_TIME, 0, 0, 0], // source indication = application
+            );
+            let _ = self.conn.send_event(
+                false,
+                root,
+                EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
+                event,
+            );
+        }
         let _ = self.conn.flush();
     }
     fn hide(&mut self) {
@@ -164,7 +185,11 @@ impl LinuxWindowHandle<'_> {
 
 /// 取原子（intern_atom 同步）。
 fn intern(conn: &RustConnection, name: &[u8]) -> Option<u32> {
-    conn.intern_atom(false, name).ok()?.reply().ok().map(|r| r.atom)
+    conn.intern_atom(false, name)
+        .ok()?
+        .reply()
+        .ok()
+        .map(|r| r.atom)
 }
 
 /// 用 X11 "cursor" 字体创建字形光标（如 XC_xterm=152 的 I 型、XC_left_ptr=68 箭头）。
@@ -182,7 +207,17 @@ fn create_font_cursor(conn: &RustConnection, shape: u16) -> Cursor {
     };
     // 前景黑、背景白；mask 字形约定为 shape+1。
     let _ = conn.create_glyph_cursor(
-        cursor, font, font, shape, shape + 1, 0, 0, 0, 0xffff, 0xffff, 0xffff,
+        cursor,
+        font,
+        font,
+        shape,
+        shape + 1,
+        0,
+        0,
+        0,
+        0xffff,
+        0xffff,
+        0xffff,
     );
     let _ = conn.close_font(font);
     cursor
@@ -202,8 +237,8 @@ fn update_cursor(conn: &RustConnection, st: &mut WinState, pos: Point) {
         st.cursor_arrow
     };
     if cursor != 0 {
-        let _ = conn
-            .change_window_attributes(st.xid, &ChangeWindowAttributesAux::new().cursor(cursor));
+        let _ =
+            conn.change_window_attributes(st.xid, &ChangeWindowAttributesAux::new().cursor(cursor));
         let _ = conn.flush();
     }
 }
@@ -285,6 +320,7 @@ struct WinFactory {
     utf8_string: u32,
     motif_hints: u32,
     net_wm_icon: u32,
+    xdnd: XdndAtoms,
     scale: f32,
     /// 预建的箭头 / I 型光标（cursor 字体字形），供悬停文本时切换。
     cursor_arrow: Cursor,
@@ -305,7 +341,8 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
             | EventMask::BUTTON_RELEASE
             | EventMask::POINTER_MOTION
             | EventMask::STRUCTURE_NOTIFY
-            | EventMask::FOCUS_CHANGE,
+            | EventMask::FOCUS_CHANGE
+            | EventMask::PROPERTY_CHANGE,
     );
     let _ = conn.create_window(
         COPY_DEPTH_FROM_PARENT,
@@ -321,6 +358,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         &aux,
     );
     let _ = conn.create_gc(gc, xid, &CreateGCAux::new());
+    let _ = f.xdnd.register_window(conn, xid);
     // 标题：WM_NAME(Latin-1 回退) + _NET_WM_NAME(UTF8_STRING，修中文乱码)。
     let _ = conn.change_property8(
         PropMode::REPLACE,
@@ -362,7 +400,8 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
     if frameless && f.motif_hints != 0 {
         // [flags=MWM_HINTS_DECORATIONS(2), functions, decorations=0(无), input_mode, status]
         let hints: [u32; 5] = [2, 0, 0, 0, 0];
-        let _ = conn.change_property32(PropMode::REPLACE, xid, f.motif_hints, f.motif_hints, &hints);
+        let _ =
+            conn.change_property32(PropMode::REPLACE, xid, f.motif_hints, f.motif_hints, &hints);
     }
     // 无边框 + system_corners → 用 X Shape 把窗口裁成圆角。
     let rounded = frameless && spec.config.system_corners;
@@ -399,6 +438,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         surface: None,
         images: new_image_cache(),
         pending_windows: Vec::new(),
+        xdnd: XdndTarget::new(),
         open: true,
     }
 }
@@ -431,6 +471,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         utf8_string: intern(&conn, b"UTF8_STRING").unwrap_or(0),
         motif_hints: intern(&conn, b"_MOTIF_WM_HINTS").unwrap_or(0),
         net_wm_icon: intern(&conn, b"_NET_WM_ICON").unwrap_or(0),
+        xdnd: XdndAtoms::new(&conn).expect("初始化 Xdnd Atom 失败"),
         scale: detect_scale(&conn, x_root),
         // XC_left_ptr=68（箭头）、XC_xterm=152（I 型），来自 X11 "cursor" 字体。
         cursor_arrow: create_font_cursor(&conn, 68),
@@ -473,8 +514,14 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
         open_overlay_request(&mut st.disp, req);
     }
     for a in anim_reqs {
-        st.disp
-            .animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        st.disp.animate(
+            st.root.as_mut(),
+            &a.name,
+            a.prop,
+            a.to,
+            a.dur_secs,
+            a.easing,
+        );
     }
     let _ = st.disp.take_redraw();
     st.layout_dirty |= st.disp.take_layout();
@@ -521,7 +568,7 @@ fn event_loop(
                     }
                 }
             }
-            handle_x_event(conn, factory.wm_delete, kbd, &mut states, ev);
+            handle_x_event(conn, factory, kbd, &mut states, ev);
         }
         // 帧节拍。
         let now = Instant::now();
@@ -531,6 +578,7 @@ fn event_loop(
             let ids: Vec<Window> = states.keys().copied().collect();
             for id in ids {
                 if let Some(st) = states.get_mut(&id) {
+                    st.xdnd.poll_timeout(conn, &factory.xdnd, st.xid, now);
                     tick_frame(conn, st, dt);
                 }
             }
@@ -555,7 +603,7 @@ fn event_loop(
 /// 处理单个 X 事件。
 fn handle_x_event(
     conn: &RustConnection,
-    wm_delete: u32,
+    factory: &WinFactory,
     kbd: &Keyboard,
     states: &mut HashMap<Window, WinState>,
     ev: XEvent,
@@ -593,18 +641,54 @@ fn handle_x_event(
                     if st.rounded {
                         apply_rounded_shape(conn, st.xid, e.width, e.height, st.scale);
                     }
-                    dispatch(conn, st, Event::WindowResized { width: w, height: h });
+                    dispatch(
+                        conn,
+                        st,
+                        Event::WindowResized {
+                            width: w,
+                            height: h,
+                        },
+                    );
                     render(conn, st);
                 }
             }
         }
         XEvent::ClientMessage(e) => {
+            if let Some(st) = states.get_mut(&e.window) {
+                if !matches!(
+                    st.xdnd
+                        .handle_client_message(conn, &factory.xdnd, st.xid, &e),
+                    XdndOutcome::Ignored
+                ) {
+                    return;
+                }
+            }
             // WM_DELETE_WINDOW：走 on_closing。
-            if e.data.as_data32()[0] == wm_delete {
+            if e.data.as_data32()[0] == factory.wm_delete {
                 if let Some(st) = states.get_mut(&e.window) {
                     if request_close(conn, st) {
                         close_window(conn, st);
                     }
+                }
+            }
+        }
+        XEvent::SelectionNotify(e) => {
+            if let Some(st) = states.get_mut(&e.requestor) {
+                let outcome = st
+                    .xdnd
+                    .handle_selection_notify(conn, &factory.xdnd, st.xid, &e);
+                if let XdndOutcome::Dropped(paths) = outcome {
+                    deliver_drop_files(conn, st, &paths);
+                }
+            }
+        }
+        XEvent::PropertyNotify(e) => {
+            if let Some(st) = states.get_mut(&e.window) {
+                let outcome = st
+                    .xdnd
+                    .handle_property_notify(conn, &factory.xdnd, st.xid, &e);
+                if let XdndOutcome::Dropped(paths) = outcome {
+                    deliver_drop_files(conn, st, &paths);
                 }
             }
         }
@@ -637,10 +721,42 @@ fn handle_x_event(
                     }
                     2 => dispatch(conn, st, down(MouseButton::Middle)),
                     3 => dispatch(conn, st, down(MouseButton::Right)),
-                    4 => dispatch(conn, st, Event::MouseWheel { pos, dx: 0.0, dy: 40.0 }),
-                    5 => dispatch(conn, st, Event::MouseWheel { pos, dx: 0.0, dy: -40.0 }),
-                    6 => dispatch(conn, st, Event::MouseWheel { pos, dx: 40.0, dy: 0.0 }),
-                    7 => dispatch(conn, st, Event::MouseWheel { pos, dx: -40.0, dy: 0.0 }),
+                    4 => dispatch(
+                        conn,
+                        st,
+                        Event::MouseWheel {
+                            pos,
+                            dx: 0.0,
+                            dy: 40.0,
+                        },
+                    ),
+                    5 => dispatch(
+                        conn,
+                        st,
+                        Event::MouseWheel {
+                            pos,
+                            dx: 0.0,
+                            dy: -40.0,
+                        },
+                    ),
+                    6 => dispatch(
+                        conn,
+                        st,
+                        Event::MouseWheel {
+                            pos,
+                            dx: 40.0,
+                            dy: 0.0,
+                        },
+                    ),
+                    7 => dispatch(
+                        conn,
+                        st,
+                        Event::MouseWheel {
+                            pos,
+                            dx: -40.0,
+                            dy: 0.0,
+                        },
+                    ),
                     _ => {}
                 }
             }
@@ -677,6 +793,50 @@ fn handle_x_event(
             }
         }
         _ => {}
+    }
+}
+
+/// 把 Xdnd 得到的文件路径交给业务委托，并落地回调产生的窗口副作用。
+fn deliver_drop_files(conn: &RustConnection, st: &mut WinState, paths: &[String]) {
+    let mut handle = LinuxWindowHandle::new(conn, st.xid);
+    let localizer = st.localizer.clone();
+    let mut ctx = WindowCtx::with_proxy_and_localizer(
+        st.root.as_mut(),
+        &mut handle,
+        st.disp.proxy(),
+        localizer,
+    );
+    st.delegate.on_drop_files(paths, &mut ctx);
+    let overlays = ctx.take_overlay_requests();
+    let anims = ctx.take_anim_requests();
+    let new_windows = ctx.take_new_windows();
+    let invalidation = ctx.take_invalidation();
+    drop(ctx);
+
+    st.pending_windows.extend(new_windows);
+    st.disp.invalidate(invalidation);
+    for request in overlays {
+        open_overlay_request(&mut st.disp, request);
+    }
+    for request in anims {
+        st.disp.animate(
+            st.root.as_mut(),
+            &request.name,
+            request.prop,
+            request.to,
+            request.dur_secs,
+            request.easing,
+        );
+    }
+    if handle.close_requested && request_close(conn, st) {
+        close_window(conn, st);
+        return;
+    }
+    st.layout_dirty |= st.disp.take_layout();
+    let redraw = st.disp.take_redraw();
+    let dirty = st.disp.take_dirty();
+    if redraw || st.layout_dirty || dirty.is_some() {
+        render(conn, st);
     }
 }
 
@@ -995,7 +1155,13 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
         let i = ctx.take_invalidation();
         (handle.close_requested, i, o, a, nw)
     } else {
-        (false, Invalidation::None, Vec::new(), Vec::new(), Vec::new())
+        (
+            false,
+            Invalidation::None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     };
     st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
@@ -1008,8 +1174,14 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
         open_overlay_request(&mut st.disp, req);
     }
     for a in anim_reqs {
-        st.disp
-            .animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+        st.disp.animate(
+            st.root.as_mut(),
+            &a.name,
+            a.prop,
+            a.to,
+            a.dur_secs,
+            a.easing,
+        );
     }
 
     st.layout_dirty |= st.disp.take_layout();
@@ -1063,8 +1235,14 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
             open_overlay_request(&mut st.disp, req);
         }
         for a in anim_reqs {
-            st.disp
-                .animate(st.root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
+            st.disp.animate(
+                st.root.as_mut(),
+                &a.name,
+                a.prop,
+                a.to,
+                a.dur_secs,
+                a.easing,
+            );
         }
     }
     st.layout_dirty |= st.disp.take_layout();
@@ -1079,8 +1257,12 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
 fn request_close(conn: &RustConnection, st: &mut WinState) -> bool {
     let mut handle = LinuxWindowHandle::new(conn, st.xid);
     let localizer = st.localizer.clone();
-    let mut ctx =
-        WindowCtx::with_proxy_and_localizer(st.root.as_mut(), &mut handle, st.disp.proxy(), localizer);
+    let mut ctx = WindowCtx::with_proxy_and_localizer(
+        st.root.as_mut(),
+        &mut handle,
+        st.disp.proxy(),
+        localizer,
+    );
     st.delegate.on_closing(&mut ctx)
 }
 
@@ -1107,7 +1289,8 @@ fn render(conn: &RustConnection, st: &mut WinState) {
     // 布局（需要时）。CairoCanvas 只在建 Context 的瞬间借用 surface，之后不保留
     // Rust 借用（Context 在 C 层持有引用），因此可与 st.root 的可变借用并存。
     if st.layout_dirty {
-        let cv = CairoCanvas::with_images(st.surface.as_ref().unwrap(), st.scale, st.images.clone());
+        let cv =
+            CairoCanvas::with_images(st.surface.as_ref().unwrap(), st.scale, st.images.clone());
         layout_node(
             st.root.as_mut(),
             Rect::new(0.0, 0.0, st.width, st.height),
@@ -1126,10 +1309,19 @@ fn render(conn: &RustConnection, st: &mut WinState) {
             &mut cv,
             Rect::new(0.0, 0.0, st.width, st.height),
         );
-        st.disp.paint_overlays(&mut cv, Size::new(st.width, st.height));
+        st.disp
+            .paint_overlays(&mut cv, Size::new(st.width, st.height));
     }
 
-    present(conn, st.xid, st.gc, st.depth, st.surface.as_mut().unwrap(), pw, ph);
+    present(
+        conn,
+        st.xid,
+        st.gc,
+        st.depth,
+        st.surface.as_mut().unwrap(),
+        pw,
+        ph,
+    );
 }
 
 /// 把 ImageSurface 的像素 PutImage 到窗口。要求对 surface 独占访问（refcount==1）。

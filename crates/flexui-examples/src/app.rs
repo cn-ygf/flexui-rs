@@ -9,7 +9,10 @@ use crate::close_prompt::{
 use crate::login::LoginDialog;
 use crate::resources::{original_bitmap, original_svg, resources};
 use crate::settings::SettingsDialog;
-use crate::tray::{AppTray, INIT as TRAY_INIT, OPEN_MENU as TRAY_OPEN_MENU, SHOW_MAIN};
+use crate::tray::{
+    AppTray, COMMAND_PREFIX as TRAY_COMMAND_PREFIX, INIT as TRAY_INIT, OPEN_MENU as TRAY_OPEN_MENU,
+    SHOW_MAIN,
+};
 
 #[derive(Clone, Copy)]
 enum ClosePreference {
@@ -69,13 +72,17 @@ impl WindowImpl for MainWindow {
     }
 
     fn on_message(&mut self, message: &str, ctx: &mut WindowCtx) {
+        if let Some(command) = message.strip_prefix(TRAY_COMMAND_PREFIX) {
+            self.handle_tray_command(command, ctx);
+            return;
+        }
         match message {
             TRAY_INIT => {
                 let tooltip = ctx.localized_text("app.tray.tooltip");
                 let Some(proxy) = ctx.main_proxy() else {
                     return;
                 };
-                match AppTray::create(proxy, &tooltip) {
+                match AppTray::create(proxy, &tooltip, tray_menu(ctx)) {
                     Ok(tray) => self.tray = Some(tray),
                     Err(error) => eprintln!("[flexui-examples] {error}"),
                 }

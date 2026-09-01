@@ -7,9 +7,12 @@ edition = "2021"
 flexui = { path = "../flexui" }
 image = { workspace = true }
 
-# 系统托盘依赖 GTK（Linux 上 muda/tray-icon 需要），Linux 暂用 stub，不引入。
+# macOS / Windows 使用 tray-icon；Linux 使用 StatusNotifierItem，不依赖 GTK。
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "=0.3.6", features = ["blocking"] }
 
 [build-dependencies]
 winresource = { version = "0.1.31", default-features = false }

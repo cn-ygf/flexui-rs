@@ -15,6 +15,7 @@ flexui-core = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 flexui-svg = { workspace = true }
+url = { workspace = true }
 # ico 特性：解码示例的 app.ico 用于 _NET_WM_ICON（png/jpeg 由 workspace 提供）。
 image = { workspace = true, features = ["ico"] }
 cairo-rs = "0.20"
