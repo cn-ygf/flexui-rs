@@ -12,7 +12,7 @@
   <img src="docs/gallery_2.png" alt="使用默认深色主题的 FlexUI Gallery" width="49%">
 </p>
 
-FlexUI 让应用逻辑始终留在 Rust 中，同时在合适的位置调用系统能力：macOS 使用 `NSWindow` / `NSView`，Windows 使用 Win32 / GDI+。布局、控件、状态、主题和绘制共享同一套平台无关核心。
+FlexUI 让应用逻辑始终留在 Rust 中，同时在合适的位置调用系统能力：macOS 使用 AppKit / CoreGraphics，Windows 使用 Win32 / GDI+，Linux 使用 X11 / Cairo / Pango。布局、控件、状态、主题和绘制共享同一套平台无关核心。
 
 ## 核心能力
 
@@ -70,8 +70,8 @@ cargo run -p flexui-examples
 ### 环境要求
 
 - 当前稳定版 Rust 工具链
-- macOS 或 Windows
-- 平台构建工具：macOS 使用 Xcode Command Line Tools，Windows 使用与 Rust 工具链兼容的 C/C++ 构建环境
+- macOS、Windows，或使用 X11 的 Linux
+- 平台构建工具：macOS 使用 Xcode Command Line Tools，Windows 使用与 Rust 工具链兼容的 C/C++ 构建环境，Linux 需要 Cairo/Pango/X11 开发包
 
 克隆仓库并运行 Gallery：
 
@@ -172,15 +172,15 @@ XML 不是必选项，但很适合贴图界面以及设计与业务代码分离�
 
 ## 平台后端
 
-| 能力 | macOS | Windows |
-| --- | --- | --- |
-| 原生窗口 | AppKit `NSWindow` + 自绘 `NSView` | Win32 窗口 |
-| 绘制 | 基于 CoreGraphics 的画布 | GDI+ |
-| 原生菜单 | AppKit 菜单 | Win32 菜单 |
-| 剪贴板、IME、文件对话框 | 支持 | 支持 |
-| 自绘/系统标题栏 | 支持 | 支持 |
-
-目前暂不支持 Linux。
+| 能力 | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| 原生窗口 | AppKit `NSWindow` + 自绘 `NSView` | Win32 窗口 | X11（`x11rb`） |
+| 绘制 | CoreGraphics | GDI+ | Cairo + Pango |
+| 原生菜单 | AppKit 菜单 | Win32 菜单 | X11 override-redirect 菜单 |
+| 剪贴板、IME、文件对话框 | 支持 | 支持 | 支持 |
+| 自绘/系统标题栏 | 支持 | 支持 | 支持 |
+| 文件拖放 | 支持 | 支持 | 计划中 |
+| 系统托盘示例 | 支持 | 支持 | 计划中 |
 
 ## 工作区结构
 
@@ -189,7 +189,7 @@ XML 不是必选项，但很适合贴图界面以及设计与业务代码分离�
 | `flexui` | 面向使用者的统一入口和平台选择 |
 | `flexui-core` | 控件树、布局、事件、样式、主题和动画 |
 | `flexui-xml` | XML 解析、Include、绑定和窗口文档 |
-| `flexui-macos` / `flexui-windows` | 原生窗口、输入和绘制后端 |
+| `flexui-macos` / `flexui-windows` / `flexui-linux` | 原生窗口、输入和绘制后端 |
 | `flexui-gfx` | 画布接口与几何基础类型 |
 | `flexui-resource` / `flexui-svg` | 资源提供器与 SVG 光栅化 |
 | `flexui-i18n` | 多语言词典、回退和复数规则 |

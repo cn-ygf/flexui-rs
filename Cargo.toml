@@ -1,4 +1,4 @@
-# flexui-rs 工作区（一期只验证 macOS）
+# flexui-rs 工作区（macOS / Windows / Linux 三平台）
 [workspace]
 resolver = "2"
 members = [

@@ -246,6 +246,7 @@
 | `Label` | 文本标签 | `text`；对齐用 `textalign` 样式（超宽自动省略号截断） |
 | `Button` | 按钮（完整 4 状态） | `text`；点击经 `name` 上报 |
 | `CheckBox` | 勾选框 | `text`、`checked` |
+| `Switch` | 开关 | `checked` / `selected` |
 | `Radio` | 单选 | `text`、`group`、`tab-index`、`checked`/`selected` |
 | `Edit` | 文本输入 | `text`、`multiline`；支持选区/剪贴板/IME（见运行时） |
 | `Image` | 图片 | `src`（来源路径，`.svg` 自动矢量光栅化）；换色/渲染用 `fgtint`/`fgfit` 样式 |
@@ -291,6 +292,7 @@
 
 - `platform.macos`
 - `platform.windows`
+- `platform.linux`
 
 **自定义变量**：通过代码 `Context::new().set("已登录", true)` 注入，再在 XML 用 `v-if="已登录 && !平台.windows"` 等。
 

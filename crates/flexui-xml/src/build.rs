@@ -24,11 +24,12 @@ pub struct Context {
 }
 
 impl Context {
-    /// 新建上下文，按当前编译目标注入 `platform.macos` / `platform.windows`。
+    /// 新建上下文，按当前编译目标注入三个支持平台的谓词。
     pub fn new() -> Self {
         let mut vars = HashMap::new();
         vars.insert("platform.macos".to_string(), cfg!(target_os = "macos"));
         vars.insert("platform.windows".to_string(), cfg!(target_os = "windows"));
+        vars.insert("platform.linux".to_string(), cfg!(target_os = "linux"));
         Self {
             vars,
             localizer: None,
@@ -1592,6 +1593,14 @@ mod tests {
         apply_localizations, find_by_name, layout_node, Canvas, Font, Rect, Size, WidgetPropertyKey,
     };
     use flexui_resource::{DirProvider, ResourceManager};
+
+    #[test]
+    fn 内置平台谓词覆盖三个后端() {
+        let ctx = Context::new();
+        assert_eq!(ctx.get("platform.macos"), cfg!(target_os = "macos"));
+        assert_eq!(ctx.get("platform.windows"), cfg!(target_os = "windows"));
+        assert_eq!(ctx.get("platform.linux"), cfg!(target_os = "linux"));
+    }
 
     #[test]
     fn window_根解析配置() {

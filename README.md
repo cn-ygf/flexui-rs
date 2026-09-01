@@ -12,7 +12,7 @@ Cross-platform desktop UI framework for Rust, with native windows, a custom-rend
   <img src="docs/gallery_2.png" alt="FlexUI Gallery using the default dark theme" width="49%">
 </p>
 
-FlexUI keeps application code in Rust while using the operating system where it matters: `NSWindow`/`NSView` on macOS and Win32/GDI+ on Windows. Layout, controls, state handling, theming, and rendering share one platform-independent core.
+FlexUI keeps application code in Rust while using the operating system where it matters: AppKit/CoreGraphics on macOS, Win32/GDI+ on Windows, and X11/Cairo/Pango on Linux. Layout, controls, state handling, theming, and rendering share one platform-independent core.
 
 ## Highlights
 
@@ -70,8 +70,8 @@ The example recreates a third-party product interface strictly as a framework re
 ### Prerequisites
 
 - A current stable Rust toolchain
-- macOS or Windows
-- Platform build tools: Xcode Command Line Tools on macOS, or a Rust-compatible Windows C/C++ toolchain on Windows
+- macOS, Windows, or Linux with X11
+- Platform build tools: Xcode Command Line Tools on macOS, a Rust-compatible Windows C/C++ toolchain on Windows, or Cairo/Pango/X11 development packages on Linux
 
 Clone the repository and run the gallery:
 
@@ -173,15 +173,15 @@ State prefixes can be combined, for example `hot-bgcolor`, `focus-bordercolor`, 
 
 ## Platform Backends
 
-| Capability | macOS | Windows |
-| --- | --- | --- |
-| Native window | AppKit `NSWindow` + custom `NSView` | Win32 window |
-| Rendering | CoreGraphics-backed canvas | GDI+ |
-| Native menus | AppKit menu | Win32 menu |
-| Clipboard, IME, file dialogs | Supported | Supported |
-| Custom/system title bars | Supported | Supported |
-
-Linux is not currently supported.
+| Capability | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Native window | AppKit `NSWindow` + custom `NSView` | Win32 window | X11 (`x11rb`) |
+| Rendering | CoreGraphics-backed canvas | GDI+ | Cairo + Pango |
+| Native menus | AppKit menu | Win32 menu | X11 override-redirect menu |
+| Clipboard, IME, file dialogs | Supported | Supported | Supported |
+| Custom/system title bars | Supported | Supported | Supported |
+| File drag and drop | Supported | Supported | Planned |
+| System tray example | Supported | Supported | Planned |
 
 ## Workspace Layout
 
@@ -190,7 +190,7 @@ Linux is not currently supported.
 | `flexui` | Public facade and platform selection |
 | `flexui-core` | Widget tree, layout, events, styles, themes, animation |
 | `flexui-xml` | XML parsing, includes, bindings, and window documents |
-| `flexui-macos` / `flexui-windows` | Native windows, input, and rendering backends |
+| `flexui-macos` / `flexui-windows` / `flexui-linux` | Native windows, input, and rendering backends |
 | `flexui-gfx` | Canvas contracts and geometry primitives |
 | `flexui-resource` / `flexui-svg` | Resource providers and SVG rasterization |
 | `flexui-i18n` | Localization catalogs, fallback, and plurals |
