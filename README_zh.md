@@ -210,7 +210,12 @@ XML 不是必选项，但很适合贴图界面以及设计与业务代码分离�
 ```bash
 cargo test --workspace --all-targets
 cargo check --workspace --all-targets
+./scripts/gui-smoke.sh
 ```
+
+冒烟脚本会实际创建原生窗口，从后台线程投递关闭请求，并校验完整生命周期回调顺序。无图形
+会话的 Linux 会自动使用 `xvfb-run`；Windows 请运行
+`powershell -ExecutionPolicy Bypass -File scripts/gui-smoke.ps1`。
 
 将复杂示例打包为临时签名的 macOS `.app`：
 

@@ -482,7 +482,9 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     for spec in windows {
         let mut st = create_win(&conn, &factory, spec);
         run_delegate_init(&conn, &mut st);
-        states.insert(st.xid, st);
+        if st.open {
+            states.insert(st.xid, st);
+        }
     }
     conn.flush().unwrap();
 
@@ -508,6 +510,7 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
     let new_wins = ctx.take_new_windows();
     let inval = ctx.take_invalidation();
     drop(ctx);
+    let close_requested = handle.close_requested;
     st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
     for req in overlay_reqs {
@@ -525,6 +528,9 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
     }
     let _ = st.disp.take_redraw();
     st.layout_dirty |= st.disp.take_layout();
+    if close_requested && request_close(conn, st) {
+        close_window(conn, st);
+    }
 }
 
 /// 共享事件循环：处理 X 事件 + ~60fps 帧节拍。
@@ -591,8 +597,10 @@ fn event_loop(
         for spec in new_specs {
             let mut st = create_win(conn, factory, spec);
             run_delegate_init(conn, &mut st);
-            render(conn, &mut st);
-            states.insert(st.xid, st);
+            if st.open {
+                render(conn, &mut st);
+                states.insert(st.xid, st);
+            }
         }
         // 收掉已关闭窗口。
         states.retain(|_, st| st.open);
@@ -1165,7 +1173,7 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
     };
     st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
-    if close_requested {
+    if close_requested && request_close(conn, st) {
         close_window(conn, st);
         return;
     }
@@ -1227,7 +1235,7 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
         };
         st.pending_windows.extend(new_wins);
         st.disp.invalidate(inval);
-        if close_requested {
+        if close_requested && request_close(conn, st) {
             close_window(conn, st);
             return;
         }
@@ -1263,11 +1271,49 @@ fn request_close(conn: &RustConnection, st: &mut WinState) -> bool {
         st.disp.proxy(),
         localizer,
     );
-    st.delegate.on_closing(&mut ctx)
+    let allow = st.delegate.on_closing(&mut ctx);
+    let overlay_reqs = ctx.take_overlay_requests();
+    let anim_reqs = ctx.take_anim_requests();
+    let new_wins = ctx.take_new_windows();
+    let inval = ctx.take_invalidation();
+    drop(ctx);
+    let close_requested = handle.close_requested;
+
+    if allow || close_requested {
+        return true;
+    }
+
+    // 关闭被否决时仍保留回调中产生的正常 UI 副作用。
+    st.pending_windows.extend(new_wins);
+    st.disp.invalidate(inval);
+    for req in overlay_reqs {
+        open_overlay_request(&mut st.disp, req);
+    }
+    for a in anim_reqs {
+        st.disp.animate(
+            st.root.as_mut(),
+            &a.name,
+            a.prop,
+            a.to,
+            a.dur_secs,
+            a.easing,
+        );
+    }
+    st.layout_dirty |= st.disp.take_layout();
+    let need = st.disp.take_redraw();
+    let dirty = st.disp.take_dirty();
+    if need || st.layout_dirty || dirty.is_some() {
+        render(conn, st);
+    }
+    false
 }
 
 /// 关闭窗口：销毁 X 窗口、回调 on_closed、标记移除。
 fn close_window(conn: &RustConnection, st: &mut WinState) {
+    if !st.open {
+        return;
+    }
+    st.disp.close_main_proxy();
     let _ = conn.destroy_window(st.xid);
     let _ = conn.flush();
     st.delegate.on_closed();

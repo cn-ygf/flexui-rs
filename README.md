@@ -211,7 +211,12 @@ State prefixes can be combined, for example `hot-bgcolor`, `focus-bordercolor`, 
 ```bash
 cargo test --workspace --all-targets
 cargo check --workspace --all-targets
+./scripts/gui-smoke.sh
 ```
+
+The smoke script opens a real native window, posts a close request from a background thread, and
+checks the complete lifecycle callback order. On a headless Linux host it automatically uses
+`xvfb-run`; on Windows, run `powershell -ExecutionPolicy Bypass -File scripts/gui-smoke.ps1`.
 
 Build an ad-hoc signed macOS application bundle for the complex example:
 
