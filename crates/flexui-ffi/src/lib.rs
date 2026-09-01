@@ -30,7 +30,15 @@ use flexui_linux as backend;
 /// 库版本（主*10000 + 次*100 + 补丁）。
 #[no_mangle]
 pub extern "C" fn flex_version() -> u32 {
-    1 // 0.0.1 → 简单返回 1
+    let mut parts = env!("CARGO_PKG_VERSION").split('.');
+    let major = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|v| v.split('-').next())
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    major * 10_000 + minor * 100 + patch
 }
 
 /// 把 C 字符串转 Rust &str（失败返回 None）。
@@ -1018,6 +1026,15 @@ mod tests {
         fn minimize(&mut self) {}
         fn maximize(&mut self) {}
         fn restore(&mut self) {}
+    }
+
+    #[test]
+    fn ffi版本号由包版本自动生成() {
+        let mut parts = env!("CARGO_PKG_VERSION").split('.');
+        let major = parts.next().unwrap().parse::<u32>().unwrap();
+        let minor = parts.next().unwrap().parse::<u32>().unwrap();
+        let patch = parts.next().unwrap().parse::<u32>().unwrap();
+        assert_eq!(flex_version(), major * 10_000 + minor * 100 + patch);
     }
 
     extern "C" fn ui_task(ctx: *mut c_void, user: *mut c_void) {

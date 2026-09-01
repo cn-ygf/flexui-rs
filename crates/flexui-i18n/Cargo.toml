@@ -1,7 +1,11 @@
 [package]
 name = "flexui-i18n"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "Localization catalogs, fallback, interpolation, and plurals for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 serde = { workspace = true }

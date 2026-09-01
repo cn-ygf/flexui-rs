@@ -1,10 +1,11 @@
 [package]
 name = "flexui-examples"
-version = "0.0.1"
+version = "0.1.0"
+publish = false
 edition = "2021"
 
 [dependencies]
-flexui = { path = "../flexui" }
+flexui = { version = "0.1.0", path = "../flexui" }
 image = { workspace = true }
 
 # macOS / Windows 使用 tray-icon；Linux 使用 StatusNotifierItem，不依赖 GTK。

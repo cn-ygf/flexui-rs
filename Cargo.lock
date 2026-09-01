@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "flexui"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui-core",
  "flexui-i18n",
@@ -675,11 +675,12 @@ dependencies = [
  "flexui-resource",
  "flexui-windows",
  "flexui-xml",
+ "serde_json",
 ]
 
 [[package]]
 name = "flexui-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui-gfx",
  "flexui-i18n",
@@ -688,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-examples"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui",
  "image",
@@ -700,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-ffi"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "cbindgen",
  "flexui-core",
@@ -712,7 +713,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-gallery"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui",
  "minreq",
@@ -721,11 +722,11 @@ dependencies = [
 
 [[package]]
 name = "flexui-gfx"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "flexui-i18n"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui-resource",
  "intl_pluralrules",
@@ -737,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-linux"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "cairo-rs",
@@ -754,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-macos"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "core-foundation",
  "core-graphics",
@@ -770,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-native-menu"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui-core",
  "flexui-svg",
@@ -780,21 +781,21 @@ dependencies = [
 
 [[package]]
 name = "flexui-resource"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "zip",
 ]
 
 [[package]]
 name = "flexui-svg"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "resvg",
 ]
 
 [[package]]
 name = "flexui-windows"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui-core",
  "flexui-gfx",
@@ -807,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "flexui-xml"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flexui-core",
  "flexui-i18n",

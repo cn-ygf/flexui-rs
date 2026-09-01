@@ -56,7 +56,7 @@ fn fetch(url: &str) -> Result<HttpResponse, String> {
     let response = minreq::get(url)
         .with_timeout(20)
         .with_max_redirects(8)
-        .with_header("User-Agent", "FlexUI-Gallery/0.0.1")
+        .with_header("User-Agent", concat!("FlexUI-Gallery/", env!("CARGO_PKG_VERSION")))
         .with_header("Accept-Encoding", "identity")
         .send_lazy()
         .map_err(|error| format!("GET {url}\n\n{error}"))?;

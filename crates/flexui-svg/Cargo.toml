@@ -1,7 +1,11 @@
 [package]
 name = "flexui-svg"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "Pure Rust SVG rasterization adapter for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 # 纯 Rust SVG 光栅化（usvg 解析 + tiny-skia 栅格）；作用域仅 SVG→RGBA 位图。

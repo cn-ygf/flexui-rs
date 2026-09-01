@@ -1,10 +1,11 @@
 [package]
 name = "flexui-gallery"
-version = "0.0.1"
+version = "0.1.0"
+publish = false
 edition = "2021"
 
 [dependencies]
-flexui = { path = "../flexui" }
+flexui = { version = "0.1.0", path = "../flexui" }
 minreq = { version = "2.14", features = ["https-rustls"] }
 
 [build-dependencies]

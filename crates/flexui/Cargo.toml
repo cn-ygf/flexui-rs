@@ -1,7 +1,13 @@
 [package]
 name = "flexui"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "Cross-platform desktop UI framework with native windows, XML layouts, and a pure Rust API"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords = ["gui", "desktop", "ui", "xml", "cross-platform"]
+categories = ["gui"]
 
 [dependencies]
 flexui-core = { workspace = true }
@@ -18,3 +24,6 @@ flexui-windows = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 flexui-linux = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -1,7 +1,11 @@
 [package]
 name = "flexui-ffi"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "C ABI static and dynamic library bindings for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [lib]
 # rlib 供本 crate 的示例/测试链接；cdylib/staticlib 供 C/其它语言使用。

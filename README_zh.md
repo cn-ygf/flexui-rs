@@ -5,7 +5,7 @@
 简体中文 | [English](README.md)
 
 > [!IMPORTANT]
-> FlexUI 仍处于积极开发的早期阶段（`0.0.x`）。目前适合技术验证和内部工具，首个稳定版本发布前 API 仍可能调整。
+> FlexUI 仍处于积极开发的早期阶段（`0.1.x`）。目前适合技术验证和内部工具，首个稳定版本发布前 API 仍可能调整。
 
 <p align="center">
   <img src="docs/gallery_1.png" alt="使用默认浅色主题的 FlexUI Gallery" width="49%">
@@ -115,6 +115,8 @@ fn main() {
     Window::new(HelloWindow).center().run();
 }
 ```
+
+工作区会持续编译检查同一份示例，也可运行 `cargo run -p flexui --example hello` 直接体验。
 
 ### UI 线程投递与窗口生命周期
 

@@ -1,7 +1,11 @@
 [package]
 name = "flexui-native-menu"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "Native menu adapter shared by FlexUI desktop backends"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 flexui-core = { workspace = true }

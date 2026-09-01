@@ -5,7 +5,7 @@ Cross-platform desktop UI framework for Rust, with native windows, a custom-rend
 [简体中文](README_zh.md) | English
 
 > [!IMPORTANT]
-> FlexUI is in active early development (`0.0.x`). It is already suitable for experiments and internal tools, but APIs may change before the first stable release.
+> FlexUI is in active early development (`0.1.x`). It is already suitable for experiments and internal tools, but APIs may change before the first stable release.
 
 <p align="center">
   <img src="docs/gallery_1.png" alt="FlexUI Gallery using the default light theme" width="49%">
@@ -115,6 +115,8 @@ fn main() {
     Window::new(HelloWindow).center().run();
 }
 ```
+
+The same example is checked by the workspace and can be run with `cargo run -p flexui --example hello`.
 
 ### UI-Thread Dispatch and Window Lifecycle
 
