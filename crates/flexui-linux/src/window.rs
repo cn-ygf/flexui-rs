@@ -12,8 +12,8 @@ use cairo::{Format, ImageSurface};
 use flexui_core::event::Mods;
 use flexui_core::{
     find_mut_by_id, hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation,
-    MouseButton, NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, OverlayRequest, Point, Rect,
-    Size, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
+    MouseButton, NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, Point, Rect, Size,
+    TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
     WindowHandle, WindowPresentation,
 };
 
@@ -290,25 +290,6 @@ fn corner_inset(y: i32, h: i32, r: i32) -> i32 {
     (rf - (rf * rf - dy * dy).max(0.0).sqrt()).round() as i32
 }
 
-/// 把 WindowCtx 收集的浮层请求交给分发器打开（下拉/上下文菜单等）。
-fn open_overlay_request(disp: &mut Dispatcher, request: OverlayRequest) {
-    if let Some(entries) = request.entries {
-        disp.open_styled_menu_entries(
-            request.anchor,
-            entries,
-            request.style.unwrap_or_default(),
-            request.selected_name,
-        );
-    } else {
-        disp.open_styled_menu(
-            request.anchor,
-            request.items,
-            request.style,
-            request.selected_name,
-        );
-    }
-}
-
 /// 建窗口用的共享参数（供初始窗口与回调里 open_window 复用）。
 struct WinFactory {
     x_root: Window,
@@ -514,7 +495,7 @@ fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
     st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
     for req in overlay_reqs {
-        open_overlay_request(&mut st.disp, req);
+        st.disp.open_overlay_request(req);
     }
     for a in anim_reqs {
         st.disp.animate(
@@ -824,7 +805,7 @@ fn deliver_drop_files(conn: &RustConnection, st: &mut WinState, paths: &[String]
     st.pending_windows.extend(new_windows);
     st.disp.invalidate(invalidation);
     for request in overlays {
-        open_overlay_request(&mut st.disp, request);
+        st.disp.open_overlay_request(request);
     }
     for request in anims {
         st.disp.animate(
@@ -1179,7 +1160,7 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
     }
     // 委托里请求的浮层菜单 / 属性动画 → 交分发器。
     for req in overlay_reqs {
-        open_overlay_request(&mut st.disp, req);
+        st.disp.open_overlay_request(req);
     }
     for a in anim_reqs {
         st.disp.animate(
@@ -1240,7 +1221,7 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
             return;
         }
         for req in overlay_reqs {
-            open_overlay_request(&mut st.disp, req);
+            st.disp.open_overlay_request(req);
         }
         for a in anim_reqs {
             st.disp.animate(
@@ -1287,7 +1268,7 @@ fn request_close(conn: &RustConnection, st: &mut WinState) -> bool {
     st.pending_windows.extend(new_wins);
     st.disp.invalidate(inval);
     for req in overlay_reqs {
-        open_overlay_request(&mut st.disp, req);
+        st.disp.open_overlay_request(req);
     }
     for a in anim_reqs {
         st.disp.animate(

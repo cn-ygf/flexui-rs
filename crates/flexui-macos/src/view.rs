@@ -29,24 +29,6 @@ use flexui_core::{
 
 use crate::canvas::{CgCanvas, ImageCache, SharedImageCache};
 
-fn open_overlay_request(disp: &mut Dispatcher, request: flexui_core::OverlayRequest) {
-    if let Some(entries) = request.entries {
-        disp.open_styled_menu_entries(
-            request.anchor,
-            entries,
-            request.style.unwrap_or_default(),
-            request.selected_name,
-        );
-    } else {
-        disp.open_styled_menu(
-            request.anchor,
-            request.items,
-            request.style,
-            request.selected_name,
-        );
-    }
-}
-
 /// 逻辑矩形 → NSRect（视图为 flipped，坐标一致）。
 fn to_nsrect(r: Rect) -> NSRect {
     NSRect::new(
@@ -779,7 +761,7 @@ impl FlexView {
         let opened = !overlays.is_empty();
         if !close_requested {
             for request in overlays {
-                open_overlay_request(disp, request);
+                disp.open_overlay_request(request);
             }
             for request in anims {
                 disp.animate(
@@ -878,7 +860,7 @@ impl FlexView {
         }
 
         for request in overlays {
-            open_overlay_request(disp, request);
+            disp.open_overlay_request(request);
         }
         for request in anims {
             disp.animate(
@@ -930,7 +912,7 @@ impl FlexView {
         disp.invalidate(ctx.take_invalidation());
         let close_requested = handle.take_close_request();
         for r in overlays {
-            open_overlay_request(disp, r);
+            disp.open_overlay_request(r);
         }
         for a in anims {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -1108,7 +1090,7 @@ impl FlexView {
         disp.invalidate(invalidation);
         if !close_requested {
             for r in ov_reqs {
-                open_overlay_request(disp, r);
+                disp.open_overlay_request(r);
             }
             for a in anim_reqs {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -1254,7 +1236,7 @@ impl FlexView {
         disp.invalidate(invalidation);
         if !close_requested {
             for r in reqs {
-                open_overlay_request(disp, r);
+                disp.open_overlay_request(r);
             }
             for a in anim_reqs {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);

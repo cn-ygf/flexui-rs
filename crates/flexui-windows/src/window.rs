@@ -43,24 +43,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use crate::canvas::{GdiCanvas, ImageCache};
 use crate::gdiplus::{Gdiplus, OffscreenBitmap, UNIT_PIXEL};
 
-fn open_overlay_request(disp: &mut Dispatcher, request: flexui_core::OverlayRequest) {
-    if let Some(entries) = request.entries {
-        disp.open_styled_menu_entries(
-            request.anchor,
-            entries,
-            request.style.unwrap_or_default(),
-            request.selected_name,
-        );
-    } else {
-        disp.open_styled_menu(
-            request.anchor,
-            request.items,
-            request.style,
-            request.selected_name,
-        );
-    }
-}
-
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
 /// 还原消息栈退出后再刷新最小化期间发生的内容更新。
@@ -481,7 +463,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         let nw = ctx.take_new_windows();
         st.disp.invalidate(ctx.take_invalidation());
         for r in overlays {
-            open_overlay_request(&mut st.disp, r);
+            st.disp.open_overlay_request(r);
         }
         for a in anims {
             st.disp.animate(
@@ -614,7 +596,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
-        open_overlay_request(&mut st.disp, r);
+        st.disp.open_overlay_request(r);
     }
     for a in anim_reqs {
         st.disp.animate(
@@ -670,7 +652,7 @@ unsafe fn fire_window_event(hwnd: HWND, st: &mut AppState, event: flexui_core::W
     st.disp.invalidate(ctx.take_invalidation());
     let opened = !overlays.is_empty();
     for request in overlays {
-        open_overlay_request(&mut st.disp, request);
+        st.disp.open_overlay_request(request);
     }
     for request in anims {
         st.disp.animate(
@@ -916,12 +898,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let dpi = GetDpiForWindow(hwnd);
                 let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
                 let logical = Point::new(p.x as f32 / scale, p.y as f32 / scale);
-                let cursor = if flexui_core::point_wants_text_cursor((*state).root.as_ref(), logical)
-                {
-                    IDC_IBEAM
-                } else {
-                    IDC_ARROW
-                };
+                let cursor =
+                    if flexui_core::point_wants_text_cursor((*state).root.as_ref(), logical) {
+                        IDC_IBEAM
+                    } else {
+                        IDC_ARROW
+                    };
                 SetCursor(LoadCursorW(null_mut(), cursor));
                 return 1;
             }
@@ -1341,7 +1323,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     }
                     st.disp.invalidate(invalidation);
                     for r in ov_reqs {
-                        open_overlay_request(&mut st.disp, r);
+                        st.disp.open_overlay_request(r);
                     }
                     for a in anim_reqs {
                         st.disp.animate(
@@ -1428,7 +1410,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 st.disp.invalidate(ctx.take_invalidation());
                 if !allow {
                     for request in overlays {
-                        open_overlay_request(&mut st.disp, request);
+                        st.disp.open_overlay_request(request);
                     }
                     for request in anims {
                         st.disp.animate(
@@ -1675,7 +1657,10 @@ mod cursor_tests {
         edit.base_mut().rect = Rect::new(20.0, 20.0, 120.0, 36.0);
         root.base_mut().children.push(Box::new(edit));
 
-        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
+        assert!(flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(30.0, 30.0)
+        ));
         assert!(!flexui_core::point_wants_text_cursor(
             &root,
             Point::new(180.0, 80.0)
@@ -1701,6 +1686,9 @@ mod cursor_tests {
         overlay.base_mut().hit = HitPolicy::Transparent;
         root.base_mut().children.push(Box::new(overlay));
 
-        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
+        assert!(flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(30.0, 30.0)
+        ));
     }
 }

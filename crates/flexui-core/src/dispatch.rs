@@ -15,7 +15,7 @@ use crate::frame_animation::{FrameAnimation, FrameLayer};
 use crate::layout::layout_node;
 use crate::paint::paint_tree;
 use crate::widget::{find_by_id, find_by_name, HitPolicy, Node, Widget, WidgetId, WidgetRole};
-use crate::window::WindowCtx;
+use crate::window::{OverlayRequest, WindowCtx};
 
 /// 文本输入停止后保持光标常亮的时间；随后才恢复系统近似周期的闪烁。
 const CARET_BLINK_RESUME_DELAY: Duration = Duration::from_millis(500);
@@ -362,6 +362,25 @@ impl Dispatcher {
     /// 打开一个上下文菜单（owner=None，选中项按其 name 上报激活）。
     pub fn open_menu(&mut self, anchor: Rect, items: Vec<(String, String)>) {
         self.open_styled_menu(anchor, items, None, None);
+    }
+
+    /// 应用窗口回调通过 `WindowCtx` 收集的菜单浮层请求。
+    pub fn open_overlay_request(&mut self, request: OverlayRequest) {
+        if let Some(entries) = request.entries {
+            self.open_styled_menu_entries(
+                request.anchor,
+                entries,
+                request.style.unwrap_or_default(),
+                request.selected_name,
+            );
+        } else {
+            self.open_styled_menu(
+                request.anchor,
+                request.items,
+                request.style,
+                request.selected_name,
+            );
+        }
     }
 
     /// 打开可定制外观并标记当前项的上下文菜单。
