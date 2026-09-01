@@ -1,7 +1,7 @@
 //! TabBox：多页容器（仅显示 selected_index 指向的那一页，配合 Radio 组成 tabbar）。
 
-use flexui_gfx::{Rect, Size};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Rect, Size};
 
 use crate::common_builders;
 use crate::layout;

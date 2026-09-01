@@ -565,7 +565,9 @@ impl<'a> WindowCtx<'a> {
             crate::NativeMenuAnchor::Window(point) => crate::NativeMenuPopupAnchor::Window(point),
             crate::NativeMenuAnchor::Screen(point) => crate::NativeMenuPopupAnchor::Screen(point),
             crate::NativeMenuAnchor::Control(name) => {
-                let rect = self.get(&name, |widget| widget.base().rect)?;
+                let id = crate::find_by_name(self.root, &name)?;
+                let rect = crate::find_by_id(self.root, id)?.base().rect;
+                let rect = crate::widget_rect_to_window(self.root, id, rect)?;
                 crate::NativeMenuPopupAnchor::Window(flexui_gfx::Point::new(
                     rect.left(),
                     rect.bottom(),

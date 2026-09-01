@@ -36,7 +36,12 @@ struct WrapCache {
 }
 
 fn font_key(font: &Font) -> (u32, bool, bool, Option<String>) {
-    (font.size.to_bits(), font.bold, font.italic, font.family.clone())
+    (
+        font.size.to_bits(),
+        font.bold,
+        font.italic,
+        font.family.clone(),
+    )
 }
 
 /// 文本标签（不可交互；`selectable` 开启后支持拖选与复制；`wrap_width` 开启自动换行）。
@@ -158,7 +163,12 @@ impl Label {
             let layout = cv.layout_text(&text, font);
             let width = layout.width();
             max_w = max_w.max(width);
-            lines.push(CachedLine { layout, start: s, len, width });
+            lines.push(CachedLine {
+                layout,
+                start: s,
+                len,
+                width,
+            });
         }
         let total = Size::new(max_w, line_h * lines.len().max(1) as f32);
         (lines, line_h, total)
@@ -234,7 +244,9 @@ impl Widget for Label {
         });
 
         let sel = self.base.focused.then(|| self.sel_range()).flatten();
-        let sel_color = style.selection_color.unwrap_or(Color::rgba(0.20, 0.52, 1.0, 0.30));
+        let sel_color = style
+            .selection_color
+            .unwrap_or(Color::rgba(0.20, 0.52, 1.0, 0.30));
 
         for (idx, line) in c.lines.iter().enumerate() {
             let y = top + idx as f32 * c.line_h;
@@ -244,18 +256,41 @@ impl Widget for Label {
                 let l0 = lo.max(line.start);
                 let l1 = hi.min(line.start + line.len);
                 if l1 > l0 {
-                    for r in line.layout.selection_rects((l0 - line.start)..(l1 - line.start), y, c.line_h) {
-                        cv.fill_rect(Rect::new(ox + r.left(), r.top(), r.size.width, r.size.height), sel_color);
+                    for r in line.layout.selection_rects(
+                        (l0 - line.start)..(l1 - line.start),
+                        y,
+                        c.line_h,
+                    ) {
+                        cv.fill_rect(
+                            Rect::new(ox + r.left(), r.top(), r.size.width, r.size.height),
+                            sel_color,
+                        );
                     }
                 }
             }
             // 换行模式：逐行按预算宽度左对齐绘制；单行模式：铺满内容区并按对齐 + 越界省略（沿用旧行为）。
             if self.wrap_width.is_some() {
                 let line_rect = Rect::new(ox, y, line.width.max(1.0), c.line_h);
-                draw_aligned_text(cv, line.layout.text(), line_rect, &self.base.font, color, TextAlign::Left, true);
+                draw_aligned_text(
+                    cv,
+                    line.layout.text(),
+                    line_rect,
+                    &self.base.font,
+                    color,
+                    TextAlign::Left,
+                    true,
+                );
             } else {
                 let line_rect = Rect::new(content.left(), y, content.size.width, c.line_h);
-                draw_aligned_text(cv, line.layout.text(), line_rect, &self.base.font, color, align, true);
+                draw_aligned_text(
+                    cv,
+                    line.layout.text(),
+                    line_rect,
+                    &self.base.font,
+                    color,
+                    align,
+                    true,
+                );
             }
         }
     }
@@ -266,7 +301,11 @@ impl Widget for Label {
         }
         match ev {
             // 按下：光标与锚点都落在点击处（拖动即从此起选）。
-            Event::MouseDown { pos, button: MouseButton::Left, .. } => {
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Left,
+                ..
+            } => {
                 let idx = self.hit_index(*pos);
                 self.caret = idx;
                 self.sel_anchor = Some(idx);
@@ -331,7 +370,9 @@ mod tests {
     #[test]
     fn 未开启选中不接收鼠标事件() {
         let mut label = Label::new("abc");
-        let flow = label.on_event(&Event::MouseMove { pos: Point::new(0.0, 0.0) });
+        let flow = label.on_event(&Event::MouseMove {
+            pos: Point::new(0.0, 0.0),
+        });
         assert_eq!(flow, EventFlow::Ignored);
     }
 }

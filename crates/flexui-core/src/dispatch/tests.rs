@@ -7,7 +7,7 @@ use crate::widgets::{
 };
 use crate::WidgetProperty;
 use flexui_gfx::{Canvas, Font};
-use flexui_gfx::{Rect, Size};
+use flexui_gfx::{Corners, Rect, Size};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -346,6 +346,42 @@ fn slider_按下拖动改变值() {
         },
     );
     assert_eq!(root.current(), 1.0);
+}
+
+#[test]
+fn 变换后的滑块按视觉坐标交互() {
+    let mut root = Slider::new()
+        .width(100.0)
+        .height(20.0)
+        .translate(100.0, 30.0);
+    layout_node(&mut root, Rect::new(0.0, 0.0, 100.0, 20.0), &FakeCanvas);
+    let mut disp = Dispatcher::new();
+    disp.handle(
+        &mut root,
+        &Event::MouseDown {
+            pos: Point::new(150.0, 40.0),
+            button: MouseButton::Left,
+            mods: Mods::default(),
+        },
+    );
+    assert!((root.current() - 0.5).abs() < 0.01);
+    assert!(hit_test(&root, Point::new(50.0, 10.0)).is_none());
+}
+
+#[test]
+fn 非矩形命中排除透明角落且保留中心() {
+    let mut root = Panel::new();
+    root.base_mut().rect = Rect::new(0.0, 0.0, 300.0, 160.0);
+    let mut child = Button::new("round")
+        .size(100.0, 40.0)
+        .translate(100.0, 20.0)
+        .hit_shape(crate::HitShape::Rounded(Corners::all(16.0)));
+    child.base_mut().rect = Rect::new(20.0, 20.0, 100.0, 40.0);
+    let child_id = child.base().id;
+    root.base_mut().children.push(Box::new(child));
+
+    assert_eq!(hit_test(&root, Point::new(170.0, 60.0)), Some(child_id));
+    assert_ne!(hit_test(&root, Point::new(121.0, 41.0)), Some(child_id));
 }
 
 #[test]

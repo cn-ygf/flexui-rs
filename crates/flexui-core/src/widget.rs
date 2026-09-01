@@ -7,8 +7,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use flexui_gfx::{Insets, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageSource};
+use flexui_gfx::{Insets, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::event::{Event, EventFlow};
@@ -17,6 +17,7 @@ use crate::localization::LocalizationBinding;
 use crate::sizing::{Align, Justify, Sizing};
 use crate::style::{BaseState, PlaceholderStyleSet, StyleSet, StyleSpec, VisualState};
 use crate::theme::{Theme, ThemeColorBinding, WidgetKind};
+use crate::transform::{HitShape, WidgetTransform};
 
 /// 控件唯一 id。
 pub type WidgetId = u64;
@@ -85,6 +86,8 @@ pub enum WidgetPropertyKey {
     Focusable,
     FocusWithin,
     HitPolicy,
+    Transform,
+    HitShape,
     Placeholder,
     PlaceholderStyle,
     Multiline,
@@ -149,6 +152,8 @@ pub enum WidgetProperty {
     Focusable(bool),
     FocusWithin(bool),
     HitPolicy(HitPolicy),
+    Transform(WidgetTransform),
+    HitShape(HitShape),
     Placeholder(String),
     PlaceholderStyle(PlaceholderStyleSet),
     Multiline(bool),
@@ -252,6 +257,9 @@ pub struct Base {
     pub caret_on: bool,
     pub visible: bool,
     pub hit: HitPolicy,
+    /// 只影响绘制、命中和窗口坐标换算，不参与布局分配。
+    pub transform: WidgetTransform,
+    pub hit_shape: HitShape,
 
     // —— 选择 / 分组（Radio/CheckBox/TabBox 用）——
     pub selected: bool,
@@ -343,6 +351,8 @@ impl Base {
             selectable: false,
             visible: true,
             hit: HitPolicy::Solid,
+            transform: WidgetTransform::default(),
+            hit_shape: HitShape::default(),
             selected: false,
             rect: Rect::default(),
             padding: Insets::default(),
@@ -532,7 +542,11 @@ pub trait Widget {
         None
     }
     /// 按拖动中的鼠标位置更新滚动偏移。返回是否变化。
-    fn scrollbar_drag(&mut self, _pos: flexui_gfx::Point, _grab: &crate::scroll::ScrollGrab) -> bool {
+    fn scrollbar_drag(
+        &mut self,
+        _pos: flexui_gfx::Point,
+        _grab: &crate::scroll::ScrollGrab,
+    ) -> bool {
         false
     }
     /// 该点是否落在本控件的滚动条区域（供光标形状判断：滚动条上应显示箭头而非文本光标）。

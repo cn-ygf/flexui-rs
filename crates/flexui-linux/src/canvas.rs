@@ -629,6 +629,32 @@ mod tests {
     }
 
     #[test]
+    fn 仿射变换作用于后续绘制且可恢复() {
+        let surface = ImageSurface::create(Format::ARgb32, 30, 20).unwrap();
+        {
+            let mut cv = CairoCanvas::new(&surface, 1.0);
+            cv.save();
+            cv.concat_transform(Affine::translation(10.0, 5.0));
+            cv.fill_rect(
+                Rect::new(0.0, 0.0, 5.0, 5.0),
+                Color::rgba(1.0, 0.0, 0.0, 1.0),
+            );
+            cv.restore();
+            cv.fill_rect(
+                Rect::new(1.0, 10.0, 4.0, 4.0),
+                Color::rgba(0.0, 0.0, 1.0, 1.0),
+            );
+        }
+        let mut surface = surface;
+        let (r, _, _, a) = argb_at(&mut surface, 12, 7);
+        assert!(r > 200 && a > 200, "平移后的矩形应位于 (12,7)");
+        let (_, _, _, a) = argb_at(&mut surface, 2, 2);
+        assert_eq!(a, 0, "原始位置不应被绘制");
+        let (_, _, b, a) = argb_at(&mut surface, 2, 12);
+        assert!(b > 200 && a > 200, "restore 后应恢复原坐标系");
+    }
+
+    #[test]
     fn 文字测量非空且边界单调() {
         let surface = ImageSurface::create(Format::ARgb32, 4, 4).unwrap();
         let cv = CairoCanvas::new(&surface, 1.0);

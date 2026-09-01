@@ -129,6 +129,25 @@
 | `checked` | 布尔 | CheckBox/Radio | 初始选中 |
 | `selected` | 布尔 **或** 整数 | 见说明 | 对 `tabbox`/`combobox`/`listview` 为**页/项序号**（整数）；其它控件为**选中布尔** |
 
+### 4.7 视觉变换与命中形状
+
+| 属性 | 取值 | 说明 |
+| --- | --- | --- |
+| `translate` | `x y` | 沿 x/y 轴平移；也可分别使用 `translate-x`、`translate-y` |
+| `scale` | `s` 或 `sx sy` | 等比或分轴缩放；也可分别使用 `scale-x`、`scale-y` |
+| `rotation` / `rotate` | 角度数值 | 顺时针旋转，单位为度 |
+| `transform-origin` | `x y` | 变换原点相对控件的比例或百分比，如 `0.5 0.5`、`25% 75%` |
+| `hit-shape` | `rect` / `rounded` / `ellipse` | 控件自身的命中形状；`circle` 是 `ellipse` 的别名 |
+| `hit-radius` | 1 或 4 个数值 | `rounded` 的圆角半径；四值顺序为左上、右上、右下、左下 |
+
+变换只影响绘制、命中测试、输入事件坐标以及菜单/输入法等原生锚点，不改变 VBox/HBox 的排版占位；容器的变换会连同其子树一起生效。纯 Rust 构建时可使用 `translate`、`scale`、`scale_xy`、`rotate`、`transform_origin` 与 `hit_shape` 构建器。
+
+```xml
+<Button text="旋转按钮" width="140" height="44"
+        translate="16 4" rotation="-6" transform-origin="50% 50%"
+        hit-shape="rounded" hit-radius="12"/>
+```
+
 ---
 
 ## 5. 取值格式

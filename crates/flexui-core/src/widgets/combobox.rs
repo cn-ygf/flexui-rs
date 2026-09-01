@@ -3,8 +3,8 @@
 //! 选项存于本控件；点击时分发器读取 `menu_items()` 建浮层菜单，选中后回调
 //! `set_selected_item()` 设 `selected_index` 并回填 `text`。
 
-use flexui_gfx::{Color, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
+use flexui_gfx::{Color, Rect, Size};
 
 use crate::common_builders;
 use crate::layout;
@@ -162,8 +162,8 @@ common_builders!(ComboBox);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flexui_gfx::{Corners, Point};
     use flexui_gfx::Font;
+    use flexui_gfx::{Corners, Point};
     use std::cell::RefCell;
 
     struct TextOriginCanvas {

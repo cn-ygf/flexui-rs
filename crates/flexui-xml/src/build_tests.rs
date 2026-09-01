@@ -5,6 +5,31 @@ use flexui_core::{
 use flexui_resource::{DirProvider, ResourceManager};
 
 #[test]
+fn xml_控件变换与非矩形命中() {
+    let xml = r#"<Panel translate="12 -4" scale="1.5 0.75" rotation="30"
+        transform-origin="25% 75%" hit-shape="rounded" hit-radius="4 8 12 16"/>"#;
+    let result = load_str(xml, &Context::new()).unwrap();
+    let base = result.root.base();
+    assert_eq!(
+        base.transform.translation,
+        flexui_core::Point::new(12.0, -4.0)
+    );
+    assert_eq!(base.transform.scale_x, 1.5);
+    assert_eq!(base.transform.scale_y, 0.75);
+    assert_eq!(base.transform.rotation_degrees, 30.0);
+    assert_eq!(base.transform.origin, flexui_core::Point::new(0.25, 0.75));
+    assert!(matches!(
+        base.hit_shape,
+        flexui_core::HitShape::Rounded(Corners {
+            tl: 4.0,
+            tr: 8.0,
+            br: 12.0,
+            bl: 16.0,
+        })
+    ));
+}
+
+#[test]
 fn 内置平台谓词覆盖三个后端() {
     let ctx = Context::new();
     assert_eq!(ctx.get("platform.macos"), cfg!(target_os = "macos"));

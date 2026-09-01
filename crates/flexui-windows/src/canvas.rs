@@ -833,7 +833,8 @@ impl Canvas for GdiCanvas<'_> {
 
     fn draw_text_layout(&mut self, layout: &TextLayout, origin: Point, color: Color) {
         if unsafe {
-            crate::text::draw_text_layout(self.g, self.dpi_scale, self.clip, layout, origin, color)
+            // 最终图像由 GDI+ 绘制；让其原生裁剪跟随当前世界变换，避免软件裁剪仍停留在布局坐标。
+            crate::text::draw_text_layout(self.g, self.dpi_scale, None, layout, origin, color)
         } {
             if layout.font().underline {
                 self.fill_rect(

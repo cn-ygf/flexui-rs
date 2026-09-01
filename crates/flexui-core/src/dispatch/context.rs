@@ -245,6 +245,18 @@ impl<'a> EventCtx<'a> {
             Property::HitPolicy(value) => {
                 self.set_base_property(name, false, move |base| base.hit = value)
             }
+            Property::Transform(value) => {
+                let found = self
+                    .mutate(name, move |widget| widget.base_mut().transform = value)
+                    .is_some();
+                if found {
+                    self.invalidate(Invalidation::Redraw);
+                }
+                found
+            }
+            Property::HitShape(value) => {
+                self.set_base_property(name, false, move |base| base.hit_shape = value)
+            }
             Property::Selected(selected) => self.set_selected(name, selected),
             property => {
                 let mut applied = false;
@@ -307,6 +319,8 @@ impl<'a> EventCtx<'a> {
                     Key::Focusable => Some(Property::Focusable(base.focusable)),
                     Key::FocusWithin => Some(Property::FocusWithin(base.focus_within)),
                     Key::HitPolicy => Some(Property::HitPolicy(base.hit)),
+                    Key::Transform => Some(Property::Transform(base.transform)),
+                    Key::HitShape => Some(Property::HitShape(base.hit_shape)),
                     Key::Selected => Some(Property::Selected(base.selected)),
                     _ => None,
                 }

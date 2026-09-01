@@ -5,12 +5,12 @@ use std::rc::Rc;
 
 use flexui_core::{
     Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
-    FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, Image, ImageFit, ImageSource, Insets,
-    Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
-    Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec,
-    Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode, VBox,
-    VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualSelectionMode, VisualState,
-    Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
+    FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, HitShape, Image, ImageFit, ImageSource,
+    Insets, Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec,
+    Progress, Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet,
+    StyleSpec, Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode,
+    VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualSelectionMode,
+    VisualState, Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -602,6 +602,7 @@ fn apply_attrs(
     env: &Env,
 ) -> Result<(), LoadError> {
     let res = env.res;
+    apply_transform_and_hit_shape(node, attrs);
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
     let mut placeholder_slots: HashMap<VisualState, PlaceholderStyleSpec> = HashMap::new();
@@ -615,7 +616,9 @@ fn apply_attrs(
             "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
             | "options-args" | "items-args" | "row-height" | "header-height" | "show-header"
             | "striped" | "fill-last-column" | "overscan" | "selection-mode" | "text-args"
-            | "placeholder-args" | "tooltip-args" | "title-args" => {}
+            | "placeholder-args" | "tooltip-args" | "title-args" | "translate" | "translate-x"
+            | "translate-y" | "scale" | "scale-x" | "scale-y" | "rotation" | "rotate"
+            | "transform-origin" | "hit-shape" | "hit-radius" => {}
             "name" => node.base_mut().name = Some(v.clone()),
             "variant" => node.base_mut().variant = v.trim().to_owned(),
             "class" | "classes" => {
@@ -825,6 +828,110 @@ fn apply_attrs(
         node.apply_property(WidgetProperty::PlaceholderStyle(set));
     }
     Ok(())
+}
+
+fn apply_transform_and_hit_shape(node: &mut dyn Widget, attrs: &[(String, String)]) {
+    let mut transform = node.base().transform;
+    if let Some(value) = attr_value(attrs, "translate").and_then(parse_pair) {
+        transform.translation = flexui_core::Point::new(value.0, value.1);
+    }
+    if let Some(value) = attr_value(attrs, "translate-x").and_then(|v| v.parse().ok()) {
+        transform.translation.x = value;
+    }
+    if let Some(value) = attr_value(attrs, "translate-y").and_then(|v| v.parse().ok()) {
+        transform.translation.y = value;
+    }
+    if let Some(values) = attr_value(attrs, "scale").and_then(parse_one_or_pair) {
+        transform.scale_x = values.0;
+        transform.scale_y = values.1;
+    }
+    if let Some(value) = attr_value(attrs, "scale-x").and_then(|v| v.parse().ok()) {
+        transform.scale_x = value;
+    }
+    if let Some(value) = attr_value(attrs, "scale-y").and_then(|v| v.parse().ok()) {
+        transform.scale_y = value;
+    }
+    if let Some(value) = attr_value(attrs, "rotation")
+        .or_else(|| attr_value(attrs, "rotate"))
+        .and_then(|v| v.parse().ok())
+    {
+        transform.rotation_degrees = value;
+    }
+    if let Some(value) = attr_value(attrs, "transform-origin").and_then(parse_origin) {
+        transform.origin = flexui_core::Point::new(value.0, value.1);
+    }
+    node.base_mut().transform = transform;
+
+    let radius = attr_value(attrs, "hit-radius").and_then(parse_corners);
+    let shape = attr_value(attrs, "hit-shape").map(str::trim);
+    let current_shape = node.base().hit_shape;
+    let hit_shape = match shape {
+        Some(value)
+            if value.eq_ignore_ascii_case("ellipse") || value.eq_ignore_ascii_case("circle") =>
+        {
+            HitShape::Ellipse
+        }
+        Some(value)
+            if value.eq_ignore_ascii_case("rounded") || value.eq_ignore_ascii_case("round") =>
+        {
+            HitShape::Rounded(radius.unwrap_or_else(|| Corners::all(8.0)))
+        }
+        Some(_) => HitShape::Rect,
+        None => radius.map_or(current_shape, HitShape::Rounded),
+    };
+    node.base_mut().hit_shape = hit_shape;
+}
+
+fn split_numbers(value: &str) -> Option<Vec<f32>> {
+    value
+        .split([',', ' '])
+        .filter(|part| !part.is_empty())
+        .map(str::parse::<f32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+}
+
+fn parse_pair(value: &str) -> Option<(f32, f32)> {
+    let values = split_numbers(value)?;
+    (values.len() == 2).then(|| (values[0], values[1]))
+}
+
+fn parse_one_or_pair(value: &str) -> Option<(f32, f32)> {
+    let values = split_numbers(value)?;
+    match values.as_slice() {
+        [value] => Some((*value, *value)),
+        [x, y] => Some((*x, *y)),
+        _ => None,
+    }
+}
+
+fn parse_origin(value: &str) -> Option<(f32, f32)> {
+    let values = value
+        .split([',', ' '])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.strip_suffix('%').map_or_else(
+                || part.parse::<f32>(),
+                |v| v.parse::<f32>().map(|v| v / 100.0),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (values.len() == 2).then(|| (values[0], values[1]))
+}
+
+fn parse_corners(value: &str) -> Option<Corners> {
+    let values = split_numbers(value)?;
+    match values.as_slice() {
+        [radius] => Some(Corners::all(*radius)),
+        [top_left, top_right, bottom_right, bottom_left] => Some(Corners {
+            tl: *top_left,
+            tr: *top_right,
+            br: *bottom_right,
+            bl: *bottom_left,
+        }),
+        _ => None,
+    }
 }
 
 fn parse_local_rect(value: &str, property: &str) -> Result<Rect, LoadError> {

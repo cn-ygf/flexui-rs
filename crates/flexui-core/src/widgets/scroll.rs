@@ -2,8 +2,8 @@
 //!
 //! 滚动状态复用统一的 `ScrollState`（见 `crate::scroll`），与 ListView/Edit 共用一套逻辑。
 
-use flexui_gfx::{Point, Rect, Size};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Point, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::common_builders;
@@ -197,7 +197,13 @@ impl Widget for ScrollView {
 
     fn paint_foreground(&self, cv: &mut dyn Canvas, style: &StyleSpec) {
         // 内容高于视口时在子内容之上绘制滚动条（统一绘制器），贴控件外缘。
-        paint_scrollbars(cv, self.scrollbar_viewport(), &self.scroll, &self.scrollbar, style);
+        paint_scrollbars(
+            cv,
+            self.scrollbar_viewport(),
+            &self.scroll,
+            &self.scrollbar,
+            style,
+        );
     }
     fn is_scrollable(&self) -> bool {
         true
@@ -226,7 +232,12 @@ impl Widget for ScrollView {
         Some(self.scroll.offset())
     }
     fn scrollbar_grab(&self, pos: Point) -> Option<crate::scroll::ScrollGrab> {
-        crate::scroll::thumb_grab(&self.scroll, self.scrollbar_viewport(), &self.scrollbar, pos)
+        crate::scroll::thumb_grab(
+            &self.scroll,
+            self.scrollbar_viewport(),
+            &self.scrollbar,
+            pos,
+        )
     }
     fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
         let before = self.scroll.offset();
@@ -299,8 +310,8 @@ mod tests {
     use super::*;
     use crate::layout::layout_node;
     use crate::widgets::Panel;
-    use flexui_gfx::{Color, Corners};
     use flexui_gfx::Font;
+    use flexui_gfx::{Color, Corners};
 
     struct FakeCanvas;
     impl Canvas for FakeCanvas {

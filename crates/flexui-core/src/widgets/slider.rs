@@ -2,8 +2,8 @@
 //!
 //! 交互事件（按下/拖动）由分发器转发到本控件（见 dispatch 的指针转发）。
 
-use flexui_gfx::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Color, Corners, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::common_builders;

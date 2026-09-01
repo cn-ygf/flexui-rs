@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use flexui_gfx::Canvas;
-use flexui_gfx::{Point, Rect, Size};
+use flexui_gfx::{Affine, Point, Rect, Size};
 
 use crate::anim::{Anim, AnimProp, Easing};
 use crate::event::{ControlEvent, Event, EventFlow, MouseButton};
@@ -308,7 +308,7 @@ impl Dispatcher {
 
         let mut dirty = None;
         let mut finished = Vec::new();
-        tick_frame_animations(root, dt, false, &mut dirty, &mut finished);
+        tick_frame_animations(root, dt, false, Affine::IDENTITY, &mut dirty, &mut finished);
         finished.sort_unstable_by_key(|(id, layer)| (*id, *layer as u8));
         finished.dedup();
         for (id, layer) in finished {
@@ -540,11 +540,10 @@ impl Dispatcher {
             self.caret_blink_after = None;
             return None;
         }
-        let mut rect = None;
         visit_mut(root, fid, &mut |w| {
             w.base_mut().caret_on = true;
-            rect = Some(w.base().rect);
         });
+        let rect = rect_of(root, fid);
         self.caret_blink_after = Some(now + CARET_BLINK_RESUME_DELAY);
         rect
     }
@@ -568,13 +567,11 @@ impl Dispatcher {
             return None;
         }
         self.caret_blink_after = None;
-        let mut rect = None;
         visit_mut(root, fid, &mut |w| {
             let b = w.base_mut();
             b.caret_on = !b.caret_on;
-            rect = Some(b.rect);
         });
-        rect
+        rect_of(root, fid)
     }
 
     /// 当前焦点控件 id。
@@ -757,13 +754,13 @@ impl Dispatcher {
             return;
         };
         let mut index = None;
-        let mut anchor = Rect::default();
         visit_mut(self.overlays[level].root.as_mut(), item_id, &mut |widget| {
             if widget.base().role == WidgetRole::MenuItem {
                 index = widget.selected_index();
-                anchor = widget.base().rect;
             }
         });
+        let mut anchor =
+            layout_rect_of(self.overlays[level].root.as_ref(), item_id).unwrap_or_default();
         let Some(entry) = index
             .and_then(|index| self.overlays[level].entries.get(index))
             .cloned()
@@ -875,9 +872,10 @@ impl Dispatcher {
     /// 把事件转发给指定 id 的控件 on_event；消费则脏其区域。
     fn forward_to_widget(&mut self, root: &mut dyn Widget, id: WidgetId, ev: &Event) {
         let before = control_snapshot(root, id);
+        let mapped_event = event_for_widget(root, id, ev);
         let mut consumed = false;
         visit_mut(root, id, &mut |w| {
-            consumed = w.on_event(ev) == EventFlow::Consumed;
+            consumed = w.on_event(&mapped_event) == EventFlow::Consumed;
         });
         if consumed {
             if role_of(root, id) == Some(WidgetRole::Edit) {
@@ -1066,9 +1064,12 @@ impl Dispatcher {
         pos: Point,
         grab: crate::scroll::ScrollGrab,
     ) {
+        let local_pos = widget_transform_to_window(root, id)
+            .and_then(Affine::inverse)
+            .map_or(pos, |inverse| inverse.transform_point(pos));
         let mut changed = false;
         visit_mut(root, id, &mut |w| {
-            changed = w.scrollbar_drag(pos, &grab);
+            changed = w.scrollbar_drag(local_pos, &grab);
         });
         if changed {
             if let Some(r) = rect_of(root, id) {
@@ -1133,11 +1134,10 @@ impl Dispatcher {
         };
         // 读悬停控件的 tooltip 文本与矩形。
         let mut text: Option<String> = None;
-        let mut rect = Rect::default();
         visit_mut(root, id, &mut |w| {
             text = w.base().tooltip.clone();
-            rect = w.base().rect;
         });
+        let rect = layout_rect_of(root, id).unwrap_or_default();
         let Some(text) = text.filter(|s| !s.is_empty()) else {
             self.tip_ticks = 0;
             return None;
@@ -1225,7 +1225,6 @@ impl Dispatcher {
         let mut activated_name: Option<String> = None;
         let mut menu: Option<Vec<String>> = None;
         let mut menu_theme = None;
-        let mut anchor = Rect::default();
         visit_mut(root, id, &mut |w| {
             let group = w.selection_group();
             let tab_index = w.tab_index();
@@ -1241,10 +1240,10 @@ impl Dispatcher {
             }
             info = Some((b.role, group, tab_index));
             activated_name = b.name.clone();
-            anchor = b.rect;
             menu_theme = b.applied_theme.clone();
             menu = w.menu_items();
         });
+        let anchor = layout_rect_of(root, id).unwrap_or_default();
         if !enabled {
             return;
         }
@@ -1467,20 +1466,72 @@ impl Default for Dispatcher {
 /// 命中测试：返回最上层「不穿透」且包含该点的可见控件 id。
 /// 子控件绘制在父之上，故逆序遍历子控件优先命中。
 pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
+    hit_test_impl(node, p, Affine::IDENTITY)
+}
+
+fn hit_test_impl(node: &dyn Widget, p: Point, parent_transform: Affine) -> Option<WidgetId> {
     let b = node.base();
-    if !b.visible || !b.rect.contains(p) {
+    if !b.visible {
         return None;
     }
-    if node.children_viewport().contains(p) {
+    let transform = b.transform.affine(b.rect).then(parent_transform);
+    let local_point = transform.inverse()?.transform_point(p);
+    if !b.rect.contains(local_point) {
+        return None;
+    }
+    if node.children_viewport().contains(local_point) {
         for child in b.children.iter().rev() {
-            if let Some(id) = hit_test(child.as_ref(), p) {
+            if let Some(id) = hit_test_impl(child.as_ref(), p, transform) {
                 return Some(id);
             }
         }
     }
     match b.hit {
-        HitPolicy::Solid => Some(b.id),
+        HitPolicy::Solid if b.hit_shape.contains(b.rect, local_point) => Some(b.id),
         HitPolicy::Transparent => None,
+        HitPolicy::Solid => None,
+    }
+}
+
+/// 返回控件布局坐标到窗口坐标的累计变换。
+pub fn widget_transform_to_window(root: &dyn Widget, id: WidgetId) -> Option<Affine> {
+    transform_for_id(root, id, Affine::IDENTITY)
+}
+
+/// 把控件排版阶段产生的矩形换算为窗口坐标包围盒。
+pub fn widget_rect_to_window(root: &dyn Widget, id: WidgetId, rect: Rect) -> Option<Rect> {
+    Some(widget_transform_to_window(root, id)?.transform_rect(rect))
+}
+
+fn event_for_widget(root: &dyn Widget, id: WidgetId, event: &Event) -> Event {
+    let Some(inverse) = widget_transform_to_window(root, id).and_then(Affine::inverse) else {
+        return event.clone();
+    };
+    match event {
+        Event::MouseMove { pos } => Event::MouseMove {
+            pos: inverse.transform_point(*pos),
+        },
+        Event::MouseDown { pos, button, mods } => Event::MouseDown {
+            pos: inverse.transform_point(*pos),
+            button: *button,
+            mods: *mods,
+        },
+        Event::MouseUp { pos, button } => Event::MouseUp {
+            pos: inverse.transform_point(*pos),
+            button: *button,
+        },
+        Event::DoubleClick { pos } => Event::DoubleClick {
+            pos: inverse.transform_point(*pos),
+        },
+        Event::MouseWheel { pos, dx, dy } => {
+            let delta = inverse.transform_vector(Point::new(*dx, *dy));
+            Event::MouseWheel {
+                pos: inverse.transform_point(*pos),
+                dx: delta.x,
+                dy: delta.y,
+            }
+        }
+        _ => event.clone(),
     }
 }
 
@@ -1491,6 +1542,10 @@ pub fn point_wants_text_cursor(root: &dyn Widget, p: Point) -> bool {
     let Some(id) = hit_test(root, p) else {
         return false;
     };
+    let Some(inverse) = widget_transform_to_window(root, id).and_then(Affine::inverse) else {
+        return false;
+    };
+    let local_point = inverse.transform_point(p);
     fn check(node: &dyn Widget, id: WidgetId, p: Point) -> Option<bool> {
         let b = node.base();
         if b.id == id {
@@ -1500,7 +1555,7 @@ pub fn point_wants_text_cursor(root: &dyn Widget, p: Point) -> bool {
         }
         b.children.iter().find_map(|c| check(c.as_ref(), id, p))
     }
-    check(root, id, p) == Some(true)
+    check(root, id, local_point) == Some(true)
 }
 
 /// 读取控件的可动画属性值。
@@ -1568,33 +1623,80 @@ fn scrollbar_grab_at(
     root: &mut dyn Widget,
     pos: Point,
 ) -> Option<(WidgetId, crate::scroll::ScrollGrab)> {
-    let mut found = None;
-    for_each_visible_mut(root, true, &mut |widget| {
-        if let Some(grab) = widget.scrollbar_grab(pos) {
-            found = Some((widget.base().id, grab));
+    fn find(
+        node: &dyn Widget,
+        pos: Point,
+        parent: Affine,
+        found: &mut Option<(WidgetId, crate::scroll::ScrollGrab)>,
+    ) {
+        let base = node.base();
+        if !base.visible {
+            return;
         }
-    });
+        let transform = base.transform.affine(base.rect).then(parent);
+        let Some(inverse) = transform.inverse() else {
+            return;
+        };
+        let local_pos = inverse.transform_point(pos);
+        if !base.rect.contains(local_pos) {
+            return;
+        }
+        if let Some(grab) = node.scrollbar_grab(local_pos) {
+            *found = Some((base.id, grab));
+        }
+        if node.children_viewport().contains(local_pos) {
+            for child in &base.children {
+                find(child.as_ref(), pos, transform, found);
+            }
+        }
+    }
+    let mut found = None;
+    find(root, pos, Affine::IDENTITY, &mut found);
     found
 }
 
 fn scroll_tree_at(root: &mut dyn Widget, pos: Point, dx: f32, dy: f32) -> Option<(WidgetId, Rect)> {
-    let mut target = None;
-    for_each_visible_mut(root, true, &mut |widget| {
-        if widget.is_scrollable() && widget.children_viewport().contains(pos) {
-            target = Some(widget.base().id);
+    fn find(
+        node: &dyn Widget,
+        pos: Point,
+        parent: Affine,
+        target: &mut Option<(WidgetId, Affine)>,
+    ) {
+        let base = node.base();
+        if !base.visible {
+            return;
         }
-    });
-    let id = target?;
-    let mut changed_rect = None;
+        let transform = base.transform.affine(base.rect).then(parent);
+        let Some(inverse) = transform.inverse() else {
+            return;
+        };
+        let local_pos = inverse.transform_point(pos);
+        if !base.rect.contains(local_pos) {
+            return;
+        }
+        if node.is_scrollable() && node.children_viewport().contains(local_pos) {
+            *target = Some((base.id, inverse));
+        }
+        if node.children_viewport().contains(local_pos) {
+            for child in &base.children {
+                find(child.as_ref(), pos, transform, target);
+            }
+        }
+    }
+    let mut target = None;
+    find(root, pos, Affine::IDENTITY, &mut target);
+    let (id, inverse) = target?;
+    let delta = inverse.transform_vector(Point::new(dx, dy));
+    let rect = layout_rect_of(root, id)?;
+    let mut changed = false;
     visit_mut(root, id, &mut |widget| {
         // 脏区用控件整体矩形：children_viewport 会排除右侧滚动条列，
         // 只脏内容区会导致滚动条滑块不随内容重绘。
-        let rect = widget.base().rect;
-        if widget.scroll_by(dx, dy) {
-            changed_rect = Some(rect);
+        if widget.scroll_by(delta.x, delta.y) {
+            changed = true;
         }
     });
-    changed_rect.map(|rect| (id, rect))
+    changed.then_some((id, rect))
 }
 
 /// 两矩形的包围并集。
@@ -1647,28 +1749,46 @@ fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
     None
 }
 
-/// 按 id 找控件的绝对矩形。
+fn transform_for_id(node: &dyn Widget, id: WidgetId, parent: Affine) -> Option<Affine> {
+    let base = node.base();
+    let transform = base.transform.affine(base.rect).then(parent);
+    if base.id == id {
+        return Some(transform);
+    }
+    base.children
+        .iter()
+        .find_map(|child| transform_for_id(child.as_ref(), id, transform))
+}
+
+fn layout_rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
+    let widget = find_by_id(node, id)?;
+    widget_rect_to_window(node, id, widget.base().rect)
+}
+
+/// 按 id 找控件包含所有状态阴影的窗口坐标包围盒。
 fn rect_of(node: &dyn Widget, id: WidgetId) -> Option<Rect> {
-    if node.base().id == id {
+    fn find(node: &dyn Widget, id: WidgetId, parent: Affine) -> Option<Rect> {
         let base = node.base();
-        return Some(base.style_shadows().fold(base.rect, |visual, shadow| {
-            union_rect(
-                visual,
-                Rect::new(
-                    base.rect.left() + shadow.dx,
-                    base.rect.top() + shadow.dy,
-                    base.rect.size.width,
-                    base.rect.size.height,
-                ),
-            )
-        }));
-    }
-    for child in node.base().children.iter() {
-        if let Some(r) = rect_of(child.as_ref(), id) {
-            return Some(r);
+        let transform = base.transform.affine(base.rect).then(parent);
+        if base.id == id {
+            let visual = base.style_shadows().fold(base.rect, |visual, shadow| {
+                union_rect(
+                    visual,
+                    Rect::new(
+                        base.rect.left() + shadow.dx,
+                        base.rect.top() + shadow.dy,
+                        base.rect.size.width,
+                        base.rect.size.height,
+                    ),
+                )
+            });
+            return Some(transform.transform_rect(visual));
         }
+        base.children
+            .iter()
+            .find_map(|child| find(child.as_ref(), id, transform))
     }
-    None
+    find(node, id, Affine::IDENTITY)
 }
 
 /// 前序遍历，对每个节点执行 f。
@@ -1702,6 +1822,7 @@ fn tick_frame_animations(
     node: &mut dyn Widget,
     dt: f32,
     inherited_focus: bool,
+    parent_transform: Affine,
     dirty: &mut Option<Rect>,
     finished: &mut Vec<(WidgetId, FrameLayer)>,
 ) {
@@ -1711,6 +1832,7 @@ fn tick_frame_animations(
     // 仅在 focus_within 生效时才需要扫描子树的焦点，避免每帧对整棵树做 O(N²) 遍历。
     let subtree_has_focus = node.base().focus_within && subtree_focused_for_frames(node);
     let b = node.base_mut();
+    let transform = b.transform.affine(b.rect).then(parent_transform);
     let focus_active = inherited_focus || b.focused || (b.focus_within && subtree_has_focus);
     // 廉价门控：本控件既没有定义帧动画、也没有正在播放的帧动画时，跳过昂贵的
     // 样式解析(resolve_over→StyleSpec::clone)。空闲时（大列表尤甚）大幅降低每帧 CPU。
@@ -1738,14 +1860,32 @@ fn tick_frame_animations(
             finished.push((b.id, FrameLayer::Foreground));
         }
         if changed {
-            let rect = b.rect;
+            let visual = style.shadow.map_or(b.rect, |shadow| {
+                union_rect(
+                    b.rect,
+                    Rect::new(
+                        b.rect.left() + shadow.dx,
+                        b.rect.top() + shadow.dy,
+                        b.rect.size.width,
+                        b.rect.size.height,
+                    ),
+                )
+            });
+            let rect = transform.transform_rect(visual);
             *dirty = Some(dirty.map_or(rect, |current| union_rect(current, rect)));
         }
     }
     let pass_focus = focus_active && b.focus_within;
     let child_count = b.children.len();
     for i in 0..child_count {
-        tick_frame_animations(b.children[i].as_mut(), dt, pass_focus, dirty, finished);
+        tick_frame_animations(
+            b.children[i].as_mut(),
+            dt,
+            pass_focus,
+            transform,
+            dirty,
+            finished,
+        );
     }
 }
 

@@ -11,6 +11,7 @@ use flexui_core::{
     apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
     Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
     WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
+    widget_rect_to_window,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -726,10 +727,13 @@ unsafe fn with_focus_widget(state: *mut AppState, f: impl FnOnce(&mut dyn Widget
     }
     let st = &mut *state;
     let id = st.disp.focus()?;
-    let w = flexui_core::find_mut_by_id(st.root.as_mut(), id)?;
-    let rect = w.base().rect;
-    f(w);
-    Some(rect)
+    let rect = {
+        let w = flexui_core::find_mut_by_id(st.root.as_mut(), id)?;
+        let rect = w.base().rect;
+        f(w);
+        rect
+    };
+    widget_rect_to_window(st.root.as_ref(), id, rect)
 }
 
 /// 设置焦点控件的 IME 组合串并失效其区域。
@@ -766,11 +770,14 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     }
     let st = &mut *state;
     let Some(id) = st.disp.focus() else { return };
-    let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
-        return;
+    let (edit_rect, caret_rect) = {
+        let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
+            return;
+        };
+        (w.base().rect, w.text_input_rect().unwrap_or(w.base().rect))
     };
-    let edit_rect = w.base().rect;
-    let r = w.text_input_rect().unwrap_or(w.base().rect);
+    let edit_rect = widget_rect_to_window(st.root.as_ref(), id, edit_rect).unwrap_or(edit_rect);
+    let r = widget_rect_to_window(st.root.as_ref(), id, caret_rect).unwrap_or(caret_rect);
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
     let himc = ImmGetContext(hwnd);
