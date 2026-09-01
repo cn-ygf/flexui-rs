@@ -5,7 +5,7 @@
 
 mod geometry;
 
-pub use geometry::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
+pub use geometry::{pixel_aligned_stroke, Affine, Color, Corners, Insets, Point, Rect, Size};
 
 use std::any::Any;
 use std::fmt;
@@ -442,6 +442,9 @@ pub trait Canvas {
 
     /// 恢复绘图状态。
     fn restore(&mut self) {}
+
+    /// 把仿射变换追加到当前绘图状态；通常与 `save` / `restore` 配合使用。
+    fn concat_transform(&mut self, _transform: Affine) {}
 
     /// 追加矩形裁剪区（缺省为空，后端可覆写）。
     fn clip_rect(&mut self, _rect: Rect) {}

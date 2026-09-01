@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use flexui_gfx::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
+use flexui_gfx::{pixel_aligned_stroke, Affine, Color, Corners, Insets, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, LayerHandle, TextBoundary, TextLayout};
 
 use core_foundation::attributed_string::CFMutableAttributedString;
@@ -664,6 +664,23 @@ impl Canvas for CgCanvas {
         NSGraphicsContext::restoreGraphicsState_class();
     }
 
+    fn concat_transform(&mut self, transform: Affine) {
+        let Some(ns_context) = NSGraphicsContext::currentContext() else {
+            return;
+        };
+        let ns_cg = ns_context.CGContext();
+        let raw = Retained::as_ptr(&ns_cg).cast_mut().cast();
+        let cg = unsafe { CGContext::from_existing_context_ptr(raw) };
+        cg.concat_ctm(CGAffineTransform::new(
+            transform.m11 as f64,
+            transform.m12 as f64,
+            transform.m21 as f64,
+            transform.m22 as f64,
+            transform.dx as f64,
+            transform.dy as f64,
+        ));
+    }
+
     fn clip_rect(&mut self, rect: Rect) {
         // 追加矩形裁剪区（配合 save/restore 使用）。
         NSBezierPath::bezierPathWithRect(to_nsrect(rect)).addClip();
@@ -714,7 +731,12 @@ impl Canvas for CgCanvas {
         let Some(NsImageLayer(image)) = layer.data::<NsImageLayer>() else {
             return;
         };
-        let dst = to_nsrect(Rect::new(origin.x, origin.y, layer.size.width, layer.size.height));
+        let dst = to_nsrect(Rect::new(
+            origin.x,
+            origin.y,
+            layer.size.width,
+            layer.size.height,
+        ));
         // 缓存层按左上原点生成；主 NSView 同样是 flipped 坐标系，要求 AppKit
         // 按目标上下文方向回贴，否则静态多行文本会被上下翻转。
         unsafe {

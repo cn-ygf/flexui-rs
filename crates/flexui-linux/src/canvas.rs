@@ -8,10 +8,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use cairo::{Context, Filter, Format, ImageSurface, LinearGradient, SurfacePattern};
+use cairo::{Context, Filter, Format, ImageSurface, LinearGradient, Matrix, SurfacePattern};
 use flexui_gfx::{
-    Canvas, Color, Corners, Font, ImageFit, ImageSource, Insets, LayerHandle, Point, Rect, Size,
-    TextBoundary, TextLayout,
+    Affine, Canvas, Color, Corners, Font, ImageFit, ImageSource, Insets, LayerHandle, Point, Rect,
+    Size, TextBoundary, TextLayout,
 };
 
 /// 解码后位图的缓存键。
@@ -532,6 +532,17 @@ impl Canvas for CairoCanvas {
 
     fn restore(&mut self) {
         let _ = self.cr.restore();
+    }
+
+    fn concat_transform(&mut self, transform: Affine) {
+        self.cr.transform(Matrix::new(
+            transform.m11 as f64,
+            transform.m12 as f64,
+            transform.m21 as f64,
+            transform.m22 as f64,
+            transform.dx as f64,
+            transform.dy as f64,
+        ));
     }
 
     fn clip_rect(&mut self, rect: Rect) {

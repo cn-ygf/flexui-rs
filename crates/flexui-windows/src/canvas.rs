@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use flexui_gfx::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
+use flexui_gfx::{pixel_aligned_stroke, Affine, Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextLayout};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;
@@ -876,6 +876,26 @@ impl Canvas for GdiCanvas<'_> {
         if let Some(state) = self.saved.pop() {
             unsafe { gp::GdipRestoreGraphics(self.g, state) };
             self.clip = self.saved_clips.pop().flatten();
+        }
+    }
+
+    fn concat_transform(&mut self, transform: Affine) {
+        unsafe {
+            let mut matrix: *mut gp::Matrix = std::ptr::null_mut();
+            if gp::GdipCreateMatrix2(
+                transform.m11,
+                transform.m12,
+                transform.m21,
+                transform.m22,
+                transform.dx,
+                transform.dy,
+                &mut matrix,
+            ) == 0
+                && !matrix.is_null()
+            {
+                gp::GdipMultiplyWorldTransform(self.g, matrix, MATRIX_ORDER_PREPEND);
+                gp::GdipDeleteMatrix(matrix);
+            }
         }
     }
 

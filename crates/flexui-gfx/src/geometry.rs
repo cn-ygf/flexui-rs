@@ -29,6 +29,124 @@ impl Size {
     }
 }
 
+/// 二维仿射变换。
+///
+/// 点按 `x' = m11*x + m21*y + dx`、`y' = m12*x + m22*y + dy` 变换。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Affine {
+    pub m11: f32,
+    pub m12: f32,
+    pub m21: f32,
+    pub m22: f32,
+    pub dx: f32,
+    pub dy: f32,
+}
+
+impl Affine {
+    pub const IDENTITY: Self = Self {
+        m11: 1.0,
+        m12: 0.0,
+        m21: 0.0,
+        m22: 1.0,
+        dx: 0.0,
+        dy: 0.0,
+    };
+
+    pub const fn new(m11: f32, m12: f32, m21: f32, m22: f32, dx: f32, dy: f32) -> Self {
+        Self {
+            m11,
+            m12,
+            m21,
+            m22,
+            dx,
+            dy,
+        }
+    }
+
+    pub const fn translation(x: f32, y: f32) -> Self {
+        Self::new(1.0, 0.0, 0.0, 1.0, x, y)
+    }
+
+    pub const fn scale(x: f32, y: f32) -> Self {
+        Self::new(x, 0.0, 0.0, y, 0.0, 0.0)
+    }
+
+    pub fn rotation(radians: f32) -> Self {
+        let (sin, cos) = radians.sin_cos();
+        Self::new(cos, sin, -sin, cos, 0.0, 0.0)
+    }
+
+    /// 先应用 `self`，再应用 `next`。
+    pub fn then(self, next: Self) -> Self {
+        Self::new(
+            next.m11 * self.m11 + next.m21 * self.m12,
+            next.m12 * self.m11 + next.m22 * self.m12,
+            next.m11 * self.m21 + next.m21 * self.m22,
+            next.m12 * self.m21 + next.m22 * self.m22,
+            next.m11 * self.dx + next.m21 * self.dy + next.dx,
+            next.m12 * self.dx + next.m22 * self.dy + next.dy,
+        )
+    }
+
+    pub fn transform_point(self, point: Point) -> Point {
+        Point::new(
+            self.m11 * point.x + self.m21 * point.y + self.dx,
+            self.m12 * point.x + self.m22 * point.y + self.dy,
+        )
+    }
+
+    pub fn transform_vector(self, vector: Point) -> Point {
+        Point::new(
+            self.m11 * vector.x + self.m21 * vector.y,
+            self.m12 * vector.x + self.m22 * vector.y,
+        )
+    }
+
+    pub fn transform_rect(self, rect: Rect) -> Rect {
+        let points = [
+            self.transform_point(Point::new(rect.left(), rect.top())),
+            self.transform_point(Point::new(rect.right(), rect.top())),
+            self.transform_point(Point::new(rect.right(), rect.bottom())),
+            self.transform_point(Point::new(rect.left(), rect.bottom())),
+        ];
+        let left = points.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let top = points.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+        let right = points.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+        let bottom = points.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+        Rect::new(left, top, right - left, bottom - top)
+    }
+
+    pub fn inverse(self) -> Option<Self> {
+        let determinant = self.m11 * self.m22 - self.m12 * self.m21;
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let inv = 1.0 / determinant;
+        let m11 = self.m22 * inv;
+        let m12 = -self.m12 * inv;
+        let m21 = -self.m21 * inv;
+        let m22 = self.m11 * inv;
+        Some(Self::new(
+            m11,
+            m12,
+            m21,
+            m22,
+            -(m11 * self.dx + m21 * self.dy),
+            -(m12 * self.dx + m22 * self.dy),
+        ))
+    }
+
+    pub fn is_identity(self) -> bool {
+        self == Self::IDENTITY
+    }
+}
+
+impl Default for Affine {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
 /// 矩形：左上角 origin + 尺寸。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Rect {
@@ -260,5 +378,30 @@ mod tests {
         assert!(pixel_aligned_stroke(Rect::new(0.0, 0.0, 0.5, 0.5), 1.0, 1.0).is_none());
         assert!(pixel_aligned_stroke(Rect::new(0.0, 0.0, 10.0, 10.0), 0.0, 1.0).is_none());
         assert!(pixel_aligned_stroke(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn 仿射变换可组合并求逆() {
+        let transform = Affine::translation(-10.0, -5.0)
+            .then(Affine::scale(2.0, 3.0))
+            .then(Affine::rotation(std::f32::consts::FRAC_PI_2))
+            .then(Affine::translation(10.0, 5.0));
+        let point = Point::new(14.0, 7.0);
+        let transformed = transform.transform_point(point);
+        close(transformed.x, 4.0);
+        close(transformed.y, 13.0);
+        let restored = transform.inverse().unwrap().transform_point(transformed);
+        close(restored.x, point.x);
+        close(restored.y, point.y);
+    }
+
+    #[test]
+    fn 仿射变换返回矩形包围盒() {
+        let bounds = Affine::rotation(std::f32::consts::FRAC_PI_2)
+            .transform_rect(Rect::new(0.0, 0.0, 20.0, 10.0));
+        close(bounds.left(), -10.0);
+        close(bounds.top(), 0.0);
+        close(bounds.size.width, 10.0);
+        close(bounds.size.height, 20.0);
     }
 }
