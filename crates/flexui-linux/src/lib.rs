@@ -12,6 +12,7 @@ mod dialog;
 mod ime;
 mod menu;
 mod window;
+mod xdnd;
 
 pub use canvas::CairoCanvas;
 pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_text};

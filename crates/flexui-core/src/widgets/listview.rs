@@ -3,8 +3,8 @@
 //! 行、选择与滚动状态均由本控件持有；分发器通过 Widget 的滚动能力转发滚轮，
 //! 点击选中经指针转发到 `on_event`，选择变化经 name 上报。
 
-use flexui_gfx::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, TextAlign};
+use flexui_gfx::{Color, Point, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::common_builders;
@@ -43,7 +43,12 @@ impl ListView {
 
     /// 若已知视口，滚动使第 i 行进入可见区。
     fn ensure_row_visible(&mut self, i: usize) {
-        let row = Rect::new(0.0, i as f32 * self.row_h, self.scroll.viewport().width, self.row_h);
+        let row = Rect::new(
+            0.0,
+            i as f32 * self.row_h,
+            self.scroll.viewport().width,
+            self.row_h,
+        );
         self.scroll.ensure_visible(row, 0.0);
     }
 
@@ -223,7 +228,12 @@ impl Widget for ListView {
         Some(self.scroll.offset())
     }
     fn scrollbar_grab(&self, pos: Point) -> Option<crate::scroll::ScrollGrab> {
-        crate::scroll::thumb_grab(&self.scroll, self.scrollbar_viewport(), &self.scrollbar, pos)
+        crate::scroll::thumb_grab(
+            &self.scroll,
+            self.scrollbar_viewport(),
+            &self.scrollbar,
+            pos,
+        )
     }
     fn scrollbar_drag(&mut self, pos: Point, grab: &crate::scroll::ScrollGrab) -> bool {
         let viewport = self.scrollbar_viewport();
@@ -280,21 +290,8 @@ mod tests {
         fn fill_rect(&mut self, _r: Rect, _c: Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: Color, _w: f32) {}
         fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_gfx::Corners, _c: Color) {}
-        fn stroke_round_rect(
-            &mut self,
-            _r: Rect,
-            _rad: flexui_gfx::Corners,
-            _c: Color,
-            _w: f32,
-        ) {
-        }
-        fn draw_text(
-            &mut self,
-            _t: &str,
-            _o: flexui_gfx::Point,
-            _f: &flexui_gfx::Font,
-            _c: Color,
-        ) {
+        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_gfx::Corners, _c: Color, _w: f32) {}
+        fn draw_text(&mut self, _t: &str, _o: flexui_gfx::Point, _f: &flexui_gfx::Font, _c: Color) {
         }
         fn measure_text(&self, t: &str, f: &flexui_gfx::Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)

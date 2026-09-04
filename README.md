@@ -5,20 +5,21 @@ Cross-platform desktop UI framework for Rust, with native windows, a custom-rend
 [简体中文](README_zh.md) | English
 
 > [!IMPORTANT]
-> FlexUI is in active early development (`0.0.x`). It is already suitable for experiments and internal tools, but APIs may change before the first stable release.
+> FlexUI is in active early development (`0.1.x`). It is already suitable for experiments and internal tools, but APIs may change before the first stable release.
 
 <p align="center">
   <img src="docs/gallery_1.png" alt="FlexUI Gallery using the default light theme" width="49%">
   <img src="docs/gallery_2.png" alt="FlexUI Gallery using the default dark theme" width="49%">
 </p>
 
-FlexUI keeps application code in Rust while using the operating system where it matters: `NSWindow`/`NSView` on macOS and Win32/GDI+ on Windows. Layout, controls, state handling, theming, and rendering share one platform-independent core.
+FlexUI keeps application code in Rust while using the operating system where it matters: AppKit/CoreGraphics on macOS, Win32/GDI+ on Windows, and X11/Cairo/Pango on Linux. Layout, controls, state handling, theming, and rendering share one platform-independent core.
 
 ## Highlights
 
 - **Two authoring styles**: compose interfaces with XML or build the same widget tree with Rust.
 - **Native desktop windows**: multi-window and modal workflows, system title bars, custom title bars, DPI handling, IME, clipboard, drag and drop, and native file dialogs.
 - **Practical layout system**: `VBox`, `HBox`, `Panel`, `ScrollView`, and `TabBox`, with fixed/content/fill sizing, flex growth, alignment, padding, margin, and absolute positioning.
+- **Visual transforms and shaped hits**: translate, scale, and rotate widgets or entire subtrees while pointer input, scrolling, menus, and IME anchors follow the visual result; rectangular, rounded, and elliptical hit regions are supported.
 - **Built-in controls**: labels, images, buttons, edits, checkboxes, switches, radios, combo boxes, sliders, progress bars, list views, separators, scrolling, and menus.
 - **State-aware styling**: normal, hot, pushed, disabled, focused, selected, and combined states. Colors, borders, images, gradients, shadows, opacity, and text alignment can all vary by state.
 - **Theme system**: light and dark defaults, semantic color tokens, component recipes, variants, classes, and runtime theme switching.
@@ -70,8 +71,8 @@ The example recreates a third-party product interface strictly as a framework re
 ### Prerequisites
 
 - A current stable Rust toolchain
-- macOS or Windows
-- Platform build tools: Xcode Command Line Tools on macOS, or a Rust-compatible Windows C/C++ toolchain on Windows
+- macOS, Windows, or Linux with X11
+- Platform build tools: Xcode Command Line Tools on macOS, a Rust-compatible Windows C/C++ toolchain on Windows, or Cairo/Pango/X11 development packages on Linux
 
 Clone the repository and run the gallery:
 
@@ -114,6 +115,8 @@ fn main() {
     Window::new(HelloWindow).center().run();
 }
 ```
+
+The same example is checked by the workspace and can be run with `cargo run -p flexui --example hello`.
 
 ### UI-Thread Dispatch and Window Lifecycle
 
@@ -173,15 +176,15 @@ State prefixes can be combined, for example `hot-bgcolor`, `focus-bordercolor`, 
 
 ## Platform Backends
 
-| Capability | macOS | Windows |
-| --- | --- | --- |
-| Native window | AppKit `NSWindow` + custom `NSView` | Win32 window |
-| Rendering | CoreGraphics-backed canvas | GDI+ |
-| Native menus | AppKit menu | Win32 menu |
-| Clipboard, IME, file dialogs | Supported | Supported |
-| Custom/system title bars | Supported | Supported |
-
-Linux is not currently supported.
+| Capability | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Native window | AppKit `NSWindow` + custom `NSView` | Win32 window | X11 (`x11rb`) |
+| Rendering | CoreGraphics-backed canvas | GDI+ | Cairo + Pango |
+| Native menus | AppKit menu | Win32 menu | X11 override-redirect menu |
+| Clipboard, IME, file dialogs | Supported | Supported | Supported |
+| Custom/system title bars | Supported | Supported | Supported |
+| File drag and drop | Supported | Supported | Supported (Xdnd/XWayland) |
+| System tray example | Supported | Supported | Supported (StatusNotifierItem) |
 
 ## Workspace Layout
 
@@ -190,7 +193,7 @@ Linux is not currently supported.
 | `flexui` | Public facade and platform selection |
 | `flexui-core` | Widget tree, layout, events, styles, themes, animation |
 | `flexui-xml` | XML parsing, includes, bindings, and window documents |
-| `flexui-macos` / `flexui-windows` | Native windows, input, and rendering backends |
+| `flexui-macos` / `flexui-windows` / `flexui-linux` | Native windows, input, and rendering backends |
 | `flexui-gfx` | Canvas contracts and geometry primitives |
 | `flexui-resource` / `flexui-svg` | Resource providers and SVG rasterization |
 | `flexui-i18n` | Localization catalogs, fallback, and plurals |
@@ -211,7 +214,12 @@ Linux is not currently supported.
 ```bash
 cargo test --workspace --all-targets
 cargo check --workspace --all-targets
+./scripts/gui-smoke.sh
 ```
+
+The smoke script opens a real native window, posts a close request from a background thread, and
+checks the complete lifecycle callback order. On a headless Linux host it automatically uses
+`xvfb-run`; on Windows, run `powershell -ExecutionPolicy Bypass -File scripts/gui-smoke.ps1`.
 
 Build an ad-hoc signed macOS application bundle for the complex example:
 

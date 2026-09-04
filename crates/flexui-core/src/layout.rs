@@ -4,8 +4,8 @@
 //! - VBox/HBox：主轴顺序排列 + `flex_grow` 分配剩余空间，交叉轴拉伸。
 //! - 所有节点的 `rect` 最终是窗口逻辑坐标下的绝对矩形，供绘制与命中测试直接使用。
 
-use flexui_gfx::{Insets, Rect, Size};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Insets, Rect, Size};
 
 use crate::sizing::{Align, Justify, Sizing};
 use crate::widget::{Base, Widget};
@@ -320,13 +320,7 @@ mod tests {
     impl Canvas for FakeCanvas {
         fn fill_rect(&mut self, _r: Rect, _c: flexui_gfx::Color) {}
         fn stroke_rect(&mut self, _r: Rect, _c: flexui_gfx::Color, _w: f32) {}
-        fn fill_round_rect(
-            &mut self,
-            _r: Rect,
-            _rad: flexui_gfx::Corners,
-            _c: flexui_gfx::Color,
-        ) {
-        }
+        fn fill_round_rect(&mut self, _r: Rect, _rad: flexui_gfx::Corners, _c: flexui_gfx::Color) {}
         fn stroke_round_rect(
             &mut self,
             _r: Rect,
@@ -335,13 +329,7 @@ mod tests {
             _w: f32,
         ) {
         }
-        fn draw_text(
-            &mut self,
-            _t: &str,
-            _o: flexui_gfx::Point,
-            _f: &Font,
-            _c: flexui_gfx::Color,
-        ) {
+        fn draw_text(&mut self, _t: &str, _o: flexui_gfx::Point, _f: &Font, _c: flexui_gfx::Color) {
         }
         fn measure_text(&self, t: &str, f: &Font) -> Size {
             Size::new(t.chars().count() as f32 * f.size * 0.6, f.size * 1.2)

@@ -1,7 +1,11 @@
 [package]
 name = "flexui-linux"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "X11, Cairo, and Pango native backend for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 # Linux 后端：用系统图形接口，不打包渲染器。
 #   2D=Cairo、文字=Pango、窗口=X11(x11rb)、剪贴板=arboard、图片=image/flexui-svg。
@@ -15,6 +19,7 @@ flexui-core = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 flexui-svg = { workspace = true }
+url = { workspace = true }
 # ico 特性：解码示例的 app.ico 用于 _NET_WM_ICON（png/jpeg 由 workspace 提供）。
 image = { workspace = true, features = ["ico"] }
 cairo-rs = "0.20"

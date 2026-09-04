@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use flexui_gfx::{pixel_aligned_stroke, Color, Corners, Insets, Point, Rect, Size};
+use flexui_gfx::{pixel_aligned_stroke, Affine, Color, Corners, Insets, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, LayerHandle, TextBoundary, TextLayout};
 
 use core_foundation::attributed_string::CFMutableAttributedString;
@@ -31,12 +31,11 @@ use objc2::AllocAnyThread;
 use objc2_app_kit::{
     NSBezierPath, NSBitmapImageRep, NSColor, NSCompositingOperation, NSDeviceRGBColorSpace, NSFont,
     NSFontAttributeName, NSFontManager, NSFontTraitMask, NSForegroundColorAttributeName,
-    NSGradient, NSGraphicsContext, NSImage, NSImageInterpolation, NSImageResizingMode,
-    NSStringDrawing, NSUnderlineStyleAttributeName,
+    NSGradient, NSGraphicsContext, NSImage, NSImageInterpolation, NSStringDrawing,
+    NSUnderlineStyleAttributeName,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSData, NSDictionary, NSEdgeInsets, NSNumber, NSPoint, NSRect, NSSize,
-    NSString,
+    MainThreadMarker, NSData, NSDictionary, NSNumber, NSPoint, NSRect, NSSize, NSString,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -331,20 +330,76 @@ fn draw_nsimage(img: &NSImage, rect: Rect, fit: &ImageFit) {
     }
 }
 
-/// 使用 AppKit 原生 cap insets 一次绘制九宫格，避免九个切片分别插值时互相采样。
+/// 将一条轴拆为固定起始边、中间拉伸区、固定结束边。
+fn split_ninepatch_axis(total: f32, leading: f32, trailing: f32) -> [f32; 3] {
+    if !total.is_finite() || total <= 0.0 {
+        return [0.0; 3];
+    }
+    let leading = if leading.is_finite() {
+        leading.max(0.0)
+    } else {
+        0.0
+    };
+    let trailing = if trailing.is_finite() {
+        trailing.max(0.0)
+    } else {
+        0.0
+    };
+    let fixed = leading + trailing;
+    if fixed > total && fixed > 0.0 {
+        let scale = total / fixed;
+        [leading * scale, 0.0, trailing * scale]
+    } else {
+        [leading, total - fixed, trailing]
+    }
+}
+
+/// 生成九宫格的源、目标矩形。源图使用 AppKit 的左下原点，目标沿用 FlexUI 左上原点。
+fn ninepatch_cells(image_size: Size, rect: Rect, ins: Insets) -> [(Rect, Rect); 9] {
+    let sw = split_ninepatch_axis(image_size.width, ins.left, ins.right);
+    let sh = split_ninepatch_axis(image_size.height, ins.top, ins.bottom);
+    let dw = split_ninepatch_axis(rect.size.width, ins.left, ins.right);
+    let dh = split_ninepatch_axis(rect.size.height, ins.top, ins.bottom);
+
+    let sx = [0.0, sw[0], sw[0] + sw[1]];
+    // AppKit 的源矩形以左下为原点，所以源行按上、中、下反向定位。
+    let sy = [sh[2] + sh[1], sh[2], 0.0];
+    let dx = [rect.left(), rect.left() + dw[0], rect.right() - dw[2]];
+    let dy = [rect.top(), rect.top() + dh[0], rect.bottom() - dh[2]];
+
+    std::array::from_fn(|index| {
+        let row = index / 3;
+        let column = index % 3;
+        (
+            Rect::new(sx[column], sy[row], sw[column], sh[row]),
+            Rect::new(dx[column], dy[row], dw[column], dh[row]),
+        )
+    })
+}
+
+/// 显式绘制九个切片，避免 `NSImage.capInsets` 对 SVG 固定端帽和拉伸区产生色差。
 fn draw_ninepatch(img: &NSImage, rect: Rect, ins: Insets) {
-    let old_insets = img.capInsets();
-    let old_mode = img.resizingMode();
-    img.setCapInsets(NSEdgeInsets {
-        top: ins.top as f64,
-        left: ins.left as f64,
-        bottom: ins.bottom as f64,
-        right: ins.right as f64,
-    });
-    img.setResizingMode(NSImageResizingMode::Stretch);
-    img.drawInRect(to_nsrect(rect));
-    img.setCapInsets(old_insets);
-    img.setResizingMode(old_mode);
+    let size = img.size();
+    let image_size = Size::new(size.width as f32, size.height as f32);
+    for (source, target) in ninepatch_cells(image_size, rect, ins) {
+        if source.size.width <= 0.0
+            || source.size.height <= 0.0
+            || target.size.width <= 0.0
+            || target.size.height <= 0.0
+        {
+            continue;
+        }
+        unsafe {
+            img.drawInRect_fromRect_operation_fraction_respectFlipped_hints(
+                to_nsrect(target),
+                to_nsrect(source),
+                NSCompositingOperation::SourceOver,
+                1.0,
+                true,
+                None,
+            );
+        }
+    }
 }
 
 /// 构造四角独立圆角的矩形路径（用 arcTo 逐角连接）。
@@ -664,6 +719,23 @@ impl Canvas for CgCanvas {
         NSGraphicsContext::restoreGraphicsState_class();
     }
 
+    fn concat_transform(&mut self, transform: Affine) {
+        let Some(ns_context) = NSGraphicsContext::currentContext() else {
+            return;
+        };
+        let ns_cg = ns_context.CGContext();
+        let raw = Retained::as_ptr(&ns_cg).cast_mut().cast();
+        let cg = unsafe { CGContext::from_existing_context_ptr(raw) };
+        cg.concat_ctm(CGAffineTransform::new(
+            transform.m11 as f64,
+            transform.m12 as f64,
+            transform.m21 as f64,
+            transform.m22 as f64,
+            transform.dx as f64,
+            transform.dy as f64,
+        ));
+    }
+
     fn clip_rect(&mut self, rect: Rect) {
         // 追加矩形裁剪区（配合 save/restore 使用）。
         NSBezierPath::bezierPathWithRect(to_nsrect(rect)).addClip();
@@ -714,7 +786,12 @@ impl Canvas for CgCanvas {
         let Some(NsImageLayer(image)) = layer.data::<NsImageLayer>() else {
             return;
         };
-        let dst = to_nsrect(Rect::new(origin.x, origin.y, layer.size.width, layer.size.height));
+        let dst = to_nsrect(Rect::new(
+            origin.x,
+            origin.y,
+            layer.size.width,
+            layer.size.height,
+        ));
         // 缓存层按左上原点生成；主 NSView 同样是 flipped 坐标系，要求 AppKit
         // 按目标上下文方向回贴，否则静态多行文本会被上下翻转。
         unsafe {
@@ -757,6 +834,82 @@ mod text_tests {
         assert_eq!(width, 1.5);
         assert_eq!(path.left() - width / 2.0, 10.0);
         assert_eq!(path.right() + width / 2.0, 26.0);
+    }
+
+    #[test]
+    fn 九宫格显式映射源图与目标九个切片() {
+        let cells = ninepatch_cells(
+            Size::new(24.0, 44.0),
+            Rect::new(100.0, 200.0, 256.0, 44.0),
+            Insets::all(6.0),
+        );
+
+        assert_eq!(cells[0].0, Rect::new(0.0, 38.0, 6.0, 6.0));
+        assert_eq!(cells[0].1, Rect::new(100.0, 200.0, 6.0, 6.0));
+        assert_eq!(cells[4].0, Rect::new(6.0, 6.0, 12.0, 32.0));
+        assert_eq!(cells[4].1, Rect::new(106.0, 206.0, 244.0, 32.0));
+        assert_eq!(cells[8].0, Rect::new(18.0, 0.0, 6.0, 6.0));
+        assert_eq!(cells[8].1, Rect::new(350.0, 238.0, 6.0, 6.0));
+    }
+
+    #[test]
+    fn retina九宫格固定端帽与拉伸区颜色一致() {
+        // 每一行使用不同颜色，既验证左右切片无色差，也验证显式源矩形没有上下翻转。
+        let mut source_pixels = Vec::with_capacity(48 * 88 * 4);
+        for row in 0..88 {
+            for _ in 0..48 {
+                source_pixels.extend_from_slice(&[(row * 2) as u8, 0x28, 0x57, 0xff]);
+            }
+        }
+        let source =
+            unsafe { nsimage_from_rgba(&source_pixels, 48, 88, Size::new(24.0, 44.0)).unwrap() };
+        let render = |fit| {
+            let target = unsafe {
+                NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                    NSBitmapImageRep::alloc(),
+                    std::ptr::null_mut(),
+                    512,
+                    88,
+                    8,
+                    4,
+                    true,
+                    false,
+                    NSDeviceRGBColorSpace,
+                    512 * 4,
+                    32,
+                )
+                .unwrap()
+            };
+            target.setSize(NSSize::new(256.0, 44.0));
+            let bitmap_context =
+                NSGraphicsContext::graphicsContextWithBitmapImageRep(&target).unwrap();
+            let cg = bitmap_context.CGContext();
+            let context = NSGraphicsContext::graphicsContextWithCGContext_flipped(&cg, true);
+            let previous = NSGraphicsContext::currentContext();
+            NSGraphicsContext::setCurrentContext(Some(&context));
+            context.setImageInterpolation(NSImageInterpolation::High);
+            draw_nsimage(&source, Rect::new(0.0, 0.0, 256.0, 44.0), &fit);
+            context.flushGraphics();
+            NSGraphicsContext::setCurrentContext(previous.as_deref());
+            target
+        };
+
+        let stretched = render(ImageFit::Stretch);
+        let ninepatch = render(ImageFit::NinePatch(Insets::all(6.0)));
+        let stretched_bytes =
+            unsafe { std::slice::from_raw_parts(stretched.bitmapData(), 512 * 88 * 4) };
+        let ninepatch_bytes =
+            unsafe { std::slice::from_raw_parts(ninepatch.bitmapData(), 512 * 88 * 4) };
+        let pixel = |bytes: &[u8], x: usize, y: usize| -> [u8; 4] {
+            let offset = (y * 512 + x) * 4;
+            bytes[offset..offset + 4].try_into().unwrap()
+        };
+        for y in [4, 20, 44, 68, 84] {
+            let center = pixel(ninepatch_bytes, 256, y);
+            assert_eq!(pixel(ninepatch_bytes, 6, y), center);
+            assert_eq!(pixel(ninepatch_bytes, 506, y), center);
+            assert_eq!(pixel(stretched_bytes, 256, y), center);
+        }
     }
 
     #[test]

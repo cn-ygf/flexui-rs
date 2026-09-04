@@ -1,4 +1,8 @@
 [package]
 name = "flexui-gfx"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "Canvas contracts, geometry, text layout, and image primitives for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true

@@ -1,7 +1,7 @@
 //! HBox：横向弹性容器（主轴横向 Flex + flex_grow，交叉轴拉伸）。
 
-use flexui_gfx::{Rect, Size};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Rect, Size};
 
 use crate::common_builders;
 use crate::layout::{self, Axis};

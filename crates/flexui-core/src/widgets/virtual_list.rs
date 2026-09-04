@@ -8,8 +8,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use flexui_gfx::{Color, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, TextAlign, TextLayout};
+use flexui_gfx::{Color, Point, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::common_builders;
@@ -1165,7 +1165,10 @@ mod tests {
     }
 
     fn row_center(row: usize) -> Point {
-        Point::new(40.0, DEFAULT_HEADER_HEIGHT + row as f32 * DEFAULT_ROW_HEIGHT + 18.0)
+        Point::new(
+            40.0,
+            DEFAULT_HEADER_HEIGHT + row as f32 * DEFAULT_ROW_HEIGHT + 18.0,
+        )
     }
 
     fn click(list: &mut VirtualList, row: usize, mods: crate::event::Mods) {

@@ -8,10 +8,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use cairo::{Context, Filter, Format, ImageSurface, LinearGradient, SurfacePattern};
+use cairo::{Context, Filter, Format, ImageSurface, LinearGradient, Matrix, SurfacePattern};
 use flexui_gfx::{
-    Canvas, Color, Corners, Font, ImageFit, ImageSource, Insets, LayerHandle, Point, Rect, Size,
-    TextBoundary, TextLayout,
+    Affine, Canvas, Color, Corners, Font, ImageFit, ImageSource, Insets, LayerHandle, Point, Rect,
+    Size, TextBoundary, TextLayout,
 };
 
 /// 解码后位图的缓存键。
@@ -53,7 +53,11 @@ impl CairoCanvas {
     }
 
     /// 用共享图片缓存建画布（窗口每帧复用同一份缓存）。
-    pub(crate) fn with_images(surface: &ImageSurface, scale: f32, images: SharedImageCache) -> Self {
+    pub(crate) fn with_images(
+        surface: &ImageSurface,
+        scale: f32,
+        images: SharedImageCache,
+    ) -> Self {
         let cr = Context::new(surface).expect("cairo context");
         let s = scale.max(0.01) as f64;
         cr.scale(s, s);
@@ -188,7 +192,8 @@ impl CairoCanvas {
         );
         self.cr.clip();
         self.cr.translate(dst.left() as f64, dst.top() as f64);
-        self.cr.scale(dst.size.width as f64 / spw, dst.size.height as f64 / sph);
+        self.cr
+            .scale(dst.size.width as f64 / spw, dst.size.height as f64 / sph);
         if let Some(c) = tint {
             self.cr
                 .set_source_rgba(c.r as f64, c.g as f64, c.b as f64, c.a as f64);
@@ -243,12 +248,7 @@ impl CairoCanvas {
         let smid_w = (sw - sl - sr).max(0.0);
         let smid_h = (sh - st - sb).max(0.0);
         // 目标三段（逻辑点）：角保持逻辑尺寸(ins)，中间拉伸。
-        let (dl, dt, dr, db) = (
-            ins.left,
-            ins.top,
-            ins.right,
-            ins.bottom,
-        );
+        let (dl, dt, dr, db) = (ins.left, ins.top, ins.right, ins.bottom);
         let dmid_w = (rect.size.width - dl - dr).max(0.0);
         let dmid_h = (rect.size.height - dt - db).max(0.0);
         let x0 = rect.left();
@@ -293,7 +293,12 @@ fn surface_from_straight_rgba(rgba: &[u8], w: u32, h: u32) -> Option<ImageSurfac
     let mut buf = vec![0u8; stride * h as usize];
     for i in 0..(w * h) as usize {
         let o = i * 4;
-        let (r, g, b, a) = (rgba[o] as u16, rgba[o + 1] as u16, rgba[o + 2] as u16, rgba[o + 3]);
+        let (r, g, b, a) = (
+            rgba[o] as u16,
+            rgba[o + 1] as u16,
+            rgba[o + 2] as u16,
+            rgba[o + 3],
+        );
         let a16 = a as u16;
         buf[o] = (b * a16 / 255) as u8;
         buf[o + 1] = (g * a16 / 255) as u8;
@@ -396,7 +401,13 @@ impl Canvas for CairoCanvas {
             )
         };
         let grad = LinearGradient::new(x0, y0, x1, y1);
-        grad.add_color_stop_rgba(0.0, from.r as f64, from.g as f64, from.b as f64, from.a as f64);
+        grad.add_color_stop_rgba(
+            0.0,
+            from.r as f64,
+            from.g as f64,
+            from.b as f64,
+            from.a as f64,
+        );
         grad.add_color_stop_rgba(1.0, to.r as f64, to.g as f64, to.b as f64, to.a as f64);
         self.round_rect_path(rect, radius);
         let _ = self.cr.set_source(&grad);
@@ -465,13 +476,7 @@ impl Canvas for CairoCanvas {
         self.draw_text(layout.text(), origin, layout.font(), color);
     }
 
-    fn draw_image(
-        &mut self,
-        source: &ImageSource,
-        rect: Rect,
-        tint: Option<Color>,
-        fit: ImageFit,
-    ) {
+    fn draw_image(&mut self, source: &ImageSource, rect: Rect, tint: Option<Color>, fit: ImageFit) {
         if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
             return;
         }
@@ -504,7 +509,12 @@ impl Canvas for CairoCanvas {
             ImageFit::Center => {
                 let x = rect.left() + (rect.size.width - lw as f32) / 2.0;
                 let y = rect.top() + (rect.size.height - lh as f32) / 2.0;
-                self.blit_sub(&surface, (0.0, 0.0, sw, sh), Rect::new(x, y, lw as f32, lh as f32), tint);
+                self.blit_sub(
+                    &surface,
+                    (0.0, 0.0, sw, sh),
+                    Rect::new(x, y, lw as f32, lh as f32),
+                    tint,
+                );
             }
             ImageFit::Tile => {
                 self.tile(&surface, rect, density, tint);
@@ -522,6 +532,17 @@ impl Canvas for CairoCanvas {
 
     fn restore(&mut self) {
         let _ = self.cr.restore();
+    }
+
+    fn concat_transform(&mut self, transform: Affine) {
+        self.cr.transform(Matrix::new(
+            transform.m11 as f64,
+            transform.m12 as f64,
+            transform.m21 as f64,
+            transform.m22 as f64,
+            transform.dx as f64,
+            transform.dy as f64,
+        ));
     }
 
     fn clip_rect(&mut self, rect: Rect) {
@@ -597,11 +618,40 @@ mod tests {
         let surface = ImageSurface::create(Format::ARgb32, 20, 20).unwrap();
         {
             let mut cv = CairoCanvas::new(&surface, 1.0);
-            cv.fill_rect(Rect::new(0.0, 0.0, 20.0, 20.0), Color::rgba(1.0, 0.0, 0.0, 1.0));
+            cv.fill_rect(
+                Rect::new(0.0, 0.0, 20.0, 20.0),
+                Color::rgba(1.0, 0.0, 0.0, 1.0),
+            );
         }
         let mut surface = surface;
         let (r, g, b, a) = argb_at(&mut surface, 10, 10);
         assert!(r > 200 && g < 50 && b < 50 && a > 200, "{r},{g},{b},{a}");
+    }
+
+    #[test]
+    fn 仿射变换作用于后续绘制且可恢复() {
+        let surface = ImageSurface::create(Format::ARgb32, 30, 20).unwrap();
+        {
+            let mut cv = CairoCanvas::new(&surface, 1.0);
+            cv.save();
+            cv.concat_transform(Affine::translation(10.0, 5.0));
+            cv.fill_rect(
+                Rect::new(0.0, 0.0, 5.0, 5.0),
+                Color::rgba(1.0, 0.0, 0.0, 1.0),
+            );
+            cv.restore();
+            cv.fill_rect(
+                Rect::new(1.0, 10.0, 4.0, 4.0),
+                Color::rgba(0.0, 0.0, 1.0, 1.0),
+            );
+        }
+        let mut surface = surface;
+        let (r, _, _, a) = argb_at(&mut surface, 12, 7);
+        assert!(r > 200 && a > 200, "平移后的矩形应位于 (12,7)");
+        let (_, _, _, a) = argb_at(&mut surface, 2, 2);
+        assert_eq!(a, 0, "原始位置不应被绘制");
+        let (_, _, b, a) = argb_at(&mut surface, 2, 12);
+        assert!(b > 200 && a > 200, "restore 后应恢复原坐标系");
     }
 
     #[test]
@@ -626,10 +676,16 @@ mod tests {
         let surface = ImageSurface::create(Format::ARgb32, 30, 30).unwrap();
         {
             let mut cv = CairoCanvas::new(&surface, 1.0);
-            cv.fill_rect(Rect::new(0.0, 0.0, 30.0, 30.0), Color::rgba(0.0, 0.0, 1.0, 1.0));
+            cv.fill_rect(
+                Rect::new(0.0, 0.0, 30.0, 30.0),
+                Color::rgba(0.0, 0.0, 1.0, 1.0),
+            );
             let layer = cv
                 .capture_layer(Size::new(10.0, 10.0), &mut |lc| {
-                    lc.fill_rect(Rect::new(0.0, 0.0, 10.0, 10.0), Color::rgba(1.0, 0.0, 0.0, 1.0));
+                    lc.fill_rect(
+                        Rect::new(0.0, 0.0, 10.0, 10.0),
+                        Color::rgba(1.0, 0.0, 0.0, 1.0),
+                    );
                 })
                 .expect("capture_layer 应支持");
             cv.draw_layer(&layer, Point::new(0.0, 0.0));

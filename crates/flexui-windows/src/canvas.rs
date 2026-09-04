@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use flexui_gfx::{pixel_aligned_stroke, Color, Corners, Point, Rect, Size};
+use flexui_gfx::{pixel_aligned_stroke, Affine, Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, Font, ImageFit, ImageSource, TextLayout};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;
@@ -833,7 +833,8 @@ impl Canvas for GdiCanvas<'_> {
 
     fn draw_text_layout(&mut self, layout: &TextLayout, origin: Point, color: Color) {
         if unsafe {
-            crate::text::draw_text_layout(self.g, self.dpi_scale, self.clip, layout, origin, color)
+            // 最终图像由 GDI+ 绘制；让其原生裁剪跟随当前世界变换，避免软件裁剪仍停留在布局坐标。
+            crate::text::draw_text_layout(self.g, self.dpi_scale, None, layout, origin, color)
         } {
             if layout.font().underline {
                 self.fill_rect(
@@ -876,6 +877,26 @@ impl Canvas for GdiCanvas<'_> {
         if let Some(state) = self.saved.pop() {
             unsafe { gp::GdipRestoreGraphics(self.g, state) };
             self.clip = self.saved_clips.pop().flatten();
+        }
+    }
+
+    fn concat_transform(&mut self, transform: Affine) {
+        unsafe {
+            let mut matrix: *mut gp::Matrix = std::ptr::null_mut();
+            if gp::GdipCreateMatrix2(
+                transform.m11,
+                transform.m12,
+                transform.m21,
+                transform.m22,
+                transform.dx,
+                transform.dy,
+                &mut matrix,
+            ) == 0
+                && !matrix.is_null()
+            {
+                gp::GdipMultiplyWorldTransform(self.g, matrix, MATRIX_ORDER_PREPEND);
+                gp::GdipDeleteMatrix(matrix);
+            }
         }
     }
 

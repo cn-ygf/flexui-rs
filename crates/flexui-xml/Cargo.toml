@@ -1,7 +1,11 @@
 [package]
 name = "flexui-xml"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "XML layouts, includes, conditions, and bindings for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 flexui-core = { workspace = true }

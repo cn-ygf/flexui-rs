@@ -5,8 +5,8 @@
 //!
 //! 约定：`offset` 表示「内容相对视口向左上卷起的像素」——即绘制时子内容整体平移 `-offset`。
 
-use flexui_gfx::{Color, Corners, Point, Rect, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource};
+use flexui_gfx::{Color, Corners, Point, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::style::StyleSpec;
@@ -437,7 +437,7 @@ mod tests {
         // 目标行在 y=250..270，视口高 100 → 偏移应使其底部进入视口。
         assert!(s.ensure_visible(Rect::new(0.0, 250.0, 100.0, 20.0), 0.0));
         assert_eq!(s.offset().y, 170.0); // 270 - 100
-        // 已可见则不动。
+                                         // 已可见则不动。
         assert!(!s.ensure_visible(Rect::new(0.0, 250.0, 100.0, 20.0), 0.0));
         // 目标在上方 → 顶部对齐。
         assert!(s.ensure_visible(Rect::new(0.0, 40.0, 100.0, 20.0), 0.0));
@@ -454,8 +454,18 @@ mod tests {
         let grab = thumb_grab(&s, vp, &style, Point::new(95.0, 10.0)).expect("应命中滑块");
         assert_eq!(grab.axis, ScrollAxis::Vertical);
         // 抓取点距滑块顶 10；拖到 y=60 → 滑块顶=50，行程=100-33.33=66.67，t≈0.75。
-        assert!(apply_thumb_drag(&mut s, vp, &style, Point::new(95.0, 60.0), &grab));
-        assert!((s.offset().y - 150.0).abs() < 1.0, "offset={}", s.offset().y);
+        assert!(apply_thumb_drag(
+            &mut s,
+            vp,
+            &style,
+            Point::new(95.0, 60.0),
+            &grab
+        ));
+        assert!(
+            (s.offset().y - 150.0).abs() < 1.0,
+            "offset={}",
+            s.offset().y
+        );
         // 滑块外的点不命中。
         assert!(thumb_grab(&s, vp, &style, Point::new(10.0, 10.0)).is_none());
     }
@@ -482,8 +492,18 @@ mod tests {
         assert!(thumb_v(&s, vp, &style).is_none());
         // 落在滚动条区域判断随可见性变化。
         s.set_visibility(ScrollBarVisibility::Auto);
-        assert!(scrollbar_region_contains(&s, vp, &style, Point::new(95.0, 50.0)));
-        assert!(!scrollbar_region_contains(&s, vp, &style, Point::new(10.0, 50.0)));
+        assert!(scrollbar_region_contains(
+            &s,
+            vp,
+            &style,
+            Point::new(95.0, 50.0)
+        ));
+        assert!(!scrollbar_region_contains(
+            &s,
+            vp,
+            &style,
+            Point::new(10.0, 50.0)
+        ));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Radio：单选控件（同 group 互斥，可绑定 tab_index 驱动 TabBox 组成 tabbar）。
 
-use flexui_gfx::Size;
 use flexui_gfx::Canvas;
+use flexui_gfx::Size;
 
 use crate::common_builders;
 use crate::layout;

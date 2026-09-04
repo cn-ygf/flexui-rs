@@ -1,7 +1,7 @@
 //! Menu：浮层菜单项 `MenuItem` 与构建器 `build_menu`（供下拉/右键菜单复用）。
 
-use flexui_gfx::{Color, Corners, Insets, Point, Size};
 use flexui_gfx::{Canvas, ImageFit, ImageSource, TextAlign};
+use flexui_gfx::{Color, Corners, Insets, Point, Size};
 
 use crate::common_builders;
 use crate::layout;

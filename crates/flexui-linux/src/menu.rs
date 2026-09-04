@@ -141,8 +141,20 @@ fn popup_at(
             | EventMask::KEY_PRESS
             | EventMask::LEAVE_WINDOW,
     );
-    conn.create_window(COPY_DEPTH_FROM_PARENT, win, root, sx, sy, pw, ph, 0, WindowClass::INPUT_OUTPUT, 0, &aux)
-        .ok()?;
+    conn.create_window(
+        COPY_DEPTH_FROM_PARENT,
+        win,
+        root,
+        sx,
+        sy,
+        pw,
+        ph,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        0,
+        &aux,
+    )
+    .ok()?;
     conn.create_gc(gc, win, &CreateGCAux::new()).ok()?;
     let depth = conn.setup().roots.first()?.root_depth;
     conn.map_window(win).ok()?;
@@ -163,7 +175,9 @@ fn popup_at(
     let _ = conn.flush();
 
     let mut hovered: Option<usize> = None;
-    render_menu(conn, win, gc, depth, &rows, &font, width, height, scale, hovered);
+    render_menu(
+        conn, win, gc, depth, &rows, &font, width, height, scale, hovered,
+    );
 
     let result;
     loop {
@@ -173,18 +187,26 @@ fn popup_at(
         };
         match ev {
             XEvent::Expose(_) => {
-                render_menu(conn, win, gc, depth, &rows, &font, width, height, scale, hovered);
+                render_menu(
+                    conn, win, gc, depth, &rows, &font, width, height, scale, hovered,
+                );
             }
             XEvent::MotionNotify(e) => {
                 let idx = row_at(&rows, e.event_y as f32 / scale);
                 if idx != hovered {
                     hovered = idx;
-                    render_menu(conn, win, gc, depth, &rows, &font, width, height, scale, hovered);
+                    render_menu(
+                        conn, win, gc, depth, &rows, &font, width, height, scale, hovered,
+                    );
                 }
             }
             XEvent::ButtonRelease(e) => {
                 // 落在弹窗外 → 取消。
-                if e.event_x < 0 || e.event_y < 0 || e.event_x as u16 >= pw || e.event_y as u16 >= ph {
+                if e.event_x < 0
+                    || e.event_y < 0
+                    || e.event_x as u16 >= pw
+                    || e.event_y as u16 >= ph
+                {
                     result = None;
                     break;
                 }
@@ -224,11 +246,15 @@ fn popup_at(
                     }
                     111 => {
                         hovered = step(&rows, hovered, -1);
-                        render_menu(conn, win, gc, depth, &rows, &font, width, height, scale, hovered);
+                        render_menu(
+                            conn, win, gc, depth, &rows, &font, width, height, scale, hovered,
+                        );
                     }
                     116 => {
                         hovered = step(&rows, hovered, 1);
-                        render_menu(conn, win, gc, depth, &rows, &font, width, height, scale, hovered);
+                        render_menu(
+                            conn, win, gc, depth, &rows, &font, width, height, scale, hovered,
+                        );
                     }
                     _ => {}
                 }
@@ -291,10 +317,15 @@ fn row_top(rows: &[Row], idx: usize, _scale: f32) -> f32 {
 /// 键盘上下移动到下一个可命中项。
 fn step(rows: &[Row], cur: Option<usize>, dir: i32) -> Option<usize> {
     let n = rows.len() as i32;
-    let mut i = cur.map(|c| c as i32).unwrap_or(if dir > 0 { -1 } else { n });
+    let mut i = cur
+        .map(|c| c as i32)
+        .unwrap_or(if dir > 0 { -1 } else { n });
     for _ in 0..n {
         i = (i + dir).rem_euclid(n);
-        if matches!(rows[i as usize], Row::Item { enabled: true, .. } | Row::Sub { enabled: true, .. }) {
+        if matches!(
+            rows[i as usize],
+            Row::Item { enabled: true, .. } | Row::Sub { enabled: true, .. }
+        ) {
             return Some(i as usize);
         }
     }
@@ -327,20 +358,46 @@ fn render_menu(
         for (i, r) in rows.iter().enumerate() {
             match r {
                 Row::Sep => {
-                    cv.fill_rect(Rect::new(PAD_X, y + SEP_H / 2.0, width - PAD_X * 2.0, 1.0), BORDER);
+                    cv.fill_rect(
+                        Rect::new(PAD_X, y + SEP_H / 2.0, width - PAD_X * 2.0, 1.0),
+                        BORDER,
+                    );
                     y += SEP_H;
                 }
-                Row::Item { text, shortcut, enabled, checked, .. } => {
+                Row::Item {
+                    text,
+                    shortcut,
+                    enabled,
+                    checked,
+                    ..
+                } => {
                     let hot = hovered == Some(i);
                     if hot {
                         cv.fill_rect(Rect::new(1.0, y, width - 2.0, ITEM_H), HOVER);
                     }
-                    let col = if hot { HOVER_TEXT } else if *enabled { TEXT } else { TEXT_DIM };
+                    let col = if hot {
+                        HOVER_TEXT
+                    } else if *enabled {
+                        TEXT
+                    } else {
+                        TEXT_DIM
+                    };
                     let tr = Rect::new(PAD_X, y, width - PAD_X * 2.0, ITEM_H);
-                    let label = if *checked { format!("✓ {text}") } else { text.clone() };
+                    let label = if *checked {
+                        format!("✓ {text}")
+                    } else {
+                        text.clone()
+                    };
                     draw_line(&mut cv, &label, tr, font, col, TextAlign::Left);
                     if let Some(sc) = shortcut {
-                        draw_line(&mut cv, sc, tr, font, if hot { HOVER_TEXT } else { TEXT_DIM }, TextAlign::Right);
+                        draw_line(
+                            &mut cv,
+                            sc,
+                            tr,
+                            font,
+                            if hot { HOVER_TEXT } else { TEXT_DIM },
+                            TextAlign::Right,
+                        );
                     }
                     y += ITEM_H;
                 }
@@ -349,7 +406,13 @@ fn render_menu(
                     if hot {
                         cv.fill_rect(Rect::new(1.0, y, width - 2.0, ITEM_H), HOVER);
                     }
-                    let col = if hot { HOVER_TEXT } else if *enabled { TEXT } else { TEXT_DIM };
+                    let col = if hot {
+                        HOVER_TEXT
+                    } else if *enabled {
+                        TEXT
+                    } else {
+                        TEXT_DIM
+                    };
                     let tr = Rect::new(PAD_X, y, width - PAD_X * 2.0, ITEM_H);
                     draw_line(&mut cv, text, tr, font, col, TextAlign::Left);
                     draw_line(&mut cv, "▶", tr, font, col, TextAlign::Right);
@@ -383,7 +446,14 @@ fn render_menu(
 }
 
 /// 在 rect 内按对齐画一行文字（垂直居中）。
-fn draw_line(cv: &mut CairoCanvas, text: &str, rect: Rect, font: &Font, color: Color, align: TextAlign) {
+fn draw_line(
+    cv: &mut CairoCanvas,
+    text: &str,
+    rect: Rect,
+    font: &Font,
+    color: Color,
+    align: TextAlign,
+) {
     let sz = cv.measure_text(text, font);
     let x = match align {
         TextAlign::Left => rect.left(),

@@ -53,8 +53,8 @@ pub use virtual_list::{
     VirtualListSourceRef, VirtualSelectionMode, VirtualSort, VirtualSortDirection,
 };
 
-use flexui_gfx::{Color, Corners, Rect};
 use flexui_gfx::{Canvas, TextAlign};
+use flexui_gfx::{Color, Corners, Rect};
 
 use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
@@ -230,6 +230,38 @@ macro_rules! common_builders {
             /// 命中策略（穿透/不穿透）。
             pub fn hit(mut self, h: $crate::widget::HitPolicy) -> Self {
                 self.base.hit = h;
+                self
+            }
+            /// 视觉平移控件及其子树，不改变布局占位。
+            pub fn translate(mut self, x: f32, y: f32) -> Self {
+                self.base.transform.translation = flexui_gfx::Point::new(x, y);
+                self
+            }
+            /// 等比缩放控件及其子树，不改变布局占位。
+            pub fn scale(mut self, value: f32) -> Self {
+                self.base.transform.scale_x = value;
+                self.base.transform.scale_y = value;
+                self
+            }
+            /// 分别设置水平和垂直缩放。
+            pub fn scale_xy(mut self, x: f32, y: f32) -> Self {
+                self.base.transform.scale_x = x;
+                self.base.transform.scale_y = y;
+                self
+            }
+            /// 设置顺时针旋转角度。
+            pub fn rotate(mut self, degrees: f32) -> Self {
+                self.base.transform.rotation_degrees = degrees;
+                self
+            }
+            /// 设置变换中心占控件宽高的比例。
+            pub fn transform_origin(mut self, x: f32, y: f32) -> Self {
+                self.base.transform.origin = flexui_gfx::Point::new(x, y);
+                self
+            }
+            /// 设置控件自身的指针命中形状。
+            pub fn hit_shape(mut self, shape: $crate::transform::HitShape) -> Self {
+                self.base.hit_shape = shape;
                 self
             }
             /// 悬停提示文本（Tooltip）。

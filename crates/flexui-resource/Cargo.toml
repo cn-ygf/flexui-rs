@@ -1,7 +1,11 @@
 [package]
 name = "flexui-resource"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
+description = "Directory, ZIP, and embedded resource providers for FlexUI"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 # 只保留纯 Rust 的压缩(deflate/flate2)与 AES，去掉 bzip2/zstd/lzma 等 C 依赖以便交叉编译。

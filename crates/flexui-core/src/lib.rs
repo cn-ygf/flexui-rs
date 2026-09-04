@@ -16,6 +16,7 @@ pub mod scroll;
 pub mod sizing;
 pub mod style;
 pub mod theme;
+pub mod transform;
 pub mod widget;
 pub mod widgets;
 pub mod window;
@@ -24,7 +25,8 @@ pub mod window;
 pub use anim::{AnimProp, Easing};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use dispatch::{
-    hit_test, point_wants_text_cursor, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
+    hit_test, point_wants_text_cursor, widget_rect_to_window, widget_transform_to_window,
+    Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
 };
 pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
@@ -48,6 +50,7 @@ pub use theme::{
     apply_theme, refresh_theme, Theme, ThemeColorBinding, ThemeColorProperty, ThemeMode,
     ThemePalette, WidgetKind,
 };
+pub use transform::{HitShape, WidgetTransform};
 pub use widget::{
     find_by_id, find_by_name, find_mut_by_id, find_mut_by_name, visit_all_mut, Base, Clickable,
     Container, HitPolicy, Node, TextControl, TextInputState, Widget, WidgetId, WidgetProperty,
@@ -66,8 +69,8 @@ pub use window::{
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。
-pub use flexui_gfx::{Color, Corners, Insets, Point, Rect, Size};
 pub use flexui_gfx::{image_density_from_path, Canvas, Font, ImageFit, ImageSource, TextAlign};
+pub use flexui_gfx::{Affine, Color, Corners, Insets, Point, Rect, Size};
 pub use flexui_i18n::{
     I18nError, LocalizationValue, LocalizedStringKey, LocalizedStringResource, Localizer,
 };

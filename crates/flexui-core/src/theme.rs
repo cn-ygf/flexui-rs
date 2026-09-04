@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use flexui_gfx::{Color, Corners};
 use flexui_gfx::TextAlign;
+use flexui_gfx::{Color, Corners};
 
 use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
 use crate::widget::Widget;

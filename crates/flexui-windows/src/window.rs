@@ -11,6 +11,7 @@ use flexui_core::{
     apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
     Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
     WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
+    widget_rect_to_window,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -42,24 +43,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::{GdiCanvas, ImageCache};
 use crate::gdiplus::{Gdiplus, OffscreenBitmap, UNIT_PIXEL};
-
-fn open_overlay_request(disp: &mut Dispatcher, request: flexui_core::OverlayRequest) {
-    if let Some(entries) = request.entries {
-        disp.open_styled_menu_entries(
-            request.anchor,
-            entries,
-            request.style.unwrap_or_default(),
-            request.selected_name,
-        );
-    } else {
-        disp.open_styled_menu(
-            request.anchor,
-            request.items,
-            request.style,
-            request.selected_name,
-        );
-    }
-}
 
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
@@ -481,7 +464,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         let nw = ctx.take_new_windows();
         st.disp.invalidate(ctx.take_invalidation());
         for r in overlays {
-            open_overlay_request(&mut st.disp, r);
+            st.disp.open_overlay_request(r);
         }
         for a in anims {
             st.disp.animate(
@@ -614,7 +597,7 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     // 委托里请求的上下文菜单 / 动画 → 交分发器。
     let opened = !reqs.is_empty();
     for r in reqs {
-        open_overlay_request(&mut st.disp, r);
+        st.disp.open_overlay_request(r);
     }
     for a in anim_reqs {
         st.disp.animate(
@@ -670,7 +653,7 @@ unsafe fn fire_window_event(hwnd: HWND, st: &mut AppState, event: flexui_core::W
     st.disp.invalidate(ctx.take_invalidation());
     let opened = !overlays.is_empty();
     for request in overlays {
-        open_overlay_request(&mut st.disp, request);
+        st.disp.open_overlay_request(request);
     }
     for request in anims {
         st.disp.animate(
@@ -744,10 +727,13 @@ unsafe fn with_focus_widget(state: *mut AppState, f: impl FnOnce(&mut dyn Widget
     }
     let st = &mut *state;
     let id = st.disp.focus()?;
-    let w = flexui_core::find_mut_by_id(st.root.as_mut(), id)?;
-    let rect = w.base().rect;
-    f(w);
-    Some(rect)
+    let rect = {
+        let w = flexui_core::find_mut_by_id(st.root.as_mut(), id)?;
+        let rect = w.base().rect;
+        f(w);
+        rect
+    };
+    widget_rect_to_window(st.root.as_ref(), id, rect)
 }
 
 /// 设置焦点控件的 IME 组合串并失效其区域。
@@ -784,11 +770,14 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
     }
     let st = &mut *state;
     let Some(id) = st.disp.focus() else { return };
-    let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
-        return;
+    let (edit_rect, caret_rect) = {
+        let Some(w) = flexui_core::find_mut_by_id(st.root.as_mut(), id) else {
+            return;
+        };
+        (w.base().rect, w.text_input_rect().unwrap_or(w.base().rect))
     };
-    let edit_rect = w.base().rect;
-    let r = w.text_input_rect().unwrap_or(w.base().rect);
+    let edit_rect = widget_rect_to_window(st.root.as_ref(), id, edit_rect).unwrap_or(edit_rect);
+    let r = widget_rect_to_window(st.root.as_ref(), id, caret_rect).unwrap_or(caret_rect);
     let dpi = GetDpiForWindow(hwnd);
     let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
     let himc = ImmGetContext(hwnd);
@@ -916,12 +905,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let dpi = GetDpiForWindow(hwnd);
                 let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
                 let logical = Point::new(p.x as f32 / scale, p.y as f32 / scale);
-                let cursor = if flexui_core::point_wants_text_cursor((*state).root.as_ref(), logical)
-                {
-                    IDC_IBEAM
-                } else {
-                    IDC_ARROW
-                };
+                let cursor =
+                    if flexui_core::point_wants_text_cursor((*state).root.as_ref(), logical) {
+                        IDC_IBEAM
+                    } else {
+                        IDC_ARROW
+                    };
                 SetCursor(LoadCursorW(null_mut(), cursor));
                 return 1;
             }
@@ -1341,7 +1330,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     }
                     st.disp.invalidate(invalidation);
                     for r in ov_reqs {
-                        open_overlay_request(&mut st.disp, r);
+                        st.disp.open_overlay_request(r);
                     }
                     for a in anim_reqs {
                         st.disp.animate(
@@ -1428,7 +1417,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 st.disp.invalidate(ctx.take_invalidation());
                 if !allow {
                     for request in overlays {
-                        open_overlay_request(&mut st.disp, request);
+                        st.disp.open_overlay_request(request);
                     }
                     for request in anims {
                         st.disp.animate(
@@ -1675,7 +1664,10 @@ mod cursor_tests {
         edit.base_mut().rect = Rect::new(20.0, 20.0, 120.0, 36.0);
         root.base_mut().children.push(Box::new(edit));
 
-        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
+        assert!(flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(30.0, 30.0)
+        ));
         assert!(!flexui_core::point_wants_text_cursor(
             &root,
             Point::new(180.0, 80.0)
@@ -1701,6 +1693,9 @@ mod cursor_tests {
         overlay.base_mut().hit = HitPolicy::Transparent;
         root.base_mut().children.push(Box::new(overlay));
 
-        assert!(flexui_core::point_wants_text_cursor(&root, Point::new(30.0, 30.0)));
+        assert!(flexui_core::point_wants_text_cursor(
+            &root,
+            Point::new(30.0, 30.0)
+        ));
     }
 }

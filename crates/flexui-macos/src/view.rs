@@ -22,30 +22,12 @@ use objc2_foundation::{
 
 use flexui_core::event::keys;
 use flexui_core::{
-    apply_localizations, find_mut_by_id, layout_node, paint_tree_in_rect, Dispatcher, Event, Mods,
-    MouseButton, NewWindow, Node, Point, Rect, Size, Widget, WindowCtx, WindowDelegate,
-    WindowDragRegion, WindowHandle,
+    apply_localizations, find_by_id, find_mut_by_id, layout_node, paint_tree_in_rect,
+    widget_rect_to_window, Dispatcher, Event, Mods, MouseButton, NewWindow, Node, Point, Rect, Size,
+    Widget, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle,
 };
 
 use crate::canvas::{CgCanvas, ImageCache, SharedImageCache};
-
-fn open_overlay_request(disp: &mut Dispatcher, request: flexui_core::OverlayRequest) {
-    if let Some(entries) = request.entries {
-        disp.open_styled_menu_entries(
-            request.anchor,
-            entries,
-            request.style.unwrap_or_default(),
-            request.selected_name,
-        );
-    } else {
-        disp.open_styled_menu(
-            request.anchor,
-            request.items,
-            request.style,
-            request.selected_name,
-        );
-    }
-}
 
 /// 逻辑矩形 → NSRect（视图为 flipped，坐标一致）。
 fn to_nsrect(r: Rect) -> NSRect {
@@ -606,7 +588,7 @@ define_class!(
         // 组合窗口定位：返回排版后的真实插入点矩形（屏幕坐标）。
         #[unsafe(method(firstRectForCharacterRange:actualRange:))]
         fn first_rect(&self, _range: NSRange, _actual: NSRangePointer) -> NSRect {
-            let rect = self.with_focused_widget(|w| w.text_input_rect().unwrap_or(w.base().rect));
+            let rect = self.focused_input_rect();
             let Some(r) = rect else {
                 return NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
             };
@@ -779,7 +761,7 @@ impl FlexView {
         let opened = !overlays.is_empty();
         if !close_requested {
             for request in overlays {
-                open_overlay_request(disp, request);
+                disp.open_overlay_request(request);
             }
             for request in anims {
                 disp.animate(
@@ -878,7 +860,7 @@ impl FlexView {
         }
 
         for request in overlays {
-            open_overlay_request(disp, request);
+            disp.open_overlay_request(request);
         }
         for request in anims {
             disp.animate(
@@ -930,7 +912,7 @@ impl FlexView {
         disp.invalidate(ctx.take_invalidation());
         let close_requested = handle.take_close_request();
         for r in overlays {
-            open_overlay_request(disp, r);
+            disp.open_overlay_request(r);
         }
         for a in anims {
             disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -1108,7 +1090,7 @@ impl FlexView {
         disp.invalidate(invalidation);
         if !close_requested {
             for r in ov_reqs {
-                open_overlay_request(disp, r);
+                disp.open_overlay_request(r);
             }
             for a in anim_reqs {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -1254,7 +1236,7 @@ impl FlexView {
         disp.invalidate(invalidation);
         if !close_requested {
             for r in reqs {
-                open_overlay_request(disp, r);
+                disp.open_overlay_request(r);
             }
             for a in anim_reqs {
                 disp.animate(root.as_mut(), &a.name, a.prop, a.to, a.dur_secs, a.easing);
@@ -1303,6 +1285,15 @@ impl FlexView {
         let id = disp.focus()?;
         let w = find_mut_by_id(root.as_mut(), id)?;
         Some(f(w))
+    }
+
+    /// 返回经过祖先变换后的焦点输入矩形，供系统输入法定位候选窗。
+    fn focused_input_rect(&self) -> Option<Rect> {
+        let st = self.ivars().state.borrow();
+        let id = st.disp.focus()?;
+        let widget = find_by_id(st.root.as_ref(), id)?;
+        let rect = widget.text_input_rect().unwrap_or(widget.base().rect);
+        widget_rect_to_window(st.root.as_ref(), id, rect)
     }
 
     /// IME 直接修改控件状态时，同步延后光标闪烁。

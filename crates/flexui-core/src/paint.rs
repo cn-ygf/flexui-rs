@@ -4,19 +4,19 @@
 //! → 边框 → 子控件(裁剪)。控件本身只需实现 `paint_content`，即可自动获得
 //! 4×2 状态下的分状态样式渲染（对应需求 C3）。
 
-use flexui_gfx::{Corners, Rect};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Affine, Corners, Rect};
 
 use crate::widget::Widget;
 
 /// 递归绘制整棵控件树。
 pub fn paint_tree(node: &dyn Widget, cv: &mut dyn Canvas) {
-    paint_tree_impl(node, cv, None, false);
+    paint_tree_impl(node, cv, None, false, Affine::IDENTITY);
 }
 
 /// 只绘制与脏矩形相交的控件分支；画布仍应由后端裁剪到同一区域。
 pub fn paint_tree_in_rect(node: &dyn Widget, cv: &mut dyn Canvas, dirty: Rect) {
-    paint_tree_impl(node, cv, Some(dirty), false);
+    paint_tree_impl(node, cv, Some(dirty), false, Affine::IDENTITY);
 }
 
 fn subtree_focused(node: &dyn Widget) -> bool {
@@ -33,6 +33,7 @@ fn paint_tree_impl(
     cv: &mut dyn Canvas,
     dirty: Option<Rect>,
     inherited_focus: bool,
+    parent_transform: Affine,
 ) {
     let b = node.base();
     if !b.visible {
@@ -43,6 +44,8 @@ fn paint_tree_impl(
         crate::style::VisualState::with_selected(b.effective_base(), focus_active, b.selected);
     let style = b.style.resolve_over(&b.theme_style, state);
     let rect = b.rect;
+    let local_transform = b.transform.affine(rect);
+    let effective_transform = local_transform.then(parent_transform);
     if let Some(dirty) = dirty {
         let visual_rect = style.shadow.map_or(rect, |shadow| {
             union_rect(
@@ -55,7 +58,7 @@ fn paint_tree_impl(
                 ),
             )
         });
-        if !rects_intersect(visual_rect, dirty) {
+        if !rects_intersect(effective_transform.transform_rect(visual_rect), dirty) {
             return;
         }
     }
@@ -63,6 +66,12 @@ fn paint_tree_impl(
     let rounded = !is_zero_corners(radius);
     // 控件自身透明度：乘进本控件绘制用到的所有颜色的 alpha（不含子控件）。
     let op = style.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+
+    let transformed = !b.transform.is_identity();
+    if transformed {
+        cv.save();
+        cv.concat_transform(local_transform);
+    }
 
     // 0. 投影（在背景之下，按 dx/dy 偏移同形填充）。
     if let Some(sh) = style.shadow {
@@ -148,13 +157,22 @@ fn paint_tree_impl(
         cv.save();
         cv.clip_rect(node.children_viewport());
         for child in b.children.iter() {
-            paint_tree_impl(child.as_ref(), cv, dirty, focus_active && b.focus_within);
+            paint_tree_impl(
+                child.as_ref(),
+                cv,
+                dirty,
+                focus_active && b.focus_within,
+                effective_transform,
+            );
         }
         cv.restore();
     }
     // 7. 前景覆盖层（如滚动条）。
     node.paint_foreground(cv, &style);
     if rounded {
+        cv.restore();
+    }
+    if transformed {
         cv.restore();
     }
 }
@@ -250,8 +268,8 @@ mod tests {
     use crate::layout::layout_node;
     use crate::style::{BaseState, StyleSet, StyleSpec, VisualState};
     use crate::widgets::{Button, Panel, VBox};
-    use flexui_gfx::{Color, Rect, Size};
     use flexui_gfx::{Canvas, Font};
+    use flexui_gfx::{Color, Rect, Size};
 
     /// 记录绘制调用的假画布，用于断言绘制管线行为。
     #[derive(Default)]
@@ -260,6 +278,7 @@ mod tests {
         strokes: Vec<Color>,
         texts: Vec<String>,
         round_clips: Vec<(Rect, flexui_gfx::Corners)>,
+        transforms: Vec<Affine>,
     }
     impl Canvas for Recorder {
         fn fill_rect(&mut self, r: Rect, c: Color) {
@@ -271,13 +290,7 @@ mod tests {
         fn fill_round_rect(&mut self, r: Rect, _rad: flexui_gfx::Corners, c: Color) {
             self.fills.push((r, c));
         }
-        fn stroke_round_rect(
-            &mut self,
-            _r: Rect,
-            _rad: flexui_gfx::Corners,
-            c: Color,
-            _w: f32,
-        ) {
+        fn stroke_round_rect(&mut self, _r: Rect, _rad: flexui_gfx::Corners, c: Color, _w: f32) {
             self.strokes.push(c);
         }
         fn draw_text(&mut self, t: &str, _o: flexui_gfx::Point, _f: &Font, _c: Color) {
@@ -288,6 +301,9 @@ mod tests {
         }
         fn clip_round_rect(&mut self, rect: Rect, radius: flexui_gfx::Corners) {
             self.round_clips.push((rect, radius));
+        }
+        fn concat_transform(&mut self, transform: Affine) {
+            self.transforms.push(transform);
         }
     }
 
@@ -409,6 +425,21 @@ mod tests {
         paint_tree_in_rect(&root, &mut rec, Rect::new(45.0, 0.0, 5.0, 30.0));
 
         assert!(!rec.fills.is_empty(), "阴影与脏区相交时不能跳过控件");
+    }
+
+    #[test]
+    fn 变换参与绘制状态与脏区裁剪() {
+        let mut button = button_with_states().translate(100.0, 20.0);
+        button.base_mut().rect = Rect::new(0.0, 0.0, 100.0, 40.0);
+
+        let mut rec = Recorder::default();
+        paint_tree_in_rect(&button, &mut rec, Rect::new(100.0, 20.0, 100.0, 40.0));
+        assert_eq!(rec.texts, ["hi"]);
+        assert_eq!(rec.transforms.len(), 1);
+
+        let mut outside = Recorder::default();
+        paint_tree_in_rect(&button, &mut outside, Rect::new(0.0, 0.0, 90.0, 40.0));
+        assert!(outside.texts.is_empty(), "原布局位置不应误触发绘制");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Progress：进度条（按控件自身的归一化值 0~1 显示进度）。
 
-use flexui_gfx::{Color, Corners, Rect, Size};
 use flexui_gfx::Canvas;
+use flexui_gfx::{Color, Corners, Rect, Size};
 
 use crate::anim::AnimProp;
 use crate::common_builders;
