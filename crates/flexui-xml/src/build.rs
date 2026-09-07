@@ -115,8 +115,23 @@ pub fn load_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<Load
 }
 
 /// 动态从 XML 字符串构建一个布局片段（根为普通容器，非 `<Window>`）。供代码动态 build（W8）。
+///
+/// 图片按文件系统路径解析。若片段里的 `src` / `bgimage` 来自资源包，应改用
+/// [`build_fragment_str_res`]。
 pub fn build_fragment_str(xml: &str, ctx: &Context) -> Result<Node, LoadError> {
     Ok(load_str(xml, ctx)?.root)
+}
+
+/// 动态从 XML 字符串构建布局片段，图片走资源系统。
+///
+/// 与 [`build_fragment_str`] 的差别只在图片解析：`src` / `bgimage` / `fgimage`
+/// 经 `ResourceManager` 读取，可引用内嵌 zip 或目录里的资源。
+pub fn build_fragment_str_res(
+    xml: &str,
+    res: &ResourceManager,
+    ctx: &Context,
+) -> Result<Node, LoadError> {
+    Ok(load_root(xml, ctx, Some(res))?.root)
 }
 
 /// 动态从资源路径构建布局片段（W8）。

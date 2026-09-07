@@ -139,6 +139,19 @@ fn build_fragment_动态构建() {
     assert!(find_by_name(frag.as_ref(), "ok").is_some());
 }
 
+#[test]
+fn build_fragment_str_res_走资源系统() {
+    // 资源里没有这张图时不会失败，只是 ImageSource 回退成路径；此处只验证
+    // 带 ResourceManager 的入口能把片段建出来，与 build_fragment_str 并列可用。
+    let frag = build_fragment_str_res(
+        r#"<Image name="flag" src="flags/jp.png" fgfit="circle"/>"#,
+        &ResourceManager::new(),
+        &Context::new(),
+    )
+    .unwrap();
+    assert!(find_by_name(frag.as_ref(), "flag").is_some());
+}
+
 struct FakeCanvas;
 impl Canvas for FakeCanvas {
     fn fill_rect(&mut self, _r: Rect, _c: Color) {}
