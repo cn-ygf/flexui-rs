@@ -281,6 +281,11 @@ fn parse_window_config(
     if let Some(v) = el.attr("drag-region") {
         cfg.drag_region = parse_drag_region(v)?;
     }
+    if let Some(v) = el.attr("window-class") {
+        if !v.is_empty() {
+            cfg.class_name = v.to_owned();
+        }
+    }
     Ok(cfg)
 }
 

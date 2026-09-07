@@ -11,9 +11,11 @@ use flexui_core::{
     apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
     Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
     WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
-    widget_rect_to_window,
+    widget_rect_to_window, DEFAULT_WINDOW_CLASS,
 };
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows_sys::Win32::Foundation::{
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+};
 use windows_sys::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_ENABLED,
     DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -107,6 +109,8 @@ struct AppState {
     layout_dirty: bool,
     /// 模态子窗口的 owner；销毁时恢复 owner 的输入与激活状态。
     modal_owner: HWND,
+    /// 其它进程投递的激活消息；收到后显示并还原窗口。
+    activate_msg: u32,
 }
 
 /// 应用共享语言环境的最新修订，并返回是否发生变化。
@@ -143,6 +147,7 @@ impl WindowHandle for WinWindowHandle {
                 ShowWindow(self.hwnd, SW_SHOW);
             }
             SetForegroundWindow(self.hwnd);
+            BringWindowToTop(self.hwnd);
         }
     }
     fn hide(&mut self) {
@@ -187,6 +192,68 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// 其它进程用来激活本窗口的消息名，与窗口类名一一对应。
+fn activate_message_name(class_name: &str) -> String {
+    format!("FlexUi.Activate.{class_name}")
+}
+
+fn register_activate_message(class_name: &str) -> u32 {
+    let name = wide(&activate_message_name(class_name));
+    unsafe {
+        let message = RegisterWindowMessageW(name.as_ptr());
+        if message == 0 {
+            WM_APP + 201
+        } else {
+            message
+        }
+    }
+}
+
+unsafe fn register_window_class(class_name: &[u16]) -> bool {
+    let hinstance = GetModuleHandleW(null());
+    // 资源 ID 1 是 Windows 约定的主应用图标；未嵌入时 LoadIconW 返回空。
+    let app_icon = LoadIconW(hinstance, int_resource(1));
+    let wc = WNDCLASSW {
+        // 尺寸变化由 WM_SIZE 显式失效；HREDRAW/VREDRAW 会在还原时制造额外整窗重绘。
+        style: CS_DBLCLKS,
+        lpfnWndProc: Some(wndproc),
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        hInstance: hinstance,
+        hIcon: app_icon,
+        hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+        hbrBackground: null_mut(),
+        lpszMenuName: null(),
+        lpszClassName: class_name.as_ptr(),
+    };
+    if RegisterClassW(&wc) != 0 {
+        return true;
+    }
+    GetLastError() == ERROR_CLASS_ALREADY_EXISTS
+}
+
+/// 查找已运行的同名窗口并请它显示、还原、置前。
+pub fn activate_existing_window(class_name: &str) -> bool {
+    let class = if class_name.is_empty() {
+        DEFAULT_WINDOW_CLASS
+    } else {
+        class_name
+    };
+    let class_w = wide(class);
+    unsafe {
+        let hwnd = FindWindowW(class_w.as_ptr(), null());
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut process_id = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        if process_id != 0 {
+            AllowSetForegroundWindow(process_id);
+        }
+        PostMessageW(hwnd, register_activate_message(class), 0, 0) != 0
+    }
+}
+
 /// Win32 `MAKEINTRESOURCEW`：把 16 位资源 ID 编码进指针值，API 不会解引用它。
 #[allow(clippy::manual_dangling_ptr)]
 const fn int_resource(id: u16) -> *const u16 {
@@ -217,25 +284,6 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     unsafe {
         // 开启 Per-Monitor V2 DPI 感知（若宿主未嵌入清单，此调用作为运行期兜底）。
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
-        let hinstance = GetModuleHandleW(null());
-        let class_name = wide("FlexUiWindowClass");
-        // 资源 ID 1 是 Windows 约定的主应用图标；未嵌入时 LoadIconW 返回空。
-        let app_icon = LoadIconW(hinstance, int_resource(1));
-        let wc = WNDCLASSW {
-            // 尺寸变化由 WM_SIZE 显式失效；HREDRAW/VREDRAW 会在还原时制造额外整窗重绘。
-            style: CS_DBLCLKS,
-            lpfnWndProc: Some(wndproc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: hinstance,
-            hIcon: app_icon,
-            hCursor: LoadCursorW(null_mut(), IDC_ARROW),
-            hbrBackground: null_mut(),
-            lpszMenuName: null(),
-            lpszClassName: class_name.as_ptr(),
-        };
-        RegisterClassW(&wc);
 
         for spec in windows {
             create_window(spec, null_mut());
@@ -311,7 +359,17 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         locale_revision,
     } = spec;
     let hinstance = GetModuleHandleW(null());
-    let class_name = wide("FlexUiWindowClass");
+    let class_name = if config.class_name.is_empty() {
+        DEFAULT_WINDOW_CLASS
+    } else {
+        config.class_name.as_str()
+    };
+    let class_name_w = wide(class_name);
+    if !register_window_class(&class_name_w) {
+        eprintln!("[flexui] RegisterClassW 失败");
+        return null_mut();
+    }
+    let activate_msg = register_activate_message(class_name);
 
     let frameless = config.titlebar != TitlebarMode::System;
     // 逐像素 alpha 由 UpdateLayeredWindow 提交，此时系统不会给窗口套圆角与投影，
@@ -368,7 +426,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     }
     let hwnd = CreateWindowExW(
         ex_style,
-        class_name.as_ptr(),
+        class_name_w.as_ptr(),
         title.as_ptr(),
         style,
         CW_USEDEFAULT,
@@ -412,6 +470,7 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         layered_size: (0, 0),
         layout_dirty: true,
         modal_owner: if is_modal { owner } else { null_mut() },
+        activate_msg,
     }));
     // 32 位下 SetWindowLongPtrW 就是 SetWindowLongW，形参为 i32；64 位则为 isize。
     // 先转 isize 再按目标宽度收窄：指针宽度与 isize 一致，两种架构下都不丢位。
@@ -927,6 +986,14 @@ unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
 /// 窗口过程。
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
+    if !state.is_null() {
+        let activate = (*state).activate_msg;
+        if activate != 0 && msg == activate {
+            let mut handle = WinWindowHandle { hwnd };
+            handle.show();
+            return 0;
+        }
+    }
     match msg {
         // 交给默认过程维护激活状态；lParam=-1 仅禁止重绘不可见的非客户区，避免失焦白边。
         WM_NCACTIVATE if !state.is_null() && (*state).frameless => {

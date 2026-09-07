@@ -36,6 +36,9 @@ pub enum WindowDragRegion {
     Rect(Rect),
 }
 
+/// 未指定时使用的 Win32 窗口类名。
+pub const DEFAULT_WINDOW_CLASS: &str = "FlexUiWindowClass";
+
 /// 窗口配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -59,6 +62,8 @@ pub struct WindowConfig {
     pub transparent: bool,
     /// 无边框窗口内容区的可拖动范围。
     pub drag_region: WindowDragRegion,
+    /// Win32 窗口类名，供 `FindWindowW` 查找已运行实例。其它平台忽略。
+    pub class_name: String,
 }
 
 impl Default for WindowConfig {
@@ -74,6 +79,7 @@ impl Default for WindowConfig {
             system_shadow: true,
             transparent: false,
             drag_region: WindowDragRegion::PlatformDefault,
+            class_name: DEFAULT_WINDOW_CLASS.to_owned(),
         }
     }
 }
@@ -114,6 +120,11 @@ impl WindowConfig {
     }
     pub fn drag_area(mut self, rect: Rect) -> Self {
         self.drag_region = WindowDragRegion::Rect(rect);
+        self
+    }
+    /// 设置 Win32 窗口类名；单实例激活靠这个名字查找窗口。
+    pub fn class_name(mut self, name: impl Into<String>) -> Self {
+        self.class_name = name.into();
         self
     }
 }

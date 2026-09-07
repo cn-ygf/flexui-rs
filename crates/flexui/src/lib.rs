@@ -49,6 +49,12 @@ pub fn application_localizer() -> Option<Localizer> {
     application_localizer_slot().read().unwrap().clone()
 }
 
+/// 查找已运行的同名窗口并请它显示、还原、置前。找不到窗口时返回 false。
+#[cfg(target_os = "windows")]
+pub fn activate_existing_window(class_name: &str) -> bool {
+    flexui_windows::activate_existing_window(class_name)
+}
+
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
 #[cfg(target_os = "macos")]
 use flexui_macos::run_multi as backend_run_multi;
@@ -187,6 +193,12 @@ pub trait WindowImpl: 'static {
     fn config(&self) -> WindowConfig {
         WindowConfig::default()
     }
+    /// Win32 窗口类名；返回 Some 时覆盖 XML / `config()` 里的类名。
+    ///
+    /// 单实例激活靠这个名字 `FindWindowW`。默认沿用配置，不覆盖。
+    fn window_class(&self) -> Option<&str> {
+        None
+    }
     /// 界面来源（XML / 资源路径 / 控件树）。
     fn skin(&self) -> Skin;
 
@@ -298,13 +310,14 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
 ///
 /// 可用于多窗口：在任意窗口回调里用 `build_window` 构造规格后传给 `ctx.open_window`。
 pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
+    let class_override = imp.window_class().map(str::to_owned);
     let localizer = imp.localizer();
     let mut ctx = Context::new();
     if let Some(value) = localizer.clone() {
         ctx.set_localizer(value);
     }
     // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
-    let (config, mut root, bindings) = match imp.skin() {
+    let (mut config, mut root, bindings) = match imp.skin() {
         Skin::Xml(xml) => {
             let doc = load_window_str(&xml, &ctx)?;
             (
@@ -324,6 +337,9 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
         }
         Skin::Tree(node) => (imp.config(), node, Vec::new()),
     };
+    if let Some(class_name) = class_override {
+        config.class_name = class_name;
+    }
     if let Some(localizer) = localizer.as_ref() {
         apply_localizations(&mut root, localizer);
     }

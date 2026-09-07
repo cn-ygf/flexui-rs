@@ -20,7 +20,7 @@ pub use canvas::GdiCanvas;
 pub use clipboard::{get_text as clipboard_get_text, set_text as clipboard_set_text};
 pub use dialog::show_dialog;
 pub use gdiplus::{Gdiplus, OffscreenBitmap};
-pub use window::{run, run_multi};
+pub use window::{activate_existing_window, run, run_multi};
 
 use flexui_core::{layout_node, paint_tree, Rect, Widget};
 

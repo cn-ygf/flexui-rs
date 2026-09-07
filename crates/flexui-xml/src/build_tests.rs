@@ -57,6 +57,17 @@ fn window_根解析配置() {
     );
     // 内容根含具名控件
     assert!(find_by_name(doc.root.as_ref(), "hello").is_some());
+    assert_eq!(cfg.class_name, flexui_core::DEFAULT_WINDOW_CLASS);
+}
+
+#[test]
+fn window_根解析窗口类名() {
+    let xml = r#"<Window title="演示" window-class="RiverDesktopWindowClass"><Panel/></Window>"#;
+    let doc = load_window_str(xml, &Context::new()).unwrap();
+    assert_eq!(
+        doc.config.unwrap().class_name,
+        "RiverDesktopWindowClass"
+    );
 }
 
 #[test]
