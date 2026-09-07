@@ -1387,7 +1387,7 @@ fn parse_shadow(v: &str) -> Option<Shadow> {
     Some(Shadow { dx, dy, color })
 }
 
-/// 解析渲染方式：stretch/center/tile/ninepatch(l,t,r,b)。
+/// 解析渲染方式：stretch/center/tile/circle/ninepatch(l,t,r,b)。
 fn parse_fit(v: &str) -> Option<ImageFit> {
     let s = v.trim().to_lowercase();
     if s == "stretch" {
@@ -1396,6 +1396,8 @@ fn parse_fit(v: &str) -> Option<ImageFit> {
         Some(ImageFit::Center)
     } else if s == "tile" {
         Some(ImageFit::Tile)
+    } else if s == "circle" {
+        Some(ImageFit::Circle)
     } else if let Some(inner) = s.strip_prefix("ninepatch") {
         // ninepatch 或 ninepatch(l,t,r,b)
         let nums: Vec<f32> = inner

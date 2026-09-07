@@ -388,6 +388,25 @@ impl GdiCanvas<'_> {
                     }
                 }
             }
+            ImageFit::Circle => {
+                // 源图取居中正方形，避免非正方形素材被拉伸变形。
+                let side = iw.min(ih);
+                let (sx, sy) = ((iw - side) / 2.0, (ih - side) / 2.0);
+                // 目标取内切圆：直径为目标矩形短边，居中。
+                let diameter = dw.min(dh);
+                let (ox, oy) = (dx + (dw - diameter) / 2.0, dy + (dh - diameter) / 2.0);
+                // 本函数只持有 &self，用不了 save/clip_round_rect，直接操作 GDI+ 状态。
+                let mut state: u32 = 0;
+                gp::GdipSaveGraphics(self.g, &mut state);
+                let path = self.build_round_path(
+                    Rect::new(ox, oy, diameter, diameter),
+                    Corners::all(diameter / 2.0),
+                );
+                gp::GdipSetClipPath(self.g, path, COMBINE_INTERSECT);
+                gp::GdipDeletePath(path);
+                self.draw_piece(img, ox, oy, diameter, diameter, sx, sy, side, side, attr);
+                gp::GdipRestoreGraphics(self.g, state);
+            }
         }
         if !attr.is_null() {
             gp::GdipDisposeImageAttributes(attr);

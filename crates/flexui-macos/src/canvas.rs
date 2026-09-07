@@ -327,6 +327,27 @@ fn draw_nsimage(img: &NSImage, rect: Rect, fit: &ImageFit) {
         ImageFit::NinePatch(ins) => {
             draw_ninepatch(img, rect, *ins);
         }
+        ImageFit::Circle => {
+            // 目标取内切圆；图按短边缩放到刚好铺满该圆再居中，等价于源图居中裁方。
+            let diameter = rect.size.width.min(rect.size.height);
+            let circle = Rect::new(
+                rect.left() + (rect.size.width - diameter) / 2.0,
+                rect.top() + (rect.size.height - diameter) / 2.0,
+                diameter,
+                diameter,
+            );
+            let scale = diameter / iw.min(ih).max(1.0);
+            let (cw, ch) = (iw * scale, ih * scale);
+            NSGraphicsContext::saveGraphicsState_class();
+            round_rect_path(circle, Corners::all(diameter / 2.0)).addClip();
+            img.drawInRect(to_nsrect(Rect::new(
+                circle.left() + (diameter - cw) / 2.0,
+                circle.top() + (diameter - ch) / 2.0,
+                cw,
+                ch,
+            )));
+            NSGraphicsContext::restoreGraphicsState_class();
+        }
     }
 }
 

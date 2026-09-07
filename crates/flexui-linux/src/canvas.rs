@@ -522,6 +522,30 @@ impl Canvas for CairoCanvas {
             ImageFit::NinePatch(ins) => {
                 self.nine_patch(&surface, rect, density, ins, tint);
             }
+            ImageFit::Circle => {
+                // 源图取居中正方形，绘制到目标矩形的内切圆内。
+                let side = sw.min(sh);
+                let (sx0, sy0) = ((sw - side) / 2.0, (sh - side) / 2.0);
+                let diameter = rect.size.width.min(rect.size.height);
+                let ox = rect.left() + (rect.size.width - diameter) / 2.0;
+                let oy = rect.top() + (rect.size.height - diameter) / 2.0;
+                self.cr.save().ok();
+                self.cr.arc(
+                    (ox + diameter / 2.0) as f64,
+                    (oy + diameter / 2.0) as f64,
+                    (diameter / 2.0) as f64,
+                    0.0,
+                    std::f64::consts::TAU,
+                );
+                self.cr.clip();
+                self.blit_sub(
+                    &surface,
+                    (sx0, sy0, side, side),
+                    Rect::new(ox, oy, diameter, diameter),
+                    tint,
+                );
+                self.cr.restore().ok();
+            }
         }
         self.cr.restore().ok();
     }
