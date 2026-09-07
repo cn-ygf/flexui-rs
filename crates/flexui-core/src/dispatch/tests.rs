@@ -385,6 +385,29 @@ fn 非矩形命中排除透明角落且保留中心() {
 }
 
 #[test]
+fn caption_挡住下层且拖动视为空白() {
+    let under = Button::new("under").size(200.0, 100.0);
+    let under_id = under.base().id;
+    let child = Button::new("child").size(40.0, 20.0).pos(10.0, 10.0);
+    let child_id = child.base().id;
+    let caption = Panel::new()
+        .hit(crate::HitPolicy::Caption)
+        .push(child);
+    let caption_id = caption.base().id;
+    let mut root = Panel::new().push(under).push(caption);
+    layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 100.0), &FakeCanvas);
+
+    let empty = Point::new(100.0, 50.0);
+    assert_eq!(hit_test(&root, empty), Some(caption_id));
+    assert!(hit_test_drag(&root, empty).is_none());
+    assert_ne!(hit_test(&root, empty), Some(under_id));
+
+    let on_child = Point::new(20.0, 20.0);
+    assert_eq!(hit_test(&root, on_child), Some(child_id));
+    assert_eq!(hit_test_drag(&root, on_child), Some(child_id));
+}
+
+#[test]
 fn place_overlay_下方上翻夹取() {
     let win = Size::new(200.0, 100.0);
     // 下方够放：y=锚点底部；宽取 max(desired,min)。

@@ -89,6 +89,18 @@ fn window_拖动区域格式错误会报错() {
 }
 
 #[test]
+fn xml_mouse_caption_与drag别名() {
+    let caption = load_str(r#"<Panel mouse="caption"/>"#, &Context::new()).unwrap();
+    assert_eq!(caption.root.base().hit, flexui_core::HitPolicy::Caption);
+    let drag = load_str(r#"<Panel mouse="drag"/>"#, &Context::new()).unwrap();
+    assert_eq!(drag.root.base().hit, flexui_core::HitPolicy::Caption);
+    let solid = load_str(r#"<Panel mouse="solid"/>"#, &Context::new()).unwrap();
+    assert_eq!(solid.root.base().hit, flexui_core::HitPolicy::Solid);
+    let transparent = load_str(r#"<Panel mouse="transparent"/>"#, &Context::new()).unwrap();
+    assert_eq!(transparent.root.base().hit, flexui_core::HitPolicy::Transparent);
+}
+
+#[test]
 fn include_子xml展开() {
     let dir = std::env::temp_dir().join(format!("flexui_inc_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

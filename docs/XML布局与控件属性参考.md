@@ -117,7 +117,7 @@
 | 属性 | 取值 | 说明 |
 | --- | --- | --- |
 | `enabled` | 布尔 | 是否可用（false = disabled 状态） |
-| `mouse` | `solid`(默认) / `transparent` | 命中策略：`transparent` 时事件穿透到下层 |
+| `mouse` | `solid`(默认) / `transparent` / `caption`（别名 `drag`） | 命中策略：`transparent` 时事件穿透到下层；`caption` 挡住下层，空白处仍可拖动窗口 |
 | `multiline` | 布尔 | Edit 多行模式（Enter 换行） |
 | `value` | 0~1 | Progress/Slider 的归一化数值 |
 

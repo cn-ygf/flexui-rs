@@ -794,6 +794,8 @@ fn apply_attrs(
             "mouse" => {
                 node.base_mut().hit = if v.eq_ignore_ascii_case("transparent") {
                     HitPolicy::Transparent
+                } else if v.eq_ignore_ascii_case("caption") || v.eq_ignore_ascii_case("drag") {
+                    HitPolicy::Caption
                 } else {
                     HitPolicy::Solid
                 };

@@ -8,7 +8,7 @@ use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
+    apply_localizations, hit_test_drag, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
     Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
     WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
     widget_rect_to_window, DEFAULT_WINDOW_CLASS,
@@ -1595,7 +1595,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 WindowDragRegion::Disabled => false,
                 WindowDragRegion::Rect(rect) => rect.contains(lp),
             };
-            if in_drag_region && hit_test(st.root.as_ref(), lp).is_none() {
+            if in_drag_region && hit_test_drag(st.root.as_ref(), lp).is_none() {
                 HTCAPTION as isize
             } else {
                 HTCLIENT as isize

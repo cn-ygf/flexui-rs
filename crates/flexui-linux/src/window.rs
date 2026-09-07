@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use cairo::{Format, ImageSurface};
 use flexui_core::event::Mods;
 use flexui_core::{
-    find_mut_by_id, hit_test, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation,
+    find_mut_by_id, hit_test_drag, layout_node, paint_tree_in_rect, Dispatcher, Event, Invalidation,
     MouseButton, NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, Point, Rect, Size,
     TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
     WindowHandle, WindowPresentation,
@@ -839,7 +839,7 @@ fn is_window_drag(st: &WinState, pos: Point) -> bool {
     let WindowDragRegion::Rect(rect) = st.drag_region else {
         return false;
     };
-    rect.contains(pos) && !st.disp.has_overlays() && hit_test(st.root.as_ref(), pos).is_none()
+    rect.contains(pos) && !st.disp.has_overlays() && hit_test_drag(st.root.as_ref(), pos).is_none()
 }
 
 /// 交给 WM 做窗口移动（_NET_WM_MOVERESIZE，方向=MOVE）。

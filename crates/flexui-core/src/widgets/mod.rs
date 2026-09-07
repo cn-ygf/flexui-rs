@@ -227,7 +227,7 @@ macro_rules! common_builders {
                 }
                 self
             }
-            /// 命中策略（穿透/不穿透）。
+            /// 命中策略：不穿透、穿透，或标题栏空白（挡住下层、仍可拖窗口）。
             pub fn hit(mut self, h: $crate::widget::HitPolicy) -> Self {
                 self.base.hit = h;
                 self

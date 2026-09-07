@@ -249,7 +249,7 @@ define_class!(
                 let st = self.ivars().state.borrow();
                 !st.disp.has_overlays()
                     && matches!(st.drag_region, WindowDragRegion::Rect(rect) if rect.contains(pos))
-                    && flexui_core::hit_test(st.root.as_ref(), pos).is_none()
+                    && flexui_core::hit_test_drag(st.root.as_ref(), pos).is_none()
             };
             if should_drag {
                 if let Some(window) = self.window() {
