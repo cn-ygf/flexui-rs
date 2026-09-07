@@ -260,6 +260,9 @@ fn parse_window_config(
     if let Some(v) = el.attr("system-shadow") {
         cfg.system_shadow = parse_bool(v);
     }
+    if let Some(v) = el.attr("transparent") {
+        cfg.transparent = parse_bool(v);
+    }
     if let Some(v) = el.attr("drag-region") {
         cfg.drag_region = parse_drag_region(v)?;
     }

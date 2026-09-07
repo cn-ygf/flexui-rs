@@ -2,6 +2,10 @@
 //!
 //! 使用 windows-sys 的 GDI+ flat API（`Gdip*` 函数，句柄 + 错误码风格）。
 
+use windows_sys::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ,
+};
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 
 /// PixelFormat32bppARGB（windows-sys 未导出该常量，用其固定数值）。
@@ -106,6 +110,121 @@ impl Drop for OffscreenBitmap {
         unsafe {
             gp::GdipDeleteGraphics(self.graphics);
             gp::GdipDisposeImage(self.bmp as *mut gp::GpImage);
+        }
+    }
+}
+
+/// 供 `UpdateLayeredWindow` 使用的离屏表面。
+///
+/// 与 `OffscreenBitmap` 的区别在于像素内存由我们自己用 `CreateDIBSection` 分配：
+/// 这样同一块内存既能被 GDI+ 当作位图绘制，又能通过内存 DC 交给
+/// `UpdateLayeredWindow` 提交，无需额外拷贝。
+///
+/// 像素格式为预乘 alpha（PARGB），这是 `UpdateLayeredWindow` 要求的格式。
+/// 位图为 top-down（`biHeight` 取负），因此扫描行步长为正。
+pub struct LayeredSurface {
+    hdc: HDC,
+    hbitmap: HBITMAP,
+    old_bitmap: HGDIOBJ,
+    bmp: *mut gp::GpBitmap,
+    graphics: *mut gp::GpGraphics,
+}
+
+impl LayeredSurface {
+    /// 创建 w×h 的分层窗口离屏表面。
+    pub fn new(width: i32, height: i32) -> Option<Self> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        unsafe {
+            let mut info: BITMAPINFO = std::mem::zeroed();
+            info.bmiHeader = BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                // 负高度 = top-down，扫描行顺序与 GDI+ 一致。
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                biSizeImage: (width * height * 4) as u32,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            };
+            let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+            let hbitmap = CreateDIBSection(
+                std::ptr::null_mut(),
+                &info,
+                DIB_RGB_COLORS,
+                &mut bits,
+                std::ptr::null_mut(),
+                0,
+            );
+            if hbitmap.is_null() || bits.is_null() {
+                return None;
+            }
+            let hdc = CreateCompatibleDC(std::ptr::null_mut());
+            if hdc.is_null() {
+                DeleteObject(hbitmap as HGDIOBJ);
+                return None;
+            }
+            let old_bitmap = SelectObject(hdc, hbitmap as HGDIOBJ);
+
+            // GDI+ 直接在 DIB 内存上作画，与内存 DC 共享同一块像素。
+            let mut bmp: *mut gp::GpBitmap = std::ptr::null_mut();
+            let status = gp::GdipCreateBitmapFromScan0(
+                width,
+                height,
+                width * 4,
+                PIXEL_FORMAT_32BPP_PARGB,
+                bits as *const u8,
+                &mut bmp,
+            );
+            if status != 0 || bmp.is_null() {
+                SelectObject(hdc, old_bitmap);
+                DeleteDC(hdc);
+                DeleteObject(hbitmap as HGDIOBJ);
+                return None;
+            }
+            let mut graphics: *mut gp::GpGraphics = std::ptr::null_mut();
+            let status = gp::GdipGetImageGraphicsContext(bmp as *mut gp::GpImage, &mut graphics);
+            if status != 0 || graphics.is_null() {
+                gp::GdipDisposeImage(bmp as *mut gp::GpImage);
+                SelectObject(hdc, old_bitmap);
+                DeleteDC(hdc);
+                DeleteObject(hbitmap as HGDIOBJ);
+                return None;
+            }
+            Some(Self {
+                hdc,
+                hbitmap,
+                old_bitmap,
+                bmp,
+                graphics,
+            })
+        }
+    }
+
+    /// 绘图上下文指针（交给 GdiCanvas 使用）。
+    pub fn graphics(&self) -> *mut gp::GpGraphics {
+        self.graphics
+    }
+
+    /// 已选入位图的内存 DC，供 `UpdateLayeredWindow` 作为源。
+    pub fn dc(&self) -> HDC {
+        self.hdc
+    }
+}
+
+impl Drop for LayeredSurface {
+    fn drop(&mut self) {
+        unsafe {
+            gp::GdipDeleteGraphics(self.graphics);
+            gp::GdipDisposeImage(self.bmp as *mut gp::GpImage);
+            SelectObject(self.hdc, self.old_bitmap);
+            DeleteDC(self.hdc);
+            DeleteObject(self.hbitmap as HGDIOBJ);
         }
     }
 }

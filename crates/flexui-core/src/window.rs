@@ -51,6 +51,12 @@ pub struct WindowConfig {
     pub system_corners: bool,
     /// 是否使用平台提供的窗口阴影。
     pub system_shadow: bool,
+    /// 窗口是否按逐像素 alpha 合成。
+    ///
+    /// 开启后整个客户区可以有透明和半透明像素，透明处直接透出桌面，可用于自绘
+    /// 圆角与阴影切图；窗口尺寸即包含这圈透明外沿，边距由布局自行让出。
+    /// 代价是提交方式变为整窗提交，脏区局部刷新失效。
+    pub transparent: bool,
     /// 无边框窗口内容区的可拖动范围。
     pub drag_region: WindowDragRegion,
 }
@@ -66,6 +72,7 @@ impl Default for WindowConfig {
             titlebar: TitlebarMode::System,
             system_corners: true,
             system_shadow: true,
+            transparent: false,
             drag_region: WindowDragRegion::PlatformDefault,
         }
     }
@@ -94,6 +101,11 @@ impl WindowConfig {
     }
     pub fn system_shadow(mut self, v: bool) -> Self {
         self.system_shadow = v;
+        self
+    }
+    /// 开启逐像素 alpha 合成；自绘圆角与阴影切图时使用。
+    pub fn transparent(mut self, v: bool) -> Self {
+        self.transparent = v;
         self
     }
     pub fn drag_region(mut self, region: WindowDragRegion) -> Self {
