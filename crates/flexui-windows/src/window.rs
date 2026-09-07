@@ -398,7 +398,9 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         layout_dirty: true,
         modal_owner: if is_modal { owner } else { null_mut() },
     }));
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+    // 32 位下 SetWindowLongPtrW 就是 SetWindowLongW，形参为 i32；64 位则为 isize。
+    // 先转 isize 再按目标宽度收窄：指针宽度与 isize 一致，两种架构下都不丢位。
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize as _);
     THREAD_WINDOWS.with(|windows| windows.borrow_mut().push(hwnd));
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
