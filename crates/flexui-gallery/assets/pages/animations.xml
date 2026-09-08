@@ -1,0 +1,67 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="20">
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Control animations" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Tween values and translations, or attach transitions to visibility changes"
+             fgcolor="@text-secondary"/>
+    </VBox>
+    <Separator/>
+
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Easing comparison" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="The same translation uses four timing curves" fgcolor="@text-secondary"/>
+      <HBox height="38" spacing="10">
+        <Button name="animation_compare" text-verbatim="Play / Reverse" variant="primary"
+                width="132" height="36"/>
+        <Button name="animation_reset_easing" text-verbatim="Reset" width="88" height="36"/>
+      </HBox>
+      <VBox width="fill" padding="14" spacing="8" bgcolor="@surface"
+            bordercolor="@border-light" borderwidth="1" corner-radius="8">
+        <HBox height="30" align="center">
+          <Label text-verbatim="Linear" width="112" fgcolor="@text-secondary"/>
+          <Panel name="animation_linear" width="24" height="24" bgcolor="@brand" corner-radius="12"/>
+        </HBox>
+        <HBox height="30" align="center">
+          <Label text-verbatim="Ease in" width="112" fgcolor="@text-secondary"/>
+          <Panel name="animation_ease_in" width="24" height="24" bgcolor="@success" corner-radius="12"/>
+        </HBox>
+        <HBox height="30" align="center">
+          <Label text-verbatim="Ease out" width="112" fgcolor="@text-secondary"/>
+          <Panel name="animation_ease_out" width="24" height="24" bgcolor="@warning" corner-radius="12"/>
+        </HBox>
+        <HBox height="30" align="center">
+          <Label text-verbatim="Ease in/out" width="112" fgcolor="@text-secondary"/>
+          <Panel name="animation_ease_in_out" width="24" height="24" bgcolor="@danger" corner-radius="12"/>
+        </HBox>
+      </VBox>
+    </VBox>
+
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Visibility transition" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="The panel stays interactive while sliding out and leaves layout after completion"
+             fgcolor="@text-secondary"/>
+      <HBox height="38" spacing="10">
+        <Button name="animation_show_transition" text-verbatim="Show" width="88" height="36"/>
+        <Button name="animation_hide_transition" text-verbatim="Hide" width="88" height="36"/>
+        <Button name="animation_toggle_transition" text-verbatim="Toggle" variant="primary"
+                width="96" height="36"/>
+      </HBox>
+      <VBox name="animation_transition_panel" width="fill" height="82" padding="18" spacing="4"
+            bgcolor="@brand" corner-radius="8"
+            transition="slide-bottom" transition-distance="96"
+            transition-duration="0.38" transition-easing="ease-out">
+        <Label text-verbatim="Declarative slide transition" bold="true" fgcolor="#FFFFFF"/>
+        <Label text-verbatim="WindowCtx::set_visible_animated drives this panel" fgcolor="#F4F7FF"/>
+      </VBox>
+    </VBox>
+
+    <VBox width="fill" spacing="10">
+      <Label text-verbatim="Animated value" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <Label text-verbatim="Progress implements the shared Value animation property" fgcolor="@text-secondary"/>
+      <Progress name="animation_progress" value="0.15" width="460" height="10"/>
+      <Button name="animation_progress_toggle" text-verbatim="Animate progress" variant="primary"
+              width="144" height="36"/>
+    </VBox>
+  </VBox>
+</ScrollView>
+

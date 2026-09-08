@@ -37,7 +37,7 @@ fn embedded_gallery_loads_all_included_pages() {
         find_by_name(doc.root.as_ref(), "pages").unwrap(),
     )
     .unwrap();
-    assert_eq!(pages.base().children.len(), 7);
+    assert_eq!(pages.base().children.len(), 8);
     for name in [
         "apply_bilibili_theme",
         "restore_default_theme",
@@ -61,6 +61,20 @@ fn embedded_gallery_loads_all_included_pages() {
     ] {
         assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
     }
+    for name in flexui_gallery_animation_controls() {
+        assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
+    }
+    let transition_panel = find_by_id(
+        doc.root.as_ref(),
+        find_by_name(doc.root.as_ref(), "animation_transition_panel").unwrap(),
+    )
+    .unwrap();
+    let transition = transition_panel
+        .base()
+        .transition
+        .expect("动画示例应声明显隐过渡");
+    assert_eq!(transition.edge(), flexui::TransitionEdge::Bottom);
+    assert_eq!(transition.easing_curve(), flexui::Easing::EaseOut);
     let bilibili_button = find_by_id(
         doc.root.as_ref(),
         find_by_name(doc.root.as_ref(), "apply_bilibili_theme").unwrap(),
@@ -112,4 +126,22 @@ fn embedded_gallery_loads_all_included_pages() {
             "{name} text color"
         );
     }
+}
+
+fn flexui_gallery_animation_controls() -> &'static [&'static str] {
+    &[
+        "nav_animations",
+        "animation_compare",
+        "animation_reset_easing",
+        "animation_linear",
+        "animation_ease_in",
+        "animation_ease_out",
+        "animation_ease_in_out",
+        "animation_transition_panel",
+        "animation_show_transition",
+        "animation_hide_transition",
+        "animation_toggle_transition",
+        "animation_progress",
+        "animation_progress_toggle",
+    ]
 }

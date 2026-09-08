@@ -1,5 +1,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod animation_demo;
 mod app;
 mod http_demo;
 mod resources;

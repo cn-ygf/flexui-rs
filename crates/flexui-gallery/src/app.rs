@@ -4,11 +4,12 @@ use flexui::{
     ThemeMode, WindowCtx, WindowImpl,
 };
 
-use crate::{http_demo, resources, themes, virtual_list_demo};
+use crate::{animation_demo, http_demo, resources, themes, virtual_list_demo};
 
 #[derive(Default)]
 pub(crate) struct GalleryWindow {
     ui: Option<MainProxy>,
+    animation: animation_demo::AnimationDemo,
     virtual_list: virtual_list_demo::VirtualListDemo,
 }
 
@@ -51,6 +52,9 @@ impl WindowImpl for GalleryWindow {
     }
 
     fn on_click(&mut self, name: &str, ctx: &mut WindowCtx) {
+        if self.animation.handle_click(name, ctx) {
+            return;
+        }
         if self.virtual_list.handle_click(name, ctx) {
             return;
         }
