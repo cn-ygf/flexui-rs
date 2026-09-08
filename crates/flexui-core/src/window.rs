@@ -47,6 +47,8 @@ pub struct WindowConfig {
     pub localized_title: Option<LocalizedStringResource>,
     pub width: f32,
     pub height: f32,
+    /// 原生窗口创建完成后是否立即显示；设为 false 时由业务就绪后调用 `show()`。
+    pub visible: bool,
     /// false = 禁止改变大小。
     pub resizable: bool,
     pub titlebar: TitlebarMode,
@@ -73,6 +75,7 @@ impl Default for WindowConfig {
             localized_title: None,
             width: 640.0,
             height: 440.0,
+            visible: true,
             resizable: true,
             titlebar: TitlebarMode::System,
             system_corners: true,
@@ -95,6 +98,11 @@ impl WindowConfig {
     }
     pub fn resizable(mut self, v: bool) -> Self {
         self.resizable = v;
+        self
+    }
+    /// 设置窗口是否在初始化结束后立即显示。
+    pub fn visible(mut self, v: bool) -> Self {
+        self.visible = v;
         self
     }
     pub fn titlebar(mut self, m: TitlebarMode) -> Self {

@@ -259,6 +259,9 @@ fn parse_window_config(
             .unwrap_or(440.0),
     );
     cfg.localized_title = localized_title;
+    if let Some(v) = el.attr("visible") {
+        cfg.visible = parse_bool(v);
+    }
     if let Some(r) = el.attr("resizable") {
         cfg.resizable = parse_bool(r);
     }

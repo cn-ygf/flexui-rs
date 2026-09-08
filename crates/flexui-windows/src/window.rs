@@ -564,14 +564,16 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     // 窗口保持隐藏，先完成首次布局、图片解码和离屏帧预热。否则 WS_VISIBLE/CreateWindowExW
     // 会让 DWM 在首帧准备完成前展示空白表面，主窗口和模态窗口都会出现白闪。
     prepare_first_frame(hwnd, &mut *state);
-    if is_modal {
+    if is_modal && config.visible {
         // 子窗口首帧就绪后再冻结 owner，避免 owner 已禁用而对话框仍未出现的空档。
         EnableWindow(owner, 0);
     }
-    ShowWindow(hwnd, SW_SHOW);
-    // 显示会产生新的更新区；此时布局和图片均已缓存，同步提交不会再暴露半成品帧。
-    invalidate(hwnd, null());
-    UpdateWindow(hwnd);
+    if config.visible {
+        ShowWindow(hwnd, SW_SHOW);
+        // 显示会产生新的更新区；此时布局和图片均已缓存，同步提交不会再暴露半成品帧。
+        invalidate(hwnd, null());
+        UpdateWindow(hwnd);
+    }
 
     for w in new_wins {
         create_window(w, hwnd);
