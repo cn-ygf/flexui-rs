@@ -58,10 +58,12 @@ pub use widget::{
 };
 pub use widgets::{
     build_menu, build_menu_entries, build_menu_labels, build_menu_styled, build_tooltip, Button,
-    CheckBox, ComboBox, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
-    MenuItem, MenuStyle, Panel, Progress, Radio, ScrollView, Separator, Slider, Switch, TabBox,
-    VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualListSource,
-    VirtualListSourceRef, VirtualSelectionMode, VirtualSort, VirtualSortDirection,
+    Calendar, CalendarDate, CalendarLocale, CheckBox, ComboBox, DatePicker, DateTimePicker,
+    DateTimeValue, Edit, EditConfig, HBox, Image, Label, ListView, MenuAlignment, MenuEntry,
+    MenuItem, MenuStyle, Panel, Picker, PickerMode, Progress, Radio, ScrollView, Separator, Slider,
+    Switch, TabBox, TimeOfDay, TimePicker, TreeNode, TreeNodeId, TreeView, VBox, VirtualColumn,
+    VirtualList, VirtualListRow, VirtualListRows, VirtualListSource, VirtualListSourceRef,
+    VirtualSelectionMode, VirtualSort, VirtualSortDirection,
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,

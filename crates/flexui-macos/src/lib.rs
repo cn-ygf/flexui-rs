@@ -23,8 +23,8 @@ use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSColor, NSImage, NSScreen, NSWindow, NSWindowButton, NSWindowStyleMask,
-    NSWindowTitleVisibility,
+    NSColor, NSFloatingWindowLevel, NSImage, NSScreen, NSWindow, NSWindowButton,
+    NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSData, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
@@ -66,6 +66,9 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     let mtm = MainThreadMarker::new().expect("UI 必须在主线程运行");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    let activate_application = windows
+        .iter()
+        .any(|window| window.config.visible && !window.config.no_activate);
 
     // 保活：AppKit 的 ordered windows 会 retain 窗口，这里再存一份以防万一。
     let mut kept: Vec<Retained<NSWindow>> = Vec::new();
@@ -78,8 +81,10 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     );
     app.setDelegate(Some(ProtocolObject::from_ref(&*app_delegate)));
 
-    #[allow(deprecated)]
-    app.activateIgnoringOtherApps(true);
+    if activate_application {
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+    }
     println!("[flexui] 窗口已创建，进入事件循环。关闭窗口后用 Cmd-Q 退出。");
     app.run();
     app.setDelegate(None);
@@ -241,6 +246,27 @@ pub(crate) fn make_window(
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str(&config.title));
     window.setAcceptsMouseMovedEvents(true);
+    window.setAlphaValue(config.opacity.clamp(0.0, 1.0) as f64);
+    if config.always_on_top {
+        window.setLevel(NSFloatingWindowLevel);
+    }
+    if !config.show_in_taskbar {
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::Transient | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+    }
+    if config.min_width.is_some() || config.min_height.is_some() {
+        window.setMinSize(NSSize::new(
+            config.min_width.unwrap_or(1.0) as f64,
+            config.min_height.unwrap_or(1.0) as f64,
+        ));
+    }
+    if config.max_width.is_some() || config.max_height.is_some() {
+        window.setMaxSize(NSSize::new(
+            config.max_width.unwrap_or(f32::MAX) as f64,
+            config.max_height.unwrap_or(f32::MAX) as f64,
+        ));
+    }
 
     // 与 Windows 分层窗口语义一致：透明仅用于无边框窗口，未绘制区域透出桌面。
     if config.titlebar != TitlebarMode::System && config.transparent {
@@ -316,9 +342,26 @@ pub(crate) fn make_window(
         match config.initial_position {
             WindowInitialPosition::PlatformDefault => cascade_window_on_main_screen(mtm, &window),
             WindowInitialPosition::CenterScreen => center_window_on_main_screen(mtm, &window),
+            WindowInitialPosition::Position { x, y } => {
+                if let Some(screen) = NSScreen::mainScreen(mtm) {
+                    let area = screen.visibleFrame();
+                    let frame = window.frame();
+                    window.setFrameOrigin(NSPoint::new(
+                        area.origin.x + f64::from(x),
+                        area.origin.y + area.size.height - f64::from(y) - frame.size.height,
+                    ));
+                }
+            }
         }
         if config.visible {
-            window.makeKeyAndOrderFront(None);
+            if config.no_activate {
+                window.orderFront(None);
+            } else {
+                window.makeKeyAndOrderFront(None);
+            }
+            if config.fullscreen {
+                window.toggleFullScreen(None);
+            }
         }
     }
     if close_requested {

@@ -12,7 +12,7 @@ pub use flexui_core::*;
 pub use flexui_xml::{
     build_fragment_res, build_fragment_str, build_fragment_str_res, load_native_menu_res,
     load_native_menu_str, load_res, load_str as load_xml_str, load_window_res, load_window_str,
-    Context, LoadError, LoadResult, WindowDoc,
+    Context, Element, LoadError, LoadResult, WidgetFactory, WidgetFactoryContext, WindowDoc,
 };
 
 // 资源系统（RM1-5）。
@@ -212,6 +212,9 @@ pub trait WindowImpl: 'static {
         application_localizer()
     }
 
+    /// 配置 XML 加载上下文，可注册业务自定义标签、命名样式与类型默认属性。
+    fn configure_xml(&self, _ctx: &mut Context) {}
+
     /// 平台窗口和控件树已建立、应用初始化逻辑尚未执行。
     fn on_before_init(&mut self, _ctx: &mut WindowCtx) {}
     /// 窗口初始化（≈ InitWindow）：绑事件、预设文本或取得 `MainProxy`。
@@ -313,6 +316,7 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
     let class_override = imp.window_class().map(str::to_owned);
     let localizer = imp.localizer();
     let mut ctx = Context::new();
+    imp.configure_xml(&mut ctx);
     if let Some(value) = localizer.clone() {
         ctx.set_localizer(value);
     }
@@ -488,5 +492,28 @@ mod lifecycle_tests {
             window.initial_position_override,
             Some(WindowInitialPosition::CenterScreen)
         );
+    }
+
+    struct CustomXmlWindow;
+
+    impl WindowImpl for CustomXmlWindow {
+        fn skin(&self) -> Skin {
+            Skin::xml(r#"<Badge name="badge" text-verbatim="ready"/>"#)
+        }
+
+        fn configure_xml(&self, context: &mut Context) {
+            context.register_widget_factory("Badge", |element, _| {
+                Ok(Box::new(Label::new(
+                    element.attr("text-verbatim").unwrap_or("badge"),
+                )))
+            });
+        }
+    }
+
+    #[test]
+    fn window_impl可注册_xml_自定义控件() {
+        let spec = build_window(CustomXmlWindow).unwrap();
+        assert_eq!(spec.root.base().name.as_deref(), Some("badge"));
+        assert_eq!(spec.root.base().text, "ready");
     }
 }

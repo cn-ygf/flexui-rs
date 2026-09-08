@@ -2,8 +2,8 @@ use super::*;
 use crate::event::{Mods, MouseButton};
 use crate::layout::layout_node;
 use crate::widgets::{
-    Button, CheckBox, ComboBox, Edit, Label, ListView, Panel, Progress, Radio, ScrollView, Slider,
-    TabBox, VBox,
+    Button, CheckBox, ComboBox, DatePicker, Edit, HBox, Label, ListView, Panel, Progress, Radio,
+    ScrollView, Slider, TabBox, VBox,
 };
 use crate::WidgetProperty;
 use flexui_gfx::{Canvas, Font};
@@ -690,6 +690,55 @@ fn listview_点击选中并上报激活() {
     );
     assert_eq!(disp.take_activations(), vec!["lv".to_string()]);
     assert_eq!(root.base().children[0].selected_index(), Some(2));
+}
+
+#[test]
+fn listview_复杂行子控件点击同时选择所在行() {
+    let mut root = ListView::new()
+        .name("lv")
+        .text_item("plain")
+        .item(
+            HBox::new()
+                .height(44.0)
+                .push(Button::new("action").name("row_action").width(90.0)),
+        )
+        .row_height(24.0);
+    layout_node(&mut root, Rect::new(0.0, 0.0, 240.0, 100.0), &FakeCanvas);
+    let button = find_by_name(&root, "row_action").unwrap();
+    let rect = widget_rect_to_window(
+        &root,
+        button,
+        find_by_id(&root, button).unwrap().base().rect,
+    )
+    .unwrap();
+    let point = Point::new(
+        rect.left() + rect.size.width / 2.0,
+        rect.top() + rect.size.height / 2.0,
+    );
+    let mut dispatcher = Dispatcher::new();
+    click_at(&mut dispatcher, &mut root, point);
+    assert_eq!(root.selection(), Some(1));
+    assert_eq!(
+        dispatcher.take_activations(),
+        vec!["lv".to_string(), "row_action".to_string()]
+    );
+}
+
+#[test]
+fn datepicker_点击展开并请求重新布局() {
+    let mut picker = DatePicker::new().name("date");
+    layout_node(&mut picker, Rect::new(0.0, 0.0, 280.0, 40.0), &FakeCanvas);
+    let mut dispatcher = Dispatcher::new();
+    dispatcher.handle(
+        &mut picker,
+        &Event::MouseDown {
+            pos: Point::new(20.0, 20.0),
+            button: MouseButton::Left,
+            mods: Mods::default(),
+        },
+    );
+    assert!(picker.is_open());
+    assert!(dispatcher.take_layout());
 }
 
 #[test]

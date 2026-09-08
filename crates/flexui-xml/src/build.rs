@@ -4,24 +4,266 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use flexui_core::{
-    Align, BaseState, Button, CheckBox, Color, ComboBox, Corners, Edit, FrameAnimation,
-    FrameFinish, FramePlayback, Gradient, HBox, HitPolicy, HitShape, Image, ImageFit, ImageSource,
-    Insets, Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec,
-    Progress, Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet,
-    StyleSpec, Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode,
-    Transition, TransitionEdge, VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows,
-    VirtualSelectionMode, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
-    WindowDragRegion, WindowInitialPosition,
+    Align, BaseState, Button, Calendar, CalendarDate, CalendarLocale, CheckBox, Color, ComboBox,
+    Corners, DatePicker, DateTimePicker, Edit, FrameAnimation, FrameFinish, FramePlayback,
+    Gradient, HBox, HitPolicy, HitShape, Image, ImageFit, ImageSource, Insets, Justify, Label,
+    ListView, Node, Panel, Picker, PickerMode, PlaceholderStyleSet, PlaceholderStyleSpec, Progress,
+    Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet, StyleSpec,
+    Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TimePicker, TitlebarMode,
+    Transition, TransitionEdge, TreeNode, TreeView, VBox, VirtualColumn, VirtualList,
+    VirtualListRow, VirtualListRows, VirtualSelectionMode, VisualState, Widget, WidgetId,
+    WidgetProperty, WindowConfig, WindowDragRegion, WindowInitialPosition,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
 
 use crate::parser::{self, Element};
 
+/// 自定义控件工厂可访问的只读加载环境。
+pub struct WidgetFactoryContext<'a> {
+    resources: Option<&'a ResourceManager>,
+    localizer: Option<&'a Localizer>,
+}
+
+impl<'a> WidgetFactoryContext<'a> {
+    /// 当前资源管理器；`load_str` 构建时为 None。
+    pub fn resources(&self) -> Option<&'a ResourceManager> {
+        self.resources
+    }
+
+    /// 当前本地化环境。
+    pub fn localizer(&self) -> Option<&'a Localizer> {
+        self.localizer
+    }
+
+    /// 按当前加载方式解析图片，自动保留 SVG 与密度资源语义。
+    pub fn resolve_image(&self, path: &str) -> ImageSource {
+        resolve_image(self.resources, path)
+    }
+}
+
+/// 自定义 XML 标签的纯 Rust 构造函数。
+///
+/// 工厂只在标签未命中内置控件时调用。传入的 `Element` 已合并类型默认属性与命名样式，
+/// 节点自己的内联属性拥有最高优先级；子元素仍由通用构建流程递归挂载。
+pub type WidgetFactory =
+    Rc<dyn for<'a> Fn(&Element, &WidgetFactoryContext<'a>) -> Result<Node, LoadError>>;
+
+/// XML 属性模板表。属性统一按小写键合并，后写入的层覆盖先前层。
+#[derive(Clone, Default)]
+struct AttributeRules {
+    named: HashMap<String, Vec<(String, String)>>,
+    defaults: HashMap<String, Vec<(String, String)>>,
+    templates: HashMap<String, Element>,
+}
+
+impl AttributeRules {
+    fn set_named(&mut self, name: &str, attrs: &[(String, String)]) {
+        self.named
+            .insert(name.trim().to_owned(), normalize_template_attrs(attrs));
+    }
+
+    fn merge_default(&mut self, tag: &str, attrs: &[(String, String)]) {
+        let target = self.defaults.entry(canonical_tag(tag)).or_default();
+        merge_attrs(target, normalize_template_attrs(attrs));
+    }
+
+    /// 收集文档中的声明。支持根节点直接放 `<Style>` / `<Default>`，也支持用
+    /// `<Styles>` 包裹；同名 Style 后声明覆盖，Default 按声明顺序继续合并。
+    fn collect_document(&mut self, root: &Element) -> Result<(), LoadError> {
+        if is_styles_container(&root.tag) {
+            return self.collect_declarations(&root.children);
+        }
+        self.collect_declarations(&root.children)
+    }
+
+    fn collect_declarations(&mut self, elements: &[Element]) -> Result<(), LoadError> {
+        for element in elements {
+            if is_styles_container(&element.tag) {
+                self.collect_declarations(&element.children)?;
+                continue;
+            }
+            match element.tag.to_ascii_lowercase().as_str() {
+                "style" => {
+                    let name = attr_value_ci(&element.attrs, "name")
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .ok_or_else(|| LoadError("<Style> 缺少非空 name".into()))?;
+                    self.set_named(name, &element.attrs);
+                }
+                "default" => {
+                    let tag = attr_value_ci(&element.attrs, "type")
+                        .or_else(|| attr_value_ci(&element.attrs, "tag"))
+                        .map(str::trim)
+                        .filter(|tag| !tag.is_empty())
+                        .ok_or_else(|| LoadError("<Default> 缺少非空 type".into()))?;
+                    self.merge_default(tag, &element.attrs);
+                }
+                "template" => {
+                    let name = attr_value_ci(&element.attrs, "name")
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .ok_or_else(|| LoadError("<Template> 缺少非空 name".into()))?;
+                    let root = element.children.first().cloned().ok_or_else(|| {
+                        LoadError(format!("Template {name} 至少需要一个控件根节点"))
+                    })?;
+                    if element.children.len() != 1 {
+                        return Err(LoadError(format!("Template {name} 只能包含一个控件根节点")));
+                    }
+                    self.templates.insert(name.to_owned(), root);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn effective_attrs(
+        &self,
+        tag: &str,
+        inline: &[(String, String)],
+    ) -> Result<Vec<(String, String)>, LoadError> {
+        let mut effective = Vec::new();
+        if let Some(defaults) = self.defaults.get(&canonical_tag(tag)) {
+            if let Some(names) = attr_value_ci(defaults, "style") {
+                for name in split_style_names(names) {
+                    self.merge_named_style(name, &mut effective, &mut Vec::new())?;
+                }
+            }
+            merge_attrs(&mut effective, normalize_inline_attrs(defaults));
+        }
+        if let Some(names) = attr_value_ci(inline, "style") {
+            for name in split_style_names(names) {
+                self.merge_named_style(name, &mut effective, &mut Vec::new())?;
+            }
+        }
+        merge_attrs(&mut effective, normalize_inline_attrs(inline));
+        Ok(effective)
+    }
+
+    fn merge_named_style(
+        &self,
+        name: &str,
+        target: &mut Vec<(String, String)>,
+        stack: &mut Vec<String>,
+    ) -> Result<(), LoadError> {
+        if stack.iter().any(|item| item == name) {
+            stack.push(name.to_owned());
+            return Err(LoadError(format!(
+                "命名样式循环引用: {}",
+                stack.join(" -> ")
+            )));
+        }
+        let attrs = self
+            .named
+            .get(name)
+            .ok_or_else(|| LoadError(format!("未定义命名样式: {name}")))?;
+        stack.push(name.to_owned());
+        if let Some(parents) = attr_value_ci(attrs, "style") {
+            for parent in split_style_names(parents) {
+                self.merge_named_style(parent, target, stack)?;
+            }
+        }
+        merge_attrs(target, normalize_inline_attrs(attrs));
+        stack.pop();
+        Ok(())
+    }
+}
+
+fn owned_attrs(attrs: &[(&str, &str)]) -> Vec<(String, String)> {
+    attrs
+        .iter()
+        .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+fn canonical_tag(tag: &str) -> String {
+    match tag.trim().to_ascii_lowercase().as_str() {
+        "box" | "panel" => "panel",
+        "scroll" | "scrollview" => "scrollview",
+        "combobox" | "select" => "combobox",
+        "listview" | "list" => "listview",
+        "virtuallist" | "virtual-list" => "virtuallist",
+        "separator" | "hr" => "separator",
+        other => other,
+    }
+    .to_owned()
+}
+
+fn is_styles_container(tag: &str) -> bool {
+    tag.eq_ignore_ascii_case("styles") || tag.eq_ignore_ascii_case("templates")
+}
+
+fn is_style_metadata(tag: &str) -> bool {
+    matches!(
+        tag,
+        "styles" | "templates" | "style" | "default" | "template"
+    )
+}
+
+fn split_style_names(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(|ch: char| ch == ',' || ch.is_ascii_whitespace())
+        .filter(|name| !name.is_empty())
+}
+
+fn attr_value_ci<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    attrs
+        .iter()
+        .rev()
+        .find(|(name, _)| name.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.as_str())
+}
+
+fn normalize_template_attrs(attrs: &[(String, String)]) -> Vec<(String, String)> {
+    attrs
+        .iter()
+        .filter(|(key, _)| !matches!(key.to_ascii_lowercase().as_str(), "name" | "type" | "tag"))
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+        .collect()
+}
+
+fn normalize_inline_attrs(attrs: &[(String, String)]) -> Vec<(String, String)> {
+    attrs
+        .iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case("style"))
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+        .collect()
+}
+
+fn merge_attrs(target: &mut Vec<(String, String)>, incoming: Vec<(String, String)>) {
+    for (key, value) in incoming {
+        // 本地化键与字面量键是同一语义槽；更高优先级的任一写法都应覆盖较低层。
+        let exclusive = match key.as_str() {
+            "text" => Some("text-verbatim"),
+            "text-verbatim" => Some("text"),
+            "tooltip" => Some("tooltip-verbatim"),
+            "tooltip-verbatim" => Some("tooltip"),
+            "placeholder" => Some("placeholder-verbatim"),
+            "placeholder-verbatim" => Some("placeholder"),
+            "class" => Some("classes"),
+            "classes" => Some("class"),
+            _ => None,
+        };
+        target.retain(|(existing, _)| existing != &key && Some(existing.as_str()) != exclusive);
+        target.push((key, value));
+    }
+}
+
+fn effective_element(el: &Element, attributes: &AttributeRules) -> Result<Element, LoadError> {
+    Ok(Element {
+        tag: el.tag.clone(),
+        attrs: attributes.effective_attrs(&el.tag, &el.attrs)?,
+        children: el.children.clone(),
+    })
+}
+
 /// v-if 求值上下文：变量表 + 内置平台谓词。
 pub struct Context {
     vars: HashMap<String, bool>,
     localizer: Option<Localizer>,
+    factories: HashMap<String, WidgetFactory>,
+    attributes: AttributeRules,
 }
 
 #[cfg(test)]
@@ -38,6 +280,8 @@ impl Context {
         Self {
             vars,
             localizer: None,
+            factories: HashMap::new(),
+            attributes: AttributeRules::default(),
         }
     }
 
@@ -55,6 +299,28 @@ impl Context {
 
     pub fn localizer(&self) -> Option<&Localizer> {
         self.localizer.as_ref()
+    }
+
+    /// 注册未知 XML 标签的构造工厂。标签名不区分大小写，内置标签不会被覆盖。
+    pub fn register_widget_factory<F>(&mut self, tag: impl Into<String>, factory: F) -> &mut Self
+    where
+        F: for<'a> Fn(&Element, &WidgetFactoryContext<'a>) -> Result<Node, LoadError> + 'static,
+    {
+        self.factories
+            .insert(tag.into().trim().to_ascii_lowercase(), Rc::new(factory));
+        self
+    }
+
+    /// 用纯 Rust 注册可在 XML 中通过 `style="name"` 引用的命名属性模板。
+    pub fn define_style(&mut self, name: &str, attrs: &[(&str, &str)]) -> &mut Self {
+        self.attributes.set_named(name, &owned_attrs(attrs));
+        self
+    }
+
+    /// 用纯 Rust 注册某类控件的默认属性。后续重复调用会继续合并，后值覆盖前值。
+    pub fn define_default(&mut self, tag: &str, attrs: &[(&str, &str)]) -> &mut Self {
+        self.attributes.merge_default(tag, &owned_attrs(attrs));
+        self
     }
 
     pub(crate) fn get(&self, key: &str) -> bool {
@@ -100,6 +366,8 @@ struct Env<'a> {
     res: Option<&'a ResourceManager>,
     bindings: Vec<(u32, WidgetId)>,
     includes: Vec<String>,
+    templates: Vec<String>,
+    attributes: AttributeRules,
 }
 
 /// 解析并构建控件树（图片按文件路径处理）。
@@ -175,11 +443,15 @@ fn load_root(
     res: Option<&ResourceManager>,
 ) -> Result<LoadResult, LoadError> {
     let el = parser::parse(xml)?;
+    let mut attributes = ctx.attributes.clone();
+    attributes.collect_document(&el)?;
     let mut env = Env {
         ctx,
         res,
         bindings: Vec::new(),
         includes: Vec::new(),
+        templates: Vec::new(),
+        attributes,
     };
     let root =
         build(&el, &mut env)?.ok_or_else(|| LoadError("根节点被 v-if 求值为 false".into()))?;
@@ -195,14 +467,19 @@ fn load_window(
     res: Option<&ResourceManager>,
 ) -> Result<WindowDoc, LoadError> {
     let el = parser::parse(xml)?;
+    let mut attributes = ctx.attributes.clone();
+    attributes.collect_document(&el)?;
     let mut env = Env {
         ctx,
         res,
         bindings: Vec::new(),
         includes: Vec::new(),
+        templates: Vec::new(),
+        attributes,
     };
     if el.tag.to_lowercase() == "window" {
-        let config = parse_window_config(&el, env.ctx.localizer())?;
+        let effective_window = effective_element(&el, &env.attributes)?;
+        let config = parse_window_config(&effective_window, env.ctx.localizer())?;
         // Window 的子节点即内容；多个则包进 VBox。
         let mut kids: Vec<Node> = Vec::new();
         for child in &el.children {
@@ -260,6 +537,10 @@ fn parse_window_config(
             .unwrap_or(440.0),
     );
     cfg.localized_title = localized_title;
+    cfg.min_width = parse_optional_positive(el.attr("min-width"), "min-width")?;
+    cfg.min_height = parse_optional_positive(el.attr("min-height"), "min-height")?;
+    cfg.max_width = parse_optional_positive(el.attr("max-width"), "max-width")?;
+    cfg.max_height = parse_optional_positive(el.attr("max-height"), "max-height")?;
     if let Some(v) = el.attr("initial-position") {
         cfg.initial_position = match v.trim().to_ascii_lowercase().as_str() {
             "platform" => WindowInitialPosition::PlatformDefault,
@@ -271,8 +552,34 @@ fn parse_window_config(
             }
         };
     }
+    if let (Some(x), Some(y)) = (el.attr("x"), el.attr("y")) {
+        cfg.initial_position = WindowInitialPosition::Position {
+            x: x.parse()
+                .map_err(|_| LoadError(format!("Window x 格式错误: {x}")))?,
+            y: y.parse()
+                .map_err(|_| LoadError(format!("Window y 格式错误: {y}")))?,
+        };
+    }
     if let Some(v) = el.attr("visible") {
         cfg.visible = parse_bool(v);
+    }
+    if let Some(v) = el.attr("opacity") {
+        cfg.opacity = v
+            .parse::<f32>()
+            .map_err(|_| LoadError(format!("opacity 格式错误: {v}")))?
+            .clamp(0.0, 1.0);
+    }
+    if let Some(v) = el.attr("always-on-top") {
+        cfg.always_on_top = parse_bool(v);
+    }
+    if let Some(v) = el.attr("no-activate") {
+        cfg.no_activate = parse_bool(v);
+    }
+    if let Some(v) = el.attr("show-in-taskbar") {
+        cfg.show_in_taskbar = parse_bool(v);
+    }
+    if let Some(v) = el.attr("fullscreen") {
+        cfg.fullscreen = parse_bool(v);
     }
     if let Some(r) = el.attr("resizable") {
         cfg.resizable = parse_bool(r);
@@ -302,6 +609,20 @@ fn parse_window_config(
         }
     }
     Ok(cfg)
+}
+
+fn parse_optional_positive(value: Option<&str>, name: &str) -> Result<Option<f32>, LoadError> {
+    value
+        .map(|value| {
+            let parsed = value
+                .parse::<f32>()
+                .map_err(|_| LoadError(format!("{name} 格式错误: {value}")))?;
+            if parsed <= 0.0 {
+                return Err(LoadError(format!("{name} 必须大于 0: {value}")));
+            }
+            Ok(parsed)
+        })
+        .transpose()
 }
 
 /// 解析 `<Window drag-region>`：`x y width height`、`none` 或 `platform`。
@@ -356,28 +677,59 @@ pub(crate) fn resolve_image(res: Option<&ResourceManager>, path: &str) -> ImageS
 const MAX_INCLUDE_DEPTH: usize = 32;
 
 fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
+    let original_tag = el.tag.to_lowercase();
+
+    // 样式声明只提供元数据，不进入控件树。
+    if is_style_metadata(&original_tag) {
+        return Ok(None);
+    }
+
+    if let Some(name) = template_reference(el) {
+        if env.templates.iter().any(|item| item == name) {
+            let mut cycle = env.templates.clone();
+            cycle.push(name.to_owned());
+            return Err(LoadError(format!(
+                "XML 模板循环引用: {}",
+                cycle.join(" -> ")
+            )));
+        }
+        if env.templates.len() >= MAX_INCLUDE_DEPTH {
+            return Err(LoadError("XML 模板嵌套过深".into()));
+        }
+        let expanded =
+            instantiate_template(el, &env.attributes)?.expect("存在模板引用时必须生成模板实例");
+        env.templates.push(name.to_owned());
+        let result = build(&expanded, env);
+        env.templates.pop();
+        return result;
+    }
+    let tag = el.tag.to_lowercase();
+
+    // <Include> 自身没有可套用的控件属性。
+    if tag == "include" {
+        return build_include(el, env);
+    }
+
+    let effective = effective_element(el, &env.attributes)?;
+
     // v-if：为假则整棵子树不生成（加载期静态求值）。
-    if let Some(cond) = el.attr("v-if") {
+    if let Some(cond) = effective.attr("v-if") {
         if !expr::eval(cond, env.ctx) {
             return Ok(None);
         }
     }
 
-    let tag = el.tag.to_lowercase();
-
-    // <Include src="逻辑路径"/>：读取子 XML 就地展开（W7），带防环。
-    if tag == "include" {
-        return build_include(el, env);
-    }
-
-    let mut node = make_node(&tag, el, env)?;
-    apply_attrs(node.as_mut(), &tag, &el.attrs, env)?;
+    let mut node = make_node(&tag, &effective, env)?;
+    apply_attrs(node.as_mut(), &tag, &effective.attrs, env)?;
     let initial_text = node.base().text.clone();
     node.set_text_value(initial_text);
 
     // TabBox 的 tabbar 绑定。
     if tag == "tabbox" {
-        if let Some(g) = el.attr("bindgroup").and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(g) = effective
+            .attr("bindgroup")
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             node.apply_property(WidgetProperty::BindGroup(Some(g)));
             env.bindings.push((g, node.base().id));
         }
@@ -386,7 +738,14 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
     // 数据控件的元数据子元素已在 make_node 收进数据，不作为控件子节点。
     if matches!(
         tag.as_str(),
-        "combobox" | "select" | "listview" | "list" | "virtuallist" | "virtual-list"
+        "combobox"
+            | "select"
+            | "listview"
+            | "list"
+            | "treeview"
+            | "tree"
+            | "virtuallist"
+            | "virtual-list"
     ) {
         return Ok(Some(node));
     }
@@ -399,6 +758,56 @@ fn build(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError> {
     }
 
     Ok(Some(node))
+}
+
+fn instantiate_template(
+    element: &Element,
+    attributes: &AttributeRules,
+) -> Result<Option<Element>, LoadError> {
+    let is_use = element.tag.eq_ignore_ascii_case("use");
+    let uses_name_selector = is_use && element.attr("template").is_none();
+    let name = template_reference(element);
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let mut instance = attributes
+        .templates
+        .get(name)
+        .cloned()
+        .ok_or_else(|| LoadError(format!("未定义 XML 模板: {name}")))?;
+    if !is_use {
+        if canonical_tag(&instance.tag) != canonical_tag(&element.tag) {
+            return Err(LoadError(format!(
+                "模板 {name} 的根标签 <{}> 不能应用到 <{}>",
+                instance.tag, element.tag
+            )));
+        }
+        instance.tag = element.tag.clone();
+    }
+    let overrides = element
+        .attrs
+        .iter()
+        .filter(|(key, _)| {
+            !key.eq_ignore_ascii_case("template")
+                && !(uses_name_selector && key.eq_ignore_ascii_case("name"))
+        })
+        .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+        .collect();
+    merge_attrs(&mut instance.attrs, overrides);
+    if !element.children.is_empty() {
+        instance.children = element.children.clone();
+    }
+    Ok(Some(instance))
+}
+
+fn template_reference(element: &Element) -> Option<&str> {
+    element.attr("template").or_else(|| {
+        if element.tag.eq_ignore_ascii_case("use") {
+            element.attr("name")
+        } else {
+            None
+        }
+    })
 }
 
 /// 展开 `<Include src="...">`：经资源读取子 XML 并 build，含循环/深度防护。
@@ -420,14 +829,122 @@ fn build_include(el: &Element, env: &mut Env) -> Result<Option<Node>, LoadError>
         .read_string(&src)
         .map_err(|e| LoadError(format!("读取 Include {src} 失败: {e}")))?;
     let sub = parser::parse(&xml)?;
+    env.attributes.collect_document(&sub)?;
     env.includes.push(src);
     let node = build(&sub, env)?;
     env.includes.pop();
     Ok(node)
 }
 
+fn wrap_nodes(mut nodes: Vec<Node>) -> Option<Node> {
+    match nodes.len() {
+        0 => None,
+        1 => nodes.pop(),
+        _ => {
+            let mut column = VBox::new();
+            for node in nodes {
+                column = column.push_node(node);
+            }
+            Some(Box::new(column))
+        }
+    }
+}
+
+fn parse_tree_node(
+    element: &Element,
+    localizer: Option<&Localizer>,
+) -> Result<TreeNode, LoadError> {
+    let raw_text = element
+        .attr("text-verbatim")
+        .or_else(|| element.attr("text"))
+        .or_else(|| element.attr("label"))
+        .unwrap_or("");
+    let text = if element.attr("text-verbatim").is_some() {
+        raw_text.to_owned()
+    } else {
+        resolve_localized(raw_text, element.attr("args"), localizer).0
+    };
+    let mut node = if let Some(id) = element.attr("id") {
+        TreeNode::with_id(
+            id.parse()
+                .map_err(|_| LoadError(format!("TreeNode id 格式错误: {id}")))?,
+            text,
+        )
+    } else {
+        TreeNode::new(text)
+    };
+    if let Some(value) = element.attr("expanded") {
+        node = node.expanded(parse_bool(value));
+    }
+    if let Some(value) = element.attr("checked") {
+        node = node.checked(parse_bool(value));
+    } else if let Some(value) = element.attr("checkable") {
+        node = node.checkable(parse_bool(value));
+    }
+    for child in &element.children {
+        if child.tag.eq_ignore_ascii_case("treenode") || child.tag.eq_ignore_ascii_case("node") {
+            node.add_child(parse_tree_node(child, localizer)?);
+        }
+    }
+    Ok(node)
+}
+
+fn parse_date(value: &str, attribute: &str) -> Result<CalendarDate, LoadError> {
+    value.parse().map_err(|_| {
+        LoadError(format!(
+            "{attribute} 日期格式错误，应为 YYYY-MM-DD: {value}"
+        ))
+    })
+}
+
+fn parse_optional_date(
+    value: Option<&str>,
+    attribute: &str,
+) -> Result<Option<CalendarDate>, LoadError> {
+    value.map(|value| parse_date(value, attribute)).transpose()
+}
+
+fn parse_calendar_locale(value: Option<&str>) -> CalendarLocale {
+    if value.is_some_and(|value| value.eq_ignore_ascii_case("en")) {
+        CalendarLocale::EnUs
+    } else {
+        CalendarLocale::ZhCn
+    }
+}
+
+fn configure_picker<M: PickerMode>(
+    mut picker: Picker<M>,
+    element: &Element,
+) -> Result<Picker<M>, LoadError> {
+    if let Some(value) = element.attr("value").or_else(|| element.attr("selected")) {
+        picker.set_text_value(value.to_owned());
+    }
+    if let Some(value) = element.attr("open") {
+        picker = picker.open(parse_bool(value));
+    }
+    if let Some(value) = element
+        .attr("minute-step")
+        .and_then(|value| value.parse().ok())
+    {
+        picker = picker.minute_step(value);
+    }
+    if let Some(value) = element
+        .attr("second-step")
+        .and_then(|value| value.parse().ok())
+    {
+        picker = picker.second_step(value);
+    }
+    picker = picker
+        .range(
+            parse_optional_date(element.attr("min"), "min")?,
+            parse_optional_date(element.attr("max"), "max")?,
+        )
+        .locale(parse_calendar_locale(element.attr("locale")));
+    Ok(picker)
+}
+
 /// 按标签名构造控件。
-fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
+fn make_node(tag: &str, el: &Element, env: &mut Env) -> Result<Node, LoadError> {
     let res = env.res;
     let node: Node = match tag {
         "vbox" => Box::new(VBox::new()),
@@ -497,7 +1014,7 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             node
         }
         "listview" | "list" => {
-            let mut items: Vec<String> = Vec::new();
+            let mut list = ListView::new();
             let mut resources: Vec<LocalizedStringResource> = Vec::new();
             let mut has_binding = false;
             if let Some(o) = el.attr("items") {
@@ -506,6 +1023,7 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                 {
+                    let mut items = Vec::new();
                     push_localized_item(
                         &mut items,
                         &mut resources,
@@ -514,16 +1032,43 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
                         el.attr("items-args"),
                         env.ctx.localizer(),
                     );
+                    if let Some(text) = items.pop() {
+                        list.push_text(text);
+                    }
                 }
             }
             for c in &el.children {
                 if c.tag.eq_ignore_ascii_case("item") {
+                    if let Some(src) = c.attr("src") {
+                        let include = Element {
+                            tag: "Include".into(),
+                            attrs: vec![("src".into(), src.into())],
+                            children: Vec::new(),
+                        };
+                        if let Some(child) = build(&include, env)? {
+                            list.push_item(child);
+                        }
+                        continue;
+                    }
+                    if !c.children.is_empty() {
+                        let mut children = Vec::new();
+                        for child in &c.children {
+                            if let Some(node) = build(child, env)? {
+                                children.push(node);
+                            }
+                        }
+                        if let Some(child) = wrap_nodes(children) {
+                            list.push_item(child);
+                        }
+                        continue;
+                    }
                     if let Some(value) =
                         c.attr("text-verbatim").or_else(|| c.attr("label-verbatim"))
                     {
-                        items.push(value.to_owned());
+                        list.push_text(value);
                         resources.push(verbatim_resource(value));
                     } else if let Some(value) = c.attr("text").or_else(|| c.attr("label")) {
+                        let mut items = Vec::new();
                         push_localized_item(
                             &mut items,
                             &mut resources,
@@ -532,23 +1077,77 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
                             c.attr("args"),
                             env.ctx.localizer(),
                         );
+                        if let Some(text) = items.pop() {
+                            list.push_text(text);
+                        }
+                    }
+                } else if c.tag.eq_ignore_ascii_case("include") {
+                    if let Some(child) = build(c, env)? {
+                        list.push_item(child);
                     }
                 }
             }
-            let mut lv = ListView::new().items(items);
             if let Some(h) = el.attr("row-height").and_then(|s| s.parse::<f32>().ok()) {
-                lv = lv.row_height(h);
+                list = list.row_height(h);
             }
             if let Some(i) = el.attr("selected").and_then(|s| s.parse::<usize>().ok()) {
-                lv = lv.selected(i);
+                list = list.selected(i);
             }
-            let mut node: Node = Box::new(lv);
-            if has_binding {
+            let mut node: Node = Box::new(list);
+            // 混合复杂行时 Items 属性无法一一回写，避免语言刷新清空复杂控件。
+            if has_binding && node.base().children.is_empty() {
                 node.base_mut()
                     .localizations
                     .push(flexui_core::LocalizationBinding::Items(resources));
             }
             node
+        }
+        "treeview" | "tree" => {
+            let mut tree = TreeView::new();
+            for child in &el.children {
+                if child.tag.eq_ignore_ascii_case("treenode")
+                    || child.tag.eq_ignore_ascii_case("node")
+                {
+                    tree.add_node(parse_tree_node(child, env.ctx.localizer())?);
+                }
+            }
+            if let Some(height) = el.attr("row-height").and_then(|value| value.parse().ok()) {
+                tree = tree.row_height(height);
+            }
+            if let Some(indent) = el.attr("indent").and_then(|value| value.parse().ok()) {
+                tree = tree.indent(indent);
+            }
+            if let Some(value) = el.attr("checkboxes") {
+                tree = tree.checkboxes(parse_bool(value));
+            }
+            if let Some(id) = el.attr("selected").and_then(|value| value.parse().ok()) {
+                tree = tree.selected(id);
+            }
+            Box::new(tree)
+        }
+        "calendar" => {
+            let mut calendar = Calendar::new();
+            if let Some(value) = el.attr("selected").or_else(|| el.attr("value")) {
+                calendar = calendar.selected_date(parse_date(value, "selected")?);
+            }
+            if let (Some(year), Some(month)) = (
+                el.attr("year").and_then(|value| value.parse().ok()),
+                el.attr("month").and_then(|value| value.parse().ok()),
+            ) {
+                calendar = calendar.display_month(year, month);
+            }
+            calendar = calendar
+                .range(
+                    parse_optional_date(el.attr("min"), "min")?,
+                    parse_optional_date(el.attr("max"), "max")?,
+                )
+                .locale(parse_calendar_locale(el.attr("locale")));
+            Box::new(calendar)
+        }
+        "datepicker" => Box::new(configure_picker(DatePicker::new(), el)?),
+        "timepicker" => Box::new(configure_picker(TimePicker::new(), el)?),
+        "datetimepicker" | "date-time-picker" => {
+            Box::new(configure_picker(DateTimePicker::new(), el)?)
         }
         "virtuallist" | "virtual-list" => {
             let columns = el
@@ -627,7 +1226,20 @@ fn make_node(tag: &str, el: &Element, env: &Env) -> Result<Node, LoadError> {
             }
             Box::new(s)
         }
-        other => return Err(LoadError(format!("未知标签 <{other}>"))),
+        other => {
+            let factory = env
+                .ctx
+                .factories
+                .get(other)
+                .ok_or_else(|| LoadError(format!("未知标签 <{other}>")))?;
+            let factory_context = WidgetFactoryContext {
+                resources: env.res,
+                localizer: env.ctx.localizer(),
+            };
+            factory(el, &factory_context).map_err(|error| {
+                LoadError(format!("自定义控件 <{}> 构建失败: {}", el.tag, error.0))
+            })?
+        }
     };
     Ok(node)
 }

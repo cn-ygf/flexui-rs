@@ -951,7 +951,10 @@ impl Dispatcher {
                 self.set_hover(root, hit);
                 // 若正按住某指针型控件（Edit/Slider）或可选中文本控件：这是一次拖动 → 转发给它。
                 if let Some(id) = self.pressed {
-                    if is_pointer_target(role_of(root, id)) || selectable_of(root, id) {
+                    if is_pointer_target(role_of(root, id))
+                        || wants_pointer_events_of(root, id)
+                        || selectable_of(root, id)
+                    {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -967,21 +970,29 @@ impl Dispatcher {
                     return;
                 }
                 let hit = hit_test(root, *pos);
+                // 复杂 ListView 行会先命中内部按钮、文本等后代；列表本身仍需收到按下事件，
+                // 才能按行更新选择。内部控件继续走原有按压/点击流程，两者互不排斥。
+                let list_owner =
+                    hit.and_then(|id| nearest_role_ancestor(root, id, WidgetRole::ListView));
                 let old_focus = self.focus;
                 self.press(root, hit);
+                if let Some(id) = list_owner {
+                    self.forward_to_widget(root, id, ev);
+                    if let Some(name) = name_of(root, id) {
+                        self.activated.push(name);
+                    }
+                }
                 // 命中指针型控件（Edit/Slider/ListView）或可选中文本控件：转发按下，让其按坐标定位/选中。
                 if let Some(id) = self.pressed {
                     let role = role_of(root, id);
-                    if is_pointer_target(role) || selectable_of(root, id) {
+                    if Some(id) != list_owner
+                        && (is_pointer_target(role)
+                            || wants_pointer_events_of(root, id)
+                            || selectable_of(root, id))
+                    {
                         self.forward_to_widget(root, id, ev);
                         if old_focus != self.focus && role == Some(WidgetRole::Edit) {
                             visit_mut(root, id, &mut |w| w.focus_gained());
-                        }
-                        // 列表点击即选择：按 name 上报，供窗口层 on_activate 处理。
-                        if role == Some(WidgetRole::ListView) {
-                            if let Some(name) = name_of(root, id) {
-                                self.activated.push(name);
-                            }
                         }
                     }
                 }
@@ -996,7 +1007,10 @@ impl Dispatcher {
                 }
                 // 指针型控件需要收到抬起事件来结束列宽拖动、文本拖选等内部状态。
                 if let Some(id) = self.pressed {
-                    if is_pointer_target(role_of(root, id)) || selectable_of(root, id) {
+                    if is_pointer_target(role_of(root, id))
+                        || wants_pointer_events_of(root, id)
+                        || selectable_of(root, id)
+                    {
                         self.forward_to_widget(root, id, ev);
                     }
                 }
@@ -1396,6 +1410,10 @@ impl Dispatcher {
         before: ControlSnapshot,
         after: ControlSnapshot,
     ) {
+        if before.layout_state != after.layout_state {
+            self.needs_layout = true;
+            self.needs_redraw = true;
+        }
         if before.text != after.text {
             // 文本会影响控件测量和 Edit 的真实字符边界缓存。
             self.needs_layout = true;
@@ -1486,6 +1504,7 @@ struct ControlSnapshot {
     selected_rows: Option<Vec<u64>>,
     sort: Option<crate::widgets::VirtualSort>,
     columns: Option<Vec<crate::widgets::VirtualColumn>>,
+    layout_state: u64,
 }
 
 fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> {
@@ -1499,6 +1518,7 @@ fn control_snapshot(root: &dyn Widget, id: WidgetId) -> Option<ControlSnapshot> 
         selected_rows: widget.selected_rows(),
         sort: widget.sort_state(),
         columns: widget.virtual_columns(),
+        layout_state: widget.layout_state(),
     })
 }
 
@@ -1836,6 +1856,12 @@ fn selectable_of(node: &dyn Widget, id: WidgetId) -> bool {
         .unwrap_or(false)
 }
 
+fn wants_pointer_events_of(node: &dyn Widget, id: WidgetId) -> bool {
+    find_by_id(node, id)
+        .map(Widget::wants_pointer_events)
+        .unwrap_or(false)
+}
+
 /// 按 id 找控件的角色（用于判断是否文本控件）。
 fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
     if node.base().id == id {
@@ -1847,6 +1873,31 @@ fn role_of(node: &dyn Widget, id: WidgetId) -> Option<WidgetRole> {
         }
     }
     None
+}
+
+/// 查找目标节点自身或其最近的指定角色祖先。
+fn nearest_role_ancestor(
+    node: &dyn Widget,
+    target: WidgetId,
+    role: WidgetRole,
+) -> Option<WidgetId> {
+    fn visit(node: &dyn Widget, target: WidgetId, role: WidgetRole) -> (bool, Option<WidgetId>) {
+        if node.base().id == target {
+            return (true, (node.base().role == role).then_some(node.base().id));
+        }
+        for child in &node.base().children {
+            let (contains, nearest) = visit(child.as_ref(), target, role);
+            if contains {
+                return (
+                    true,
+                    nearest.or_else(|| (node.base().role == role).then_some(node.base().id)),
+                );
+            }
+        }
+        (false, None)
+    }
+
+    visit(node, target, role).1
 }
 
 fn transform_for_id(node: &dyn Widget, id: WidgetId, parent: Affine) -> Option<Affine> {

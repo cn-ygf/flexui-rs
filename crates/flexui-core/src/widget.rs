@@ -443,6 +443,18 @@ pub trait Widget {
         EventFlow::Ignored
     }
 
+    /// 影响期望尺寸、但不一定体现在通用属性中的轻量状态指纹。
+    /// 展开式控件可覆写；分发器检测到变化后会自动请求重新布局。
+    fn layout_state(&self) -> u64 {
+        0
+    }
+
+    /// 是否需要接收按下、拖动、抬起等坐标事件。
+    /// 自绘交互控件可覆写，避免为事件路由伪装成已有控件角色。
+    fn wants_pointer_events(&self) -> bool {
+        false
+    }
+
     /// 应用控件专属配置；不支持该属性时返回 false。
     fn apply_property(&mut self, _property: WidgetProperty) -> bool {
         false

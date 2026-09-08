@@ -1,0 +1,8 @@
+<HBox height="50" spacing="10" padding="10 6" align="center">
+  <Panel width="30" height="30" corner-radius="15" bgcolor="#2B7FFF"/>
+  <VBox width="fill" spacing="2">
+    <Label text-verbatim="External XML item" bold="true" fgcolor="@text-primary"/>
+    <Label text-verbatim="items/list_item_account.xml" font-size="11" fgcolor="@text-secondary"/>
+  </VBox>
+  <Button name="advanced_item_action" text-verbatim="Open" width="62" height="30"/>
+</HBox>

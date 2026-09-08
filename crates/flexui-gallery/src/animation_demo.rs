@@ -87,12 +87,14 @@ mod tests {
 
     #[test]
     fn animation_buttons_create_tween_and_transition_requests() {
-        let mut doc = load_window_res(
-            &crate::resources::resources(),
-            "gallery.xml",
-            &Context::new(),
-        )
-        .unwrap();
+        let mut xml_context = Context::new();
+        xml_context.register_widget_factory("StatusBadge", |element, _| {
+            Ok(Box::new(flexui::Label::new(
+                element.attr("text-verbatim").unwrap_or("Status"),
+            )))
+        });
+        let mut doc =
+            load_window_res(&crate::resources::resources(), "gallery.xml", &xml_context).unwrap();
         let mut window = TestWindow;
         let mut ctx = WindowCtx::new(doc.root.as_mut(), &mut window);
         let mut demo = AnimationDemo::default();

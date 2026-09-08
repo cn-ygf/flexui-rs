@@ -10,6 +10,7 @@
 mod button;
 mod checkbox;
 mod combobox;
+mod date_time;
 mod edit;
 mod hbox;
 mod image;
@@ -24,12 +25,17 @@ mod separator;
 mod slider;
 mod switch;
 mod tabbox;
+mod treeview;
 mod vbox;
 mod virtual_list;
 
 pub use button::Button;
 pub use checkbox::CheckBox;
 pub use combobox::ComboBox;
+pub use date_time::{
+    Calendar, CalendarDate, CalendarLocale, DatePicker, DateTimePicker, DateTimeValue, Picker,
+    PickerMode, TimeOfDay, TimePicker,
+};
 pub use edit::{Edit, EditConfig};
 pub use hbox::HBox;
 pub use image::Image;
@@ -47,6 +53,7 @@ pub use separator::Separator;
 pub use slider::Slider;
 pub use switch::Switch;
 pub use tabbox::TabBox;
+pub use treeview::{TreeNode, TreeNodeId, TreeView};
 pub use vbox::VBox;
 pub use virtual_list::{
     VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualListSource,

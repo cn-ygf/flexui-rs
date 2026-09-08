@@ -1,8 +1,104 @@
 use super::*;
 use flexui_core::{
-    apply_localizations, find_by_name, layout_node, Canvas, Font, Rect, Size, WidgetPropertyKey,
+    apply_localizations, find_by_id, find_by_name, layout_node, Canvas, Font, Rect, Size,
+    WidgetPropertyKey,
 };
 use flexui_resource::{DirProvider, ResourceManager};
+
+#[test]
+fn 自定义控件工厂接管未知标签并继续构建子树() {
+    let mut ctx = Context::new();
+    ctx.register_widget_factory("Badge", |element, _| {
+        let caption = element.attr("caption").unwrap_or("badge");
+        Ok(Box::new(Panel::new().name(caption)))
+    });
+    let result = load_str(
+        r#"<Badge caption="custom" width="120"><Label name="child" text-verbatim="ok"/></Badge>"#,
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(result.root.base().name.as_deref(), Some("custom"));
+    assert_eq!(result.root.base().width, Sizing::Fixed(120.0));
+    assert_eq!(result.root.base().children.len(), 1);
+    assert_eq!(
+        result.root.base().children[0].base().name.as_deref(),
+        Some("child")
+    );
+}
+
+#[test]
+fn 自定义控件工厂错误带标签上下文() {
+    let mut ctx = Context::new();
+    ctx.register_widget_factory("Broken", |_, _| Err(LoadError("bad input".into())));
+    let error = load_str("<Broken/>", &ctx).err().unwrap().to_string();
+    assert!(error.contains("自定义控件 <Broken> 构建失败"));
+    assert!(error.contains("bad input"));
+}
+
+#[test]
+fn xml_类型默认命名样式与内联属性按层覆盖() {
+    let xml = r##"
+        <VBox>
+          <Styles>
+            <Default type="Button" width="80" height="30" text-verbatim="default"
+                     normal-bgcolor="#111111"/>
+            <Style name="wide" width="120" height="36" text-verbatim="wide"/>
+            <Style name="accent" style="wide" width="140" normal-bgcolor="#2255AA"/>
+          </Styles>
+          <Button name="styled" style="accent" height="44" text-verbatim="inline"/>
+          <Button name="defaults"/>
+        </VBox>
+    "##;
+    let result = load_str(xml, &Context::new()).unwrap();
+    assert_eq!(result.root.base().children.len(), 2, "样式声明不进入控件树");
+
+    let styled = &result.root.base().children[0];
+    assert_eq!(styled.base().width, Sizing::Fixed(140.0));
+    assert_eq!(styled.base().height, Sizing::Fixed(44.0));
+    assert_eq!(styled.base().text, "inline");
+    assert_eq!(
+        styled.base().style.resolve(VisualState::default()).bg_color,
+        Some(Color::from_u8(34, 85, 170, 255))
+    );
+
+    let defaults = &result.root.base().children[1];
+    assert_eq!(defaults.base().width, Sizing::Fixed(80.0));
+    assert_eq!(defaults.base().height, Sizing::Fixed(30.0));
+    assert_eq!(defaults.base().text, "default");
+}
+
+#[test]
+fn 纯代码样式定义与标签别名默认值可复用() {
+    let mut ctx = Context::new();
+    ctx.define_default("Panel", &[("padding", "6"), ("width", "80")])
+        .define_style("floating", &[("width", "120"), ("height", "40")]);
+    let result = load_str(r#"<Box style="floating" width="150"/>"#, &ctx).unwrap();
+    assert_eq!(result.root.base().padding, Insets::all(6.0));
+    assert_eq!(result.root.base().width, Sizing::Fixed(150.0));
+    assert_eq!(result.root.base().height, Sizing::Fixed(40.0));
+}
+
+#[test]
+fn 命名样式未知或循环引用会明确报错() {
+    assert!(load_str(r#"<Button style="missing"/>"#, &Context::new())
+        .err()
+        .expect("未知样式应失败")
+        .to_string()
+        .contains("未定义命名样式"));
+
+    let cyclic = r#"
+        <VBox>
+          <Style name="a" style="b"/>
+          <Style name="b" style="a"/>
+          <Button style="a"/>
+        </VBox>
+    "#;
+    assert!(load_str(cyclic, &Context::new())
+        .err()
+        .expect("循环样式应失败")
+        .to_string()
+        .contains("命名样式循环引用"));
+}
 
 #[test]
 fn xml_控件变换与非矩形命中() {
@@ -797,4 +893,128 @@ fn button_图标与文本矩形属性可由_xml_设置() {
         Some(WidgetProperty::TextRect(Some(rect)))
             if rect == Rect::new(44.0, 0.0, 88.0, 40.0)
     ));
+}
+
+#[test]
+fn treeview与日期选择器可由_xml_构建() {
+    let xml = r#"<VBox>
+        <TreeView name="tree" selected="2" checkboxes="true">
+          <TreeNode id="1" text-verbatim="root" expanded="true">
+            <TreeNode id="2" text-verbatim="child" checked="true"/>
+          </TreeNode>
+        </TreeView>
+        <Calendar name="calendar" selected="2026-09-08"/>
+        <DatePicker name="date" value="2026-09-08"/>
+        <TimePicker name="time" value="14:30:00" minute-step="5"/>
+        <DateTimePicker name="datetime" value="2026-09-08 14:30:00"/>
+      </VBox>"#;
+    let result = load_str(xml, &Context::new()).unwrap();
+    let tree = find_by_id(
+        result.root.as_ref(),
+        find_by_name(result.root.as_ref(), "tree").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tree.selected_index(), Some(1));
+    for (name, expected) in [
+        ("calendar", "2026-09-08"),
+        ("date", "2026-09-08"),
+        ("time", "14:30:00"),
+        ("datetime", "2026-09-08 14:30:00"),
+    ] {
+        let widget = find_by_id(
+            result.root.as_ref(),
+            find_by_name(result.root.as_ref(), name).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(widget.base().text, expected);
+    }
+}
+
+#[test]
+fn listview支持文本与复杂控件混排() {
+    let result = load_str(
+        r#"<ListView name="mixed" row-height="30">
+          <Item text-verbatim="plain"/>
+          <Item><HBox name="complex"><Label text-verbatim="detail"/><Button text-verbatim="go"/></HBox></Item>
+        </ListView>"#,
+        &Context::new(),
+    )
+    .unwrap();
+    assert_eq!(result.root.base().children.len(), 1);
+    assert!(find_by_name(result.root.as_ref(), "complex").is_some());
+    let Some(WidgetProperty::Items(items)) = result.root.property(WidgetPropertyKey::Items) else {
+        panic!("应保留轻量文本行");
+    };
+    assert_eq!(items, vec!["plain"]);
+}
+
+#[test]
+fn window_高级属性可由_xml_设置() {
+    let doc = load_window_str(
+        r#"<Window width="500" height="400" x="120" y="80"
+            min-width="320" min-height="240" max-width="900" max-height="700"
+            opacity="0.75" always-on-top="true" no-activate="true"
+            show-in-taskbar="false" fullscreen="true"><Panel/></Window>"#,
+        &Context::new(),
+    )
+    .unwrap();
+    let config = doc.config.unwrap();
+    assert_eq!(
+        config.initial_position,
+        flexui_core::WindowInitialPosition::Position { x: 120, y: 80 }
+    );
+    assert_eq!(
+        (config.min_width, config.min_height),
+        (Some(320.0), Some(240.0))
+    );
+    assert_eq!(
+        (config.max_width, config.max_height),
+        (Some(900.0), Some(700.0))
+    );
+    assert_eq!(config.opacity, 0.75);
+    assert!(config.always_on_top && config.no_activate && config.fullscreen);
+    assert!(!config.show_in_taskbar);
+}
+
+#[test]
+fn xml_结构模板可实例化并由内联属性覆盖() {
+    let result = load_str(
+        r##"<VBox>
+          <Templates>
+            <Template name="action"><Button text-verbatim="template" width="80" normal-bgcolor="#112233"/></Template>
+          </Templates>
+          <Use template="action" name="first"/>
+          <Button template="action" name="second" text-verbatim="override" width="120"/>
+        </VBox>"##,
+        &Context::new(),
+    )
+    .unwrap();
+    assert_eq!(result.root.base().children.len(), 2);
+    let first = find_by_id(
+        result.root.as_ref(),
+        find_by_name(result.root.as_ref(), "first").unwrap(),
+    )
+    .unwrap();
+    let second = find_by_id(
+        result.root.as_ref(),
+        find_by_name(result.root.as_ref(), "second").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(first.base().text, "template");
+    assert_eq!(second.base().text, "override");
+    assert_eq!(second.base().width, Sizing::Fixed(120.0));
+}
+
+#[test]
+fn xml_结构模板循环引用会报错() {
+    let error = load_str(
+        r#"<VBox><Templates>
+          <Template name="a"><Use template="b"/></Template>
+          <Template name="b"><Use template="a"/></Template>
+        </Templates><Use template="a"/></VBox>"#,
+        &Context::new(),
+    )
+    .err()
+    .expect("循环模板应拒绝加载");
+    assert!(error.to_string().contains("模板循环引用"));
 }

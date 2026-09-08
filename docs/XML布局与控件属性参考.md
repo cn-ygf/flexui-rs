@@ -60,7 +60,15 @@
 | `width` | 数字 | `640` | 逻辑像素宽 |
 | `height` | 数字 | `440` | 逻辑像素高 |
 | `initial-position` | `platform` / `center` | `platform` | 初始位置由平台决定，或在主屏幕工作区居中 |
+| `x` / `y` | 整数 | — | 同时提供时，按桌面逻辑坐标指定窗口左上角 |
+| `min-width` / `min-height` | 正数 | — | 客户区最小尺寸限制 |
+| `max-width` / `max-height` | 正数 | — | 客户区最大尺寸限制 |
 | `visible` | 布尔 | `true` | 初始化结束后是否立即显示；为 `false` 时可由业务稍后调用 `show()` |
+| `opacity` | `0`~`1` | `1` | 窗口整体不透明度 |
+| `always-on-top` | 布尔 | `false` | 保持在普通窗口上方 |
+| `no-activate` | 布尔 | `false` | 初次显示时不主动取得焦点 |
+| `show-in-taskbar` | 布尔 | `true` | 是否显示任务栏/窗口切换入口 |
+| `fullscreen` | 布尔 | `false` | 初次显示时进入全屏 |
 | `resizable` | 布尔 | `true` | 是否允许改变大小 |
 | `titlebar` | `system` / `hidden`(=`hiddenkeepcontrols`) / `none`(=`borderless`) | `system` | 标题栏模式：系统栏 / 隐藏标题栏保留窗口控制（macOS 保留交通灯）/ 无边框自绘 |
 | `system-corners` | 布尔 | `true` | 无边框窗口是否使用平台圆角；透明窗口的边缘由内容 alpha 决定 |
@@ -314,9 +322,32 @@ let sheet = Panel::new()
 | `Slider` | 滑块 | `value`（0~1，拖动改变） |
 | `ComboBox` / `Select` | 下拉选择框 | `options="a,b,c"` 或 `<item text="…"/>` 子元素；`selected`（初始项序号） |
 | `ListView` / `List` | 可滚动列表（点击选中） | `items="a,b,c"` 或 `<item text="…"/>` 子元素；`selected`（初始行）、`row-height`（行高） |
+| `TreeView` / `Tree` | 层级树（展开、选择、复选、滚动） | 嵌套 `<TreeNode id="…" text="…" expanded="true" checked="true"/>`；`selected`（节点 ID）、`row-height`、`indent`、`checkboxes` |
+| `Calendar` | 月历选择 | `selected`/`value`、`year`、`month`、`min`、`max`、`locale="zh-CN|en"` |
+| `DatePicker` | 日期选择 | `value="YYYY-MM-DD"`、`min`、`max`、`open` |
+| `TimePicker` | 时间选择 | `value="HH:MM:SS"`、`minute-step`、`second-step`、`open` |
+| `DateTimePicker` | 日期时间选择 | `value="YYYY-MM-DD HH:MM:SS"`，并支持上述日期/时间属性 |
 | `Separator` / `Hr` | 分隔条 | `orientation`（`horizontal`默认/`vertical`）、`thickness`（线粗） |
 
-> `<item>` 子元素用 `text` 或 `label` 属性给出文本；它们只作为数据，不会成为控件子节点。
+> `ListView` 的 `<Item>` 可使用 `text`/`label` 作为轻量文本行，也可包含任意一个控件树；`<Item src="list_item_xxx.xml"/>` 和直接 `<Include>` 可把外部 XML 作为复杂行。
+
+### XML 自定义控件、样式和模板
+
+`WindowImpl::configure_xml` 可调用 `Context::register_widget_factory` 注册业务标签。工厂生成普通 `Node`，之后仍会统一应用 XML 通用属性并递归构建子控件。
+
+```xml
+<VBox>
+  <Styles>
+    <Default type="Button" height="32"/>
+    <Style name="base" corner-radius="6"/>
+    <Style name="primary" style="base" normal-bgcolor="#3478F6"/>
+    <Template name="action"><Button style="primary" text-verbatim="Action"/></Template>
+  </Styles>
+  <Use template="action" name="save"/>
+</VBox>
+```
+
+属性覆盖顺序为类型默认值 → 命名样式（从左到右，可继承）→ 节点内联属性。结构模板要求一个根控件，可用 `<Use template="…"/>`，也可在同类型标签上写 `template="…"` 后覆盖根属性。
 
 ### TabBox + Radio 联动（做 tabbar）
 

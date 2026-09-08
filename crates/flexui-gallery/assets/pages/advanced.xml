@@ -1,0 +1,62 @@
+<ScrollView width="fill" height="fill" padding="28" spacing="20">
+  <Styles>
+    <Default type="StatusBadge" height="28" padding="10 4" corner-radius="14"/>
+    <Style name="card" bgcolor="@surface" bordercolor="@border-light" borderwidth="1" corner-radius="8" padding="14"/>
+    <Style name="successBadge" normal-bgcolor="#DDF7E8" normal-fgcolor="#157347" bold="true"/>
+    <Template name="xmlTemplateCard">
+      <HBox height="38" padding="10 6" spacing="10" align="center" bgcolor="@surface-alt" corner-radius="6">
+        <Label text-verbatim="Reusable XML template" width="fill" fgcolor="@text-primary"/>
+        <Label text-verbatim="&lt;Use template=... /&gt;" font-size="11" fgcolor="@text-secondary"/>
+      </HBox>
+    </Template>
+  </Styles>
+  <VBox width="fill" spacing="20">
+    <VBox width="fill" spacing="6">
+      <Label text-verbatim="Advanced controls" font-size="24" bold="true" fgcolor="@text-primary"/>
+      <HBox spacing="10" align="center">
+        <Label text-verbatim="Trees, calendars, composite list rows and XML extension points" fgcolor="@text-secondary"/>
+        <StatusBadge name="advanced_custom_badge" style="successBadge" text-verbatim="Custom XML control"/>
+      </HBox>
+    </VBox>
+    <Separator/>
+    <Use template="xmlTemplateCard" name="advanced_xml_template"/>
+    <HBox width="fill" spacing="20" align="start">
+      <VBox style="card" width="360" spacing="10">
+        <Label text-verbatim="TreeView / TreeNode" font-size="16" bold="true" fgcolor="@text-primary"/>
+        <TreeView name="advanced_tree" width="330" height="270" row-height="30" indent="22" checkboxes="true" selected="101">
+          <TreeNode id="100" text-verbatim="Workspace" expanded="true">
+            <TreeNode id="101" text-verbatim="src" expanded="true">
+              <TreeNode id="102" text-verbatim="widgets" checked="true"/>
+              <TreeNode id="103" text-verbatim="window"/>
+            </TreeNode>
+            <TreeNode id="104" text-verbatim="assets"/>
+          </TreeNode>
+          <TreeNode id="200" text-verbatim="Cargo.toml"/>
+        </TreeView>
+      </VBox>
+      <VBox style="card" width="fill" spacing="10">
+        <Label text-verbatim="Calendar and pickers" font-size="16" bold="true" fgcolor="@text-primary"/>
+        <Calendar name="advanced_calendar" selected="2026-09-08" min="2025-01-01" max="2027-12-31" width="300"/>
+        <HBox spacing="10">
+          <DatePicker name="advanced_date_picker" value="2026-09-08" width="150"/>
+          <TimePicker name="advanced_time_picker" value="14:30:00" minute-step="5" width="130"/>
+          <DateTimePicker name="advanced_datetime_picker" value="2026-09-08 14:30:00" width="220"/>
+        </HBox>
+      </VBox>
+    </HBox>
+    <VBox style="card" width="fill" spacing="10">
+      <Label text-verbatim="ListView: text + widget composition + external item XML" font-size="16" bold="true" fgcolor="@text-primary"/>
+      <ListView name="advanced_mixed_list" width="fill" height="190" row-height="42" selected="0">
+        <Item text-verbatim="Lightweight text row"/>
+        <Item>
+          <HBox height="52" padding="10 6" spacing="10" align="center">
+            <CheckBox text-verbatim="Composite controls" checked="true" width="fill"/>
+            <Progress value="0.72" width="120" height="8"/>
+            <Button text-verbatim="Action" width="68" height="30"/>
+          </HBox>
+        </Item>
+        <Item src="items/list_item_account.xml"/>
+      </ListView>
+    </VBox>
+  </VBox>
+</ScrollView>

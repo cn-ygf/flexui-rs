@@ -1,6 +1,6 @@
 use flexui::{
-    apply_theme, find_by_id, find_by_name, layout_node, Canvas, Color, Context, Corners, Font,
-    Point, Rect, Size, Theme, WidgetProperty, WidgetPropertyKey,
+    apply_theme, find_by_id, find_by_name, find_mut_by_id, layout_node, Canvas, Color, Context,
+    Corners, Font, Point, Rect, Size, Theme, WidgetProperty, WidgetPropertyKey,
 };
 
 struct TestCanvas;
@@ -25,7 +25,13 @@ fn embedded_gallery_loads_all_included_pages() {
     resources.mount(flexui::ZipProvider::embedded_plain_static(include_bytes!(
         concat!(env!("OUT_DIR"), "/assets.zip")
     )));
-    let mut doc = flexui::load_window_res(&resources, "gallery.xml", &Context::new()).unwrap();
+    let mut context = Context::new();
+    context.register_widget_factory("StatusBadge", |element, _| {
+        Ok(Box::new(flexui::Label::new(
+            element.attr("text-verbatim").unwrap_or("Status"),
+        )))
+    });
+    let mut doc = flexui::load_window_res(&resources, "gallery.xml", &context).unwrap();
     apply_theme(doc.root.as_mut(), &Theme::light());
     layout_node(
         doc.root.as_mut(),
@@ -37,7 +43,7 @@ fn embedded_gallery_loads_all_included_pages() {
         find_by_name(doc.root.as_ref(), "pages").unwrap(),
     )
     .unwrap();
-    assert_eq!(pages.base().children.len(), 8);
+    assert_eq!(pages.base().children.len(), 9);
     for name in [
         "apply_bilibili_theme",
         "restore_default_theme",
@@ -58,6 +64,15 @@ fn embedded_gallery_loads_all_included_pages() {
         "virtual_density",
         "virtual_reset",
         "virtual_status",
+        "nav_advanced",
+        "advanced_custom_badge",
+        "advanced_tree",
+        "advanced_calendar",
+        "advanced_date_picker",
+        "advanced_time_picker",
+        "advanced_datetime_picker",
+        "advanced_mixed_list",
+        "advanced_item_action",
     ] {
         assert!(find_by_name(doc.root.as_ref(), name).is_some(), "{name}");
     }
@@ -125,6 +140,31 @@ fn embedded_gallery_loads_all_included_pages() {
             widget.base().resolved_style().fg_color.is_some(),
             "{name} text color"
         );
+    }
+
+    let pages_id = find_by_name(doc.root.as_ref(), "pages").unwrap();
+    assert!(find_mut_by_id(doc.root.as_mut(), pages_id)
+        .unwrap()
+        .set_selected_index(8));
+    layout_node(
+        doc.root.as_mut(),
+        Rect::new(0.0, 0.0, 920.0, 640.0),
+        &TestCanvas,
+    );
+    for name in [
+        "advanced_xml_template",
+        "advanced_tree",
+        "advanced_calendar",
+        "advanced_mixed_list",
+        "advanced_item_action",
+    ] {
+        let widget = find_by_id(
+            doc.root.as_ref(),
+            find_by_name(doc.root.as_ref(), name).unwrap(),
+        )
+        .unwrap();
+        assert!(widget.base().rect.size.width > 0.0, "{name} width");
+        assert!(widget.base().rect.size.height > 0.0, "{name} height");
     }
 }
 

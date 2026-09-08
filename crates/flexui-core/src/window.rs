@@ -47,6 +47,8 @@ pub enum WindowInitialPosition {
     PlatformDefault,
     /// 在主屏幕工作区内居中，不覆盖任务栏。
     CenterScreen,
+    /// 使用桌面逻辑坐标指定窗口左上角。
+    Position { x: i32, y: i32 },
 }
 
 /// 窗口配置。
@@ -57,10 +59,25 @@ pub struct WindowConfig {
     pub localized_title: Option<LocalizedStringResource>,
     pub width: f32,
     pub height: f32,
+    /// 客户区最小/最大逻辑尺寸；None 表示不限制。
+    pub min_width: Option<f32>,
+    pub min_height: Option<f32>,
+    pub max_width: Option<f32>,
+    pub max_height: Option<f32>,
     /// 原生窗口首次创建时的位置。
     pub initial_position: WindowInitialPosition,
     /// 原生窗口创建完成后是否立即显示；设为 false 时由业务就绪后调用 `show()`。
     pub visible: bool,
+    /// 窗口整体不透明度，范围 0..=1。
+    pub opacity: f32,
+    /// 是否保持在普通窗口上方。
+    pub always_on_top: bool,
+    /// 显示时不主动取得键盘焦点。
+    pub no_activate: bool,
+    /// 是否在任务栏/应用切换器中显示独立入口。
+    pub show_in_taskbar: bool,
+    /// 创建后立即进入全屏状态。
+    pub fullscreen: bool,
     /// false = 禁止改变大小。
     pub resizable: bool,
     pub titlebar: TitlebarMode,
@@ -87,8 +104,17 @@ impl Default for WindowConfig {
             localized_title: None,
             width: 640.0,
             height: 440.0,
+            min_width: None,
+            min_height: None,
+            max_width: None,
+            max_height: None,
             initial_position: WindowInitialPosition::PlatformDefault,
             visible: true,
+            opacity: 1.0,
+            always_on_top: false,
+            no_activate: false,
+            show_in_taskbar: true,
+            fullscreen: false,
             resizable: true,
             titlebar: TitlebarMode::System,
             system_corners: true,
@@ -122,9 +148,43 @@ impl WindowConfig {
     pub fn centered(self) -> Self {
         self.initial_position(WindowInitialPosition::CenterScreen)
     }
+    /// 使用桌面逻辑坐标指定窗口左上角。
+    pub fn position(self, x: i32, y: i32) -> Self {
+        self.initial_position(WindowInitialPosition::Position { x, y })
+    }
+    pub fn min_size(mut self, width: f32, height: f32) -> Self {
+        self.min_width = Some(width.max(1.0));
+        self.min_height = Some(height.max(1.0));
+        self
+    }
+    pub fn max_size(mut self, width: f32, height: f32) -> Self {
+        self.max_width = Some(width.max(1.0));
+        self.max_height = Some(height.max(1.0));
+        self
+    }
     /// 设置窗口是否在初始化结束后立即显示。
     pub fn visible(mut self, v: bool) -> Self {
         self.visible = v;
+        self
+    }
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+    pub fn always_on_top(mut self, value: bool) -> Self {
+        self.always_on_top = value;
+        self
+    }
+    pub fn no_activate(mut self, value: bool) -> Self {
+        self.no_activate = value;
+        self
+    }
+    pub fn show_in_taskbar(mut self, value: bool) -> Self {
+        self.show_in_taskbar = value;
+        self
+    }
+    pub fn fullscreen(mut self, value: bool) -> Self {
+        self.fullscreen = value;
         self
     }
     pub fn titlebar(mut self, m: TitlebarMode) -> Self {

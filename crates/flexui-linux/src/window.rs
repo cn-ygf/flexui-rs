@@ -570,6 +570,10 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         WindowInitialPosition::CenterScreen => {
             centered_origin(f.work_area, i32::from(w), i32::from(h))
         }
+        WindowInitialPosition::Position { x, y } => (
+            (x as f32 * f.scale).round() as i32,
+            (y as f32 * f.scale).round() as i32,
+        ),
     };
     let _ = conn.create_window(
         depth,
@@ -585,13 +589,33 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         &aux,
     );
     let _ = conn.create_gc(gc, xid, &CreateGCAux::new());
-    if spec.config.initial_position == WindowInitialPosition::CenterScreen {
+    if spec.config.initial_position != WindowInitialPosition::PlatformDefault
+        || spec.config.min_width.is_some()
+        || spec.config.min_height.is_some()
+        || spec.config.max_width.is_some()
+        || spec.config.max_height.is_some()
+    {
         let hints = WmSizeHints {
-            position: Some((
-                WmSizeHintsSpecification::ProgramSpecified,
-                initial_x,
-                initial_y,
-            )),
+            position: (spec.config.initial_position != WindowInitialPosition::PlatformDefault)
+                .then_some((
+                    WmSizeHintsSpecification::ProgramSpecified,
+                    initial_x,
+                    initial_y,
+                )),
+            min_size: match (spec.config.min_width, spec.config.min_height) {
+                (None, None) => None,
+                (width, height) => Some((
+                    (width.unwrap_or(1.0) * f.scale).round() as i32,
+                    (height.unwrap_or(1.0) * f.scale).round() as i32,
+                )),
+            },
+            max_size: match (spec.config.max_width, spec.config.max_height) {
+                (None, None) => None,
+                (width, height) => Some((
+                    (width.unwrap_or(32_767.0) * f.scale).round() as i32,
+                    (height.unwrap_or(32_767.0) * f.scale).round() as i32,
+                )),
+            },
             ..WmSizeHints::new()
         };
         let _ = hints.set_normal_hints(conn, xid);
@@ -613,6 +637,45 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
             f.utf8_string,
             spec.config.title.as_bytes(),
         );
+    }
+    if spec.config.opacity < 1.0 {
+        if let Some(atom) = intern(conn, b"_NET_WM_WINDOW_OPACITY") {
+            let opacity = (spec.config.opacity.clamp(0.0, 1.0) * u32::MAX as f32).round() as u32;
+            let _ = conn.change_property32(
+                PropMode::REPLACE,
+                xid,
+                atom,
+                AtomEnum::CARDINAL,
+                &[opacity],
+            );
+        }
+    }
+    let mut window_states = Vec::new();
+    if spec.config.always_on_top {
+        window_states.extend(intern(conn, b"_NET_WM_STATE_ABOVE"));
+    }
+    if spec.config.fullscreen {
+        window_states.extend(intern(conn, b"_NET_WM_STATE_FULLSCREEN"));
+    }
+    if !spec.config.show_in_taskbar {
+        window_states.extend(intern(conn, b"_NET_WM_STATE_SKIP_TASKBAR"));
+    }
+    if !window_states.is_empty() {
+        if let Some(state) = intern(conn, b"_NET_WM_STATE") {
+            let _ = conn.change_property32(
+                PropMode::REPLACE,
+                xid,
+                state,
+                AtomEnum::ATOM,
+                &window_states,
+            );
+        }
+    }
+    if spec.config.no_activate {
+        if let Some(user_time) = intern(conn, b"_NET_WM_USER_TIME") {
+            let _ =
+                conn.change_property32(PropMode::REPLACE, xid, user_time, AtomEnum::CARDINAL, &[0]);
+        }
     }
     let _ = conn.change_property32(
         PropMode::REPLACE,

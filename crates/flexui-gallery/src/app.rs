@@ -22,6 +22,17 @@ impl WindowImpl for GalleryWindow {
         resources::resources()
     }
 
+    fn configure_xml(&self, context: &mut flexui::Context) {
+        context.register_widget_factory("StatusBadge", |element, _| {
+            Ok(Box::new(flexui::Label::new(
+                element
+                    .attr("text-verbatim")
+                    .or_else(|| element.attr("text"))
+                    .unwrap_or("Status"),
+            )))
+        });
+    }
+
     fn on_init(&mut self, ctx: &mut WindowCtx) {
         self.ui = ctx.main_proxy();
         if ctx

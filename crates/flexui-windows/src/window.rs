@@ -22,8 +22,9 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, GetDC, InvalidateRect, ReleaseDC, ScreenToClient, UpdateWindow,
-    ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, HDC, PAINTSTRUCT,
+    BeginPaint, EndPaint, GetDC, GetMonitorInfoW, InvalidateRect, MonitorFromWindow, ReleaseDC,
+    ScreenToClient, UpdateWindow, ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, HDC,
+    MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -102,6 +103,11 @@ struct AppState {
     back_buffer_size: (i32, i32),
     /// 逐像素 alpha 合成（WS_EX_LAYERED + UpdateLayeredWindow）。
     layered: bool,
+    /// 分层提交的整窗透明度。
+    opacity: u8,
+    /// WM_GETMINMAXINFO 使用的物理像素限制。
+    min_size: Option<(i32, i32)>,
+    max_size: Option<(i32, i32)>,
     /// 分层窗口的整窗提交表面；非分层窗口恒为 None。
     layered_surface: Option<LayeredSurface>,
     layered_size: (i32, i32),
@@ -436,11 +442,22 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
                 centered_window_origin(&work_area, outer_width, outer_height)
             }
         }
+        WindowInitialPosition::Position { x, y } => (
+            (x as f32 * scale).round() as i32,
+            (y as f32 * scale).round() as i32,
+        ),
     };
 
     let title = wide(&config.title);
-    let mut ex_style = if is_modal { WS_EX_TOOLWINDOW } else { 0 };
-    if layered {
+    let mut ex_style = if is_modal || !config.show_in_taskbar {
+        WS_EX_TOOLWINDOW
+    } else {
+        WS_EX_APPWINDOW
+    };
+    if config.no_activate {
+        ex_style |= WS_EX_NOACTIVATE;
+    }
+    if layered || config.opacity < 1.0 {
         ex_style |= WS_EX_LAYERED;
     }
     let hwnd = CreateWindowExW(
@@ -485,6 +502,21 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         back_buffer: None,
         back_buffer_size: (0, 0),
         layered,
+        opacity: (config.opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+        min_size: match (config.min_width, config.min_height) {
+            (None, None) => None,
+            (width, height) => Some((
+                (width.unwrap_or(1.0) * scale).round() as i32,
+                (height.unwrap_or(1.0) * scale).round() as i32,
+            )),
+        },
+        max_size: match (config.max_width, config.max_height) {
+            (None, None) => None,
+            (width, height) => Some((
+                (width.unwrap_or(32_767.0) * scale).round() as i32,
+                (height.unwrap_or(32_767.0) * scale).round() as i32,
+            )),
+        },
         layered_surface: None,
         layered_size: (0, 0),
         layout_dirty: true,
@@ -522,6 +554,42 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
             (*state).client_size = (
                 (final_client.right - final_client.left).max(0) as u16,
                 (final_client.bottom - final_client.top).max(0) as u16,
+            );
+        }
+    }
+
+    if !layered && config.opacity < 1.0 {
+        SetLayeredWindowAttributes(hwnd, 0, (*state).opacity, LWA_ALPHA);
+    }
+    if config.always_on_top {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+    if config.fullscreen {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) != 0 {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP as _);
+            SetWindowPos(
+                hwnd,
+                if config.always_on_top {
+                    HWND_TOPMOST
+                } else {
+                    HWND_TOP
+                },
+                info.rcMonitor.left,
+                info.rcMonitor.top,
+                info.rcMonitor.right - info.rcMonitor.left,
+                info.rcMonitor.bottom - info.rcMonitor.top,
+                SWP_FRAMECHANGED | SWP_NOACTIVATE,
             );
         }
     }
@@ -588,7 +656,14 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         EnableWindow(owner, 0);
     }
     if config.visible {
-        ShowWindow(hwnd, SW_SHOW);
+        ShowWindow(
+            hwnd,
+            if config.no_activate {
+                SW_SHOWNOACTIVATE
+            } else {
+                SW_SHOW
+            },
+        );
         // 显示会产生新的更新区；此时布局和图片均已缓存，同步提交不会再暴露半成品帧。
         invalidate(hwnd, null());
         UpdateWindow(hwnd);
@@ -1032,6 +1107,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         // 自绘标题栏占满整个窗口，同时保留 WS_THICKFRAME 供 DWM 生成圆角、阴影和 Snap。
         WM_NCCALCSIZE if !state.is_null() && (*state).frameless => 0,
+        WM_GETMINMAXINFO if !state.is_null() => {
+            let info = &mut *(lparam as *mut MINMAXINFO);
+            if let Some((width, height)) = (*state).min_size {
+                info.ptMinTrackSize.x = width.max(1);
+                info.ptMinTrackSize.y = height.max(1);
+            }
+            if let Some((width, height)) = (*state).max_size {
+                info.ptMaxTrackSize.x = width.max(1);
+                info.ptMaxTrackSize.y = height.max(1);
+            }
+            0
+        }
         WM_SETCURSOR if !state.is_null() && (lparam as u32 & 0xFFFF) == HTCLIENT => {
             let mut p: POINT = std::mem::zeroed();
             if GetCursorPos(&mut p) != 0 && ScreenToClient(hwnd, &mut p) != 0 {
@@ -1836,25 +1923,25 @@ unsafe fn paint_layered_window(hwnd: HWND, state: &mut AppState) {
     // 提交：目标位置取窗口在屏幕上的左上角，源为已选入 DIB 的内存 DC。
     let mut win: RECT = std::mem::zeroed();
     GetWindowRect(hwnd, &mut win);
-    let mut pos = POINT {
+    let pos = POINT {
         x: win.left,
         y: win.top,
     };
-    let mut size = SIZE { cx: w, cy: h };
-    let mut src = POINT { x: 0, y: 0 };
+    let size = SIZE { cx: w, cy: h };
+    let src = POINT { x: 0, y: 0 };
     let blend = BLENDFUNCTION {
         BlendOp: AC_SRC_OVER as u8,
         BlendFlags: 0,
-        SourceConstantAlpha: 255,
+        SourceConstantAlpha: state.opacity,
         AlphaFormat: AC_SRC_ALPHA as u8,
     };
     UpdateLayeredWindow(
         hwnd,
         null_mut(),
-        &mut pos,
-        &mut size,
+        &pos,
+        &size,
         surface.dc(),
-        &mut src,
+        &src,
         0,
         &blend,
         ULW_ALPHA,

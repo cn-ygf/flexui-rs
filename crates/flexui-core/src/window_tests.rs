@@ -31,6 +31,34 @@ fn 窗口配置可用代码设置初始居中() {
 }
 
 #[test]
+fn 窗口高级属性支持纯代码配置() {
+    let config = WindowConfig::new("advanced", 640.0, 480.0)
+        .position(120, 80)
+        .min_size(320.0, 240.0)
+        .max_size(1280.0, 960.0)
+        .opacity(0.8)
+        .always_on_top(true)
+        .no_activate(true)
+        .show_in_taskbar(false)
+        .fullscreen(true);
+    assert_eq!(
+        config.initial_position,
+        WindowInitialPosition::Position { x: 120, y: 80 }
+    );
+    assert_eq!(
+        (config.min_width, config.min_height),
+        (Some(320.0), Some(240.0))
+    );
+    assert_eq!(
+        (config.max_width, config.max_height),
+        (Some(1280.0), Some(960.0))
+    );
+    assert_eq!(config.opacity, 0.8);
+    assert!(config.always_on_top && config.no_activate && config.fullscreen);
+    assert!(!config.show_in_taskbar);
+}
+
+#[test]
 fn 显隐过渡_滑入后保持可见_滑出后才隐藏() {
     let transition = Transition::slide(TransitionEdge::Bottom, 100.0)
         .duration(1.0)

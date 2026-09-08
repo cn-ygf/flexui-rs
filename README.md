@@ -21,7 +21,8 @@ FlexUI keeps application code in Rust while using the operating system where it 
 - **Practical layout system**: `VBox`, `HBox`, `Panel`, `ScrollView`, and `TabBox`, with fixed/content/fill sizing, flex growth, alignment, padding, margin, and absolute positioning.
 - **Visual transforms and shaped hits**: translate, scale, and rotate widgets or entire subtrees while pointer input, scrolling, menus, and IME anchors follow the visual result; rectangular, rounded, and elliptical hit regions are supported.
 - **Declarative visibility transitions**: SwiftUI-style edge slides can be declared in XML or Rust and driven through `WindowCtx`, including reversible enter/exit playback and hide-on-completion behavior.
-- **Built-in controls**: labels, images, buttons, edits, checkboxes, switches, radios, combo boxes, sliders, progress bars, list views, separators, scrolling, and menus.
+- **Built-in controls**: labels, images, buttons, edits, checkboxes, switches, radios, combo boxes, sliders, progress bars, text/composite list views, virtual lists, tree views, calendars, date/time pickers, separators, scrolling, and menus.
+- **Extensible XML**: custom widget factories, named and inherited styles, per-type defaults, reusable structural templates, and external item layouts.
 - **State-aware styling**: normal, hot, pushed, disabled, focused, selected, and combined states. Colors, borders, images, gradients, shadows, opacity, and text alignment can all vary by state.
 - **Theme system**: light and dark defaults, semantic color tokens, component recipes, variants, classes, and runtime theme switching.
 - **Resource-first rendering**: PNG, JPEG, and SVG; density-aware `@2.00x` assets; center, stretch, and nine-patch fitting; directory, ZIP, and embedded ZIP providers.
