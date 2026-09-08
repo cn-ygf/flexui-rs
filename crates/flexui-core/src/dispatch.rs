@@ -268,9 +268,19 @@ impl Dispatcher {
         let Some(id) = find_by_name(root, name) else {
             return false;
         };
-        let mut from = None;
-        visit_mut(root, id, &mut |w| from = w.animation_value(prop));
-        let Some(from) = from else { return false };
+        let mut start = None;
+        visit_mut(root, id, &mut |w| {
+            start = animation_value(w, prop).map(|from| {
+                let visibility_transition = w.base().transition_target_visible.is_some()
+                    && w.base()
+                        .transition
+                        .is_some_and(|value| value.prop() == prop);
+                (from, visibility_transition)
+            });
+        });
+        let Some((from, visibility_transition)) = start else {
+            return false;
+        };
         self.anims.retain(|a| !(a.target == id && a.prop == prop));
         self.anims.push(Anim {
             target: id,
@@ -280,6 +290,7 @@ impl Dispatcher {
             dur: dur_secs.max(0.001),
             elapsed: 0.0,
             easing,
+            visibility_transition,
         });
         true
     }
@@ -292,17 +303,44 @@ impl Dispatcher {
                 a.elapsed += dt;
             }
             // 快照 (target, prop, value) 后应用，避免与 self 的可变借用冲突。
-            let apply: Vec<(WidgetId, AnimProp, f32)> = self
+            let apply: Vec<(WidgetId, AnimProp, f32, bool)> = self
                 .anims
                 .iter()
-                .map(|a| (a.target, a.prop, a.value_at()))
+                .map(|a| (a.target, a.prop, a.value_at(), a.visibility_transition))
                 .collect();
-            for (id, prop, v) in apply {
+            for (id, prop, v, visibility_transition) in apply {
                 visit_mut(root, id, &mut |w| {
-                    w.set_animation_value(prop, v);
+                    if !visibility_transition || w.base().transition_target_visible.is_some() {
+                        set_animation_value(w, prop, v);
+                    }
                 });
             }
+            let completed_transitions: Vec<WidgetId> = self
+                .anims
+                .iter()
+                .filter(|animation| animation.visibility_transition && animation.done())
+                .map(|animation| animation.target)
+                .collect();
             self.anims.retain(|a| !a.done());
+            for id in completed_transitions {
+                let mut hidden = false;
+                visit_mut(root, id, &mut |w| {
+                    let base = w.base_mut();
+                    let Some(target_visible) = base.transition_target_visible.take() else {
+                        return;
+                    };
+                    if let Some(origin) = base.transition_origin.take() {
+                        base.transform.translation = origin;
+                    }
+                    if !target_visible {
+                        base.visible = false;
+                        hidden = true;
+                    }
+                });
+                if hidden {
+                    self.needs_layout = true;
+                }
+            }
             changed = true;
         }
 
@@ -1413,6 +1451,28 @@ impl Dispatcher {
         if let Some(name) = name {
             self.control_events.push((name, event));
         }
+    }
+}
+
+fn animation_value(widget: &dyn Widget, prop: AnimProp) -> Option<f32> {
+    match prop {
+        AnimProp::TranslateX => Some(widget.base().transform.translation.x),
+        AnimProp::TranslateY => Some(widget.base().transform.translation.y),
+        _ => widget.animation_value(prop),
+    }
+}
+
+fn set_animation_value(widget: &mut dyn Widget, prop: AnimProp, value: f32) -> bool {
+    match prop {
+        AnimProp::TranslateX => {
+            widget.base_mut().transform.translation.x = value;
+            true
+        }
+        AnimProp::TranslateY => {
+            widget.base_mut().transform.translation.y = value;
+            true
+        }
+        _ => widget.set_animation_value(prop, value),
     }
 }
 

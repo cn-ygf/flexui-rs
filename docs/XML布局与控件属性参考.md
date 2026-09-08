@@ -149,6 +149,35 @@
         hit-shape="rounded" hit-radius="12"/>
 ```
 
+### 4.8 声明式显隐过渡
+
+| 属性 | 取值 | 说明 |
+| --- | --- | --- |
+| `transition` | `slide-top` / `slide-bottom` / `slide-left` / `slide-right` | 显示时从指定边缘滑入，隐藏时沿相反过程滑出 |
+| `transition-distance` | 大于 0 的数字 | 滑动距离，单位为逻辑像素；声明 `transition` 时必填 |
+| `transition-duration` | 大于 0 的数字 | 动画时长，单位为秒，默认 `0.25` |
+| `transition-easing` | `linear` / `ease-in` / `ease-out` / `ease-in-out` | 缓动曲线，默认 `ease-in-out` |
+
+过渡由 `WindowCtx::set_visible_animated` 驱动。显示时控件会先参与布局再滑入；隐藏时会先完整播放退出动画，结束后才停止布局、绘制和命中。连续反向切换会从当前位置接着播放。
+
+```xml
+<Box name="sheet" visible="false"
+     transition="slide-bottom" transition-distance="440"
+     transition-duration="0.22" transition-easing="ease-out">
+  <!-- 面板内容 -->
+</Box>
+```
+
+```rust
+ctx.set_visible_animated("sheet", true);
+
+// 纯 Rust 构建同样支持：
+let sheet = Panel::new()
+    .name("sheet")
+    .visible(false)
+    .transition(Transition::slide(TransitionEdge::Bottom, 440.0));
+```
+
 ---
 
 ## 5. 取值格式
@@ -363,6 +392,7 @@ ctx.is_selected("chkRemember");             // 读勾选态
 ctx.set_enabled("btnPrimary", false);       // 启用/禁用
 ctx.with("cb", |w| w.base().text.clone());  // 任意读写控件
 ctx.animate("prog", AnimProp::Value, 1.0, 0.8, Easing::EaseInOut); // 属性动画
+ctx.set_visible_animated("sheet", true);     // 按 XML/代码声明的过渡显示
 ctx.open_menu(Rect::new(x, y, 0.0, 0.0), vec![("刷新".into(), "ctxRefresh".into())]); // 上下文菜单
 ```
 

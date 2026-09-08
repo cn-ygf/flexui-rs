@@ -22,7 +22,7 @@ pub mod widgets;
 pub mod window;
 
 // 常用类型再导出，方便上层与后端使用。
-pub use anim::{AnimProp, Easing};
+pub use anim::{AnimProp, Easing, Transition, TransitionEdge};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use dispatch::{
     hit_test, hit_test_drag, point_wants_text_cursor, widget_rect_to_window, widget_transform_to_window,

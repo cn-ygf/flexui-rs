@@ -20,6 +20,7 @@ FlexUI keeps application code in Rust while using the operating system where it 
 - **Native desktop windows**: multi-window and modal workflows, system title bars, custom title bars, DPI handling, IME, clipboard, drag and drop, and native file dialogs.
 - **Practical layout system**: `VBox`, `HBox`, `Panel`, `ScrollView`, and `TabBox`, with fixed/content/fill sizing, flex growth, alignment, padding, margin, and absolute positioning.
 - **Visual transforms and shaped hits**: translate, scale, and rotate widgets or entire subtrees while pointer input, scrolling, menus, and IME anchors follow the visual result; rectangular, rounded, and elliptical hit regions are supported.
+- **Declarative visibility transitions**: SwiftUI-style edge slides can be declared in XML or Rust and driven through `WindowCtx`, including reversible enter/exit playback and hide-on-completion behavior.
 - **Built-in controls**: labels, images, buttons, edits, checkboxes, switches, radios, combo boxes, sliders, progress bars, list views, separators, scrolling, and menus.
 - **State-aware styling**: normal, hot, pushed, disabled, focused, selected, and combined states. Colors, borders, images, gradients, shadows, opacity, and text alignment can all vary by state.
 - **Theme system**: light and dark defaults, semantic color tokens, component recipes, variants, classes, and runtime theme switching.

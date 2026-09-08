@@ -503,6 +503,71 @@ impl<'a> WindowCtx<'a> {
     pub fn set_visible(&mut self, name: &str, visible: bool) {
         self.event_ctx(|ctx| ctx.set_visible(name, visible));
     }
+    /// 使用控件声明的 `Transition` 切换可见状态。
+    ///
+    /// 显示时先让控件参与布局，再从指定边缘滑入；隐藏时先滑出，动画完成后才退出布局。
+    /// 没有声明过渡的控件会直接切换可见状态。
+    pub fn set_visible_animated(&mut self, name: &str, visible: bool) {
+        let request = self.event_ctx(|ctx| {
+            let state = ctx.get(name, |w| {
+                let base = w.base();
+                (
+                    base.visible,
+                    base.transition,
+                    base.transition_target_visible,
+                    base.transition_origin,
+                    base.transform.translation,
+                )
+            });
+            let Some((current, transition, current_target, origin, translation)) = state else {
+                return None;
+            };
+            let Some(transition) = transition else {
+                ctx.set_visible(name, visible);
+                return None;
+            };
+
+            if current_target == Some(visible) || (current_target.is_none() && current == visible) {
+                return None;
+            }
+            if !current && !visible {
+                return None;
+            }
+
+            let origin = origin.unwrap_or(translation);
+            let (offset_x, offset_y) = transition.offset();
+            ctx.with(name, |w| {
+                let base = w.base_mut();
+                base.transition_origin = Some(origin);
+                base.transition_target_visible = Some(visible);
+                if visible && !current {
+                    base.visible = true;
+                    base.transform.translation.x = origin.x + offset_x;
+                    base.transform.translation.y = origin.y + offset_y;
+                }
+            });
+
+            let to = match transition.prop() {
+                crate::anim::AnimProp::TranslateX => {
+                    origin.x + if visible { 0.0 } else { offset_x }
+                }
+                crate::anim::AnimProp::TranslateY => {
+                    origin.y + if visible { 0.0 } else { offset_y }
+                }
+                _ => unreachable!("显隐过渡只使用位移动画"),
+            };
+            Some((
+                transition.prop(),
+                to,
+                transition.duration_secs(),
+                transition.easing_curve(),
+            ))
+        });
+
+        if let Some((prop, to, duration, easing)) = request {
+            self.animate(name, prop, to, duration, easing);
+        }
+    }
     pub fn set_property(&mut self, name: &str, property: WidgetProperty) -> bool {
         self.event_ctx(|ctx| ctx.set_property(name, property))
     }
@@ -654,3 +719,7 @@ pub trait WindowDelegate {
 /// 空委托：所有钩子用默认实现。供不需要窗口钩子的底层调用方（FFI/示例）使用。
 pub struct NoopDelegate;
 impl WindowDelegate for NoopDelegate {}
+
+#[cfg(test)]
+#[path = "window_tests.rs"]
+mod tests;

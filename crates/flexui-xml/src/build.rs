@@ -9,8 +9,9 @@ use flexui_core::{
     Insets, Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec,
     Progress, Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet,
     StyleSpec, Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode,
-    VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualSelectionMode,
-    VisualState, Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
+    Transition, TransitionEdge, VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows,
+    VirtualSelectionMode, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
+    WindowDragRegion,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -629,6 +630,7 @@ fn apply_attrs(
 ) -> Result<(), LoadError> {
     let res = env.res;
     apply_transform_and_hit_shape(node, attrs);
+    apply_transition_attrs(node, attrs)?;
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
     let mut placeholder_slots: HashMap<VisualState, PlaceholderStyleSpec> = HashMap::new();
@@ -639,12 +641,41 @@ fn apply_attrs(
         match key.as_str() {
             // 已在别处处理的属性（Separator orientation/thickness、Image src、
             // ComboBox options、ListView items/row-height）。
-            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
-            | "options-args" | "items-args" | "row-height" | "header-height" | "show-header"
-            | "striped" | "fill-last-column" | "overscan" | "selection-mode" | "text-args"
-            | "placeholder-args" | "tooltip-args" | "title-args" | "translate" | "translate-x"
-            | "translate-y" | "scale" | "scale-x" | "scale-y" | "rotation" | "rotate"
-            | "transform-origin" | "hit-shape" | "hit-radius" => {}
+            "v-if"
+            | "src"
+            | "bindgroup"
+            | "orientation"
+            | "thickness"
+            | "options"
+            | "items"
+            | "options-args"
+            | "items-args"
+            | "row-height"
+            | "header-height"
+            | "show-header"
+            | "striped"
+            | "fill-last-column"
+            | "overscan"
+            | "selection-mode"
+            | "text-args"
+            | "placeholder-args"
+            | "tooltip-args"
+            | "title-args"
+            | "translate"
+            | "translate-x"
+            | "translate-y"
+            | "scale"
+            | "scale-x"
+            | "scale-y"
+            | "rotation"
+            | "rotate"
+            | "transform-origin"
+            | "hit-shape"
+            | "hit-radius"
+            | "transition"
+            | "transition-distance"
+            | "transition-duration"
+            | "transition-easing" => {}
             "name" => node.base_mut().name = Some(v.clone()),
             "variant" => node.base_mut().variant = v.trim().to_owned(),
             "class" | "classes" => {
@@ -908,6 +939,57 @@ fn apply_transform_and_hit_shape(node: &mut dyn Widget, attrs: &[(String, String
         None => radius.map_or(current_shape, HitShape::Rounded),
     };
     node.base_mut().hit_shape = hit_shape;
+}
+
+/// 解析 SwiftUI 风格的边缘移动显隐过渡。
+fn apply_transition_attrs(
+    node: &mut dyn Widget,
+    attrs: &[(String, String)],
+) -> Result<(), LoadError> {
+    let Some(kind) = attr_value(attrs, "transition") else {
+        return Ok(());
+    };
+    let edge = match kind.trim().to_ascii_lowercase().as_str() {
+        "slide-top" => TransitionEdge::Top,
+        "slide-bottom" => TransitionEdge::Bottom,
+        "slide-left" => TransitionEdge::Left,
+        "slide-right" => TransitionEdge::Right,
+        other => {
+            return Err(LoadError(format!(
+                "transition 不支持 {other:?}，应为 slide-top/slide-bottom/slide-left/slide-right"
+            )))
+        }
+    };
+    let distance = attr_value(attrs, "transition-distance")
+        .ok_or_else(|| LoadError("显隐过渡缺少 transition-distance".into()))?
+        .parse::<f32>()
+        .map_err(|_| LoadError("transition-distance 必须是数字".into()))?;
+    if !distance.is_finite() || distance <= 0.0 {
+        return Err(LoadError("transition-distance 必须大于 0".into()));
+    }
+
+    let mut transition = Transition::slide(edge, distance);
+    if let Some(value) = attr_value(attrs, "transition-duration") {
+        let duration = value
+            .parse::<f32>()
+            .map_err(|_| LoadError("transition-duration 必须是秒数".into()))?;
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(LoadError("transition-duration 必须大于 0".into()));
+        }
+        transition = transition.duration(duration);
+    }
+    if let Some(value) = attr_value(attrs, "transition-easing") {
+        let easing = match value.trim().to_ascii_lowercase().as_str() {
+            "linear" => flexui_core::Easing::Linear,
+            "ease-in" => flexui_core::Easing::EaseIn,
+            "ease-out" => flexui_core::Easing::EaseOut,
+            "ease-in-out" => flexui_core::Easing::EaseInOut,
+            other => return Err(LoadError(format!("未知 transition-easing: {other}"))),
+        };
+        transition = transition.easing(easing);
+    }
+    node.base_mut().transition = Some(transition);
+    Ok(())
 }
 
 fn split_numbers(value: &str) -> Option<Vec<f32>> {

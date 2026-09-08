@@ -261,6 +261,12 @@ pub struct Base {
     pub hit: HitPolicy,
     /// 只影响绘制、命中和窗口坐标换算，不参与布局分配。
     pub transform: WidgetTransform,
+    /// `WindowCtx::set_visible_animated` 使用的声明式显隐过渡。
+    pub transition: Option<crate::anim::Transition>,
+    /// 过渡开始前的静止位移；快速反向播放时保持不变。
+    pub(crate) transition_origin: Option<flexui_gfx::Point>,
+    /// 过渡完成后应处于的可见状态；None 表示没有显隐过渡。
+    pub(crate) transition_target_visible: Option<bool>,
     pub hit_shape: HitShape,
 
     // —— 选择 / 分组（Radio/CheckBox/TabBox 用）——
@@ -354,6 +360,9 @@ impl Base {
             visible: true,
             hit: HitPolicy::Solid,
             transform: WidgetTransform::default(),
+            transition: None,
+            transition_origin: None,
+            transition_target_visible: None,
             hit_shape: HitShape::default(),
             selected: false,
             rect: Rect::default(),
