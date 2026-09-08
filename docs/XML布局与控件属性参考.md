@@ -59,12 +59,14 @@
 | `title` | 字符串 | `flexui-rs` | 窗口标题 |
 | `width` | 数字 | `640` | 逻辑像素宽 |
 | `height` | 数字 | `440` | 逻辑像素高 |
+| `initial-position` | `platform` / `center` | `platform` | 初始位置由平台决定，或在主屏幕工作区居中 |
 | `resizable` | 布尔 | `true` | 是否允许改变大小 |
 | `titlebar` | `system` / `hidden`(=`hiddenkeepcontrols`) / `none`(=`borderless`) | `system` | 标题栏模式：系统栏 / 隐藏标题栏保留窗口控制（macOS 保留交通灯）/ 无边框自绘 |
 | `window-class` | 字符串 | `FlexUiWindowClass` | Win32 窗口类名，供单实例 `FindWindowW` 查找；其它平台忽略 |
 
 ```xml
-<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false">
+<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false"
+        initial-position="center">
   <VBox padding="16"> … </VBox>
 </Window>
 ```

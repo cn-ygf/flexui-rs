@@ -11,7 +11,7 @@ use flexui_core::{
     StyleSpec, Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode,
     Transition, TransitionEdge, VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows,
     VirtualSelectionMode, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
-    WindowDragRegion,
+    WindowDragRegion, WindowInitialPosition,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -260,6 +260,17 @@ fn parse_window_config(
             .unwrap_or(440.0),
     );
     cfg.localized_title = localized_title;
+    if let Some(v) = el.attr("initial-position") {
+        cfg.initial_position = match v.trim().to_ascii_lowercase().as_str() {
+            "platform" => WindowInitialPosition::PlatformDefault,
+            "center" => WindowInitialPosition::CenterScreen,
+            _ => {
+                return Err(LoadError(format!(
+                    "initial-position 仅支持 platform 或 center: {v}"
+                )))
+            }
+        };
+    }
     if let Some(v) = el.attr("visible") {
         cfg.visible = parse_bool(v);
     }

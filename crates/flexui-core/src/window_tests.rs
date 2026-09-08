@@ -25,6 +25,12 @@ fn apply_requests(dispatcher: &mut Dispatcher, root: &mut dyn Widget, requests: 
 }
 
 #[test]
+fn 窗口配置可用代码设置初始居中() {
+    let config = WindowConfig::new("center", 320.0, 240.0).centered();
+    assert_eq!(config.initial_position, WindowInitialPosition::CenterScreen);
+}
+
+#[test]
 fn 显隐过渡_滑入后保持可见_滑出后才隐藏() {
     let transition = Transition::slide(TransitionEdge::Bottom, 100.0)
         .duration(1.0)

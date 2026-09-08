@@ -368,29 +368,37 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 /// 窗口驱动（≈ duilib Window）：加载皮肤、建原生窗口、进事件循环。用户不继承，直接用。
 pub struct Window<W: WindowImpl> {
     imp: W,
+    initial_position_override: Option<WindowInitialPosition>,
 }
 
 impl<W: WindowImpl> Window<W> {
     /// 用一个 WindowImpl 创建窗口驱动。
     pub fn new(imp: W) -> Self {
-        Self { imp }
+        Self {
+            imp,
+            initial_position_override: None,
+        }
     }
 
-    /// 居中显示（≈ CenterWindow；当前后端默认即居中，保留以对齐习惯用法）。
-    pub fn center(self) -> Self {
+    /// 覆盖代码或 XML 配置，使窗口首次创建时在主屏幕工作区居中。
+    pub fn center(mut self) -> Self {
+        self.initial_position_override = Some(WindowInitialPosition::CenterScreen);
         self
     }
 
     /// 启动：加载皮肤 → 建窗 → 初始化生命周期 → 进主事件循环（阻塞）。
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     pub fn run(self) {
-        let spec = match build_window(self.imp) {
+        let mut spec = match build_window(self.imp) {
             Ok(spec) => spec,
             Err(e) => {
                 eprintln!("[flexui] 窗口加载失败: {e}");
                 return;
             }
         };
+        if let Some(position) = self.initial_position_override {
+            spec.config.initial_position = position;
+        }
         // 保留完整 NewWindow，确保主窗口与后续窗口共享本地化环境及其修订号。
         backend_run_multi(vec![spec]);
     }
@@ -469,6 +477,16 @@ mod lifecycle_tests {
                 "close_compat",
                 "closed"
             ]
+        );
+    }
+
+    #[test]
+    fn window_center_覆盖初始位置() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let window = Window::new(LifecycleWindow { calls }).center();
+        assert_eq!(
+            window.initial_position_override,
+            Some(WindowInitialPosition::CenterScreen)
         );
     }
 }

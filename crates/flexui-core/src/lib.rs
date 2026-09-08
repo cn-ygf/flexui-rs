@@ -65,7 +65,8 @@ pub use widgets::{
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
-    WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation, DEFAULT_WINDOW_CLASS,
+    WindowDelegate, WindowDragRegion, WindowHandle, WindowInitialPosition, WindowPresentation,
+    DEFAULT_WINDOW_CLASS,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。

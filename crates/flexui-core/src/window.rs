@@ -39,6 +39,16 @@ pub enum WindowDragRegion {
 /// 未指定时使用的 Win32 窗口类名。
 pub const DEFAULT_WINDOW_CLASS: &str = "FlexUiWindowClass";
 
+/// 顶层窗口首次创建时的位置策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowInitialPosition {
+    /// 由平台窗口管理器决定初始位置。
+    #[default]
+    PlatformDefault,
+    /// 在主屏幕工作区内居中，不覆盖任务栏。
+    CenterScreen,
+}
+
 /// 窗口配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -47,6 +57,8 @@ pub struct WindowConfig {
     pub localized_title: Option<LocalizedStringResource>,
     pub width: f32,
     pub height: f32,
+    /// 原生窗口首次创建时的位置。
+    pub initial_position: WindowInitialPosition,
     /// 原生窗口创建完成后是否立即显示；设为 false 时由业务就绪后调用 `show()`。
     pub visible: bool,
     /// false = 禁止改变大小。
@@ -75,6 +87,7 @@ impl Default for WindowConfig {
             localized_title: None,
             width: 640.0,
             height: 440.0,
+            initial_position: WindowInitialPosition::PlatformDefault,
             visible: true,
             resizable: true,
             titlebar: TitlebarMode::System,
@@ -99,6 +112,15 @@ impl WindowConfig {
     pub fn resizable(mut self, v: bool) -> Self {
         self.resizable = v;
         self
+    }
+    /// 设置窗口首次创建时的位置策略。
+    pub fn initial_position(mut self, position: WindowInitialPosition) -> Self {
+        self.initial_position = position;
+        self
+    }
+    /// 首次创建时在主屏幕工作区居中。
+    pub fn centered(self) -> Self {
+        self.initial_position(WindowInitialPosition::CenterScreen)
     }
     /// 设置窗口是否在初始化结束后立即显示。
     pub fn visible(mut self, v: bool) -> Self {

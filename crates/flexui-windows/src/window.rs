@@ -11,7 +11,7 @@ use flexui_core::{
     apply_localizations, hit_test_drag, layout_node, paint_tree_in_rect, widget_rect_to_window,
     Canvas, Color, Dispatcher, Event, Mods, MouseButton, NewWindow, Node, Point, Rect,
     TitlebarMode, Widget, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle,
-    WindowPresentation, DEFAULT_WINDOW_CLASS,
+    WindowInitialPosition, WindowPresentation, DEFAULT_WINDOW_CLASS,
 };
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
@@ -419,6 +419,25 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     let outer_width = (outer.right - outer.left).max(1);
     let outer_height = (outer.bottom - outer.top).max(1);
 
+    let (initial_x, initial_y) = match config.initial_position {
+        WindowInitialPosition::PlatformDefault => (CW_USEDEFAULT, CW_USEDEFAULT),
+        WindowInitialPosition::CenterScreen => {
+            let mut work_area: RECT = std::mem::zeroed();
+            if SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                &mut work_area as *mut RECT as *mut std::ffi::c_void,
+                0,
+            ) == 0
+            {
+                eprintln!("[flexui] 读取主屏幕工作区失败，回退到平台默认窗口位置");
+                (CW_USEDEFAULT, CW_USEDEFAULT)
+            } else {
+                centered_window_origin(&work_area, outer_width, outer_height)
+            }
+        }
+    };
+
     let title = wide(&config.title);
     let mut ex_style = if is_modal { WS_EX_TOOLWINDOW } else { 0 };
     if layered {
@@ -429,8 +448,8 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         class_name_w.as_ptr(),
         title.as_ptr(),
         style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        initial_x,
+        initial_y,
         outer_width,
         outer_height,
         if is_modal { owner } else { null_mut() },
@@ -579,6 +598,16 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         create_window(w, hwnd);
     }
     hwnd
+}
+
+/// 计算窗口在工作区内的居中左上角；窗口大于工作区时贴齐左上角。
+fn centered_window_origin(work_area: &RECT, width: i32, height: i32) -> (i32, i32) {
+    let available_width = (work_area.right - work_area.left).max(0);
+    let available_height = (work_area.bottom - work_area.top).max(0);
+    (
+        work_area.left + (available_width - width).max(0) / 2,
+        work_area.top + (available_height - height).max(0) / 2,
+    )
 }
 
 /// 在窗口尚未显示时生成完整离屏帧，预热布局、图片缓存和持久离屏缓冲。
@@ -1836,6 +1865,18 @@ unsafe fn paint_layered_window(hwnd: HWND, state: &mut AppState) {
 mod cursor_tests {
     use super::*;
     use flexui_core::{Edit, HitPolicy, Panel};
+
+    #[test]
+    fn 初始居中使用工作区且超大窗口贴齐左上角() {
+        let work_area = RECT {
+            left: 100,
+            top: 50,
+            right: 1700,
+            bottom: 950,
+        };
+        assert_eq!(centered_window_origin(&work_area, 400, 300), (700, 350));
+        assert_eq!(centered_window_origin(&work_area, 2000, 1200), (100, 50));
+    }
 
     #[test]
     fn edit_hit_uses_text_cursor() {
