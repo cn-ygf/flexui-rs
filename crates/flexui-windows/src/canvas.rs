@@ -395,22 +395,59 @@ impl GdiCanvas<'_> {
                 // 目标取内切圆：直径为目标矩形短边，居中。
                 let diameter = dw.min(dh);
                 let (ox, oy) = (dx + (dw - diameter) / 2.0, dy + (dh - diameter) / 2.0);
-                // 本函数只持有 &self，用不了 save/clip_round_rect，直接操作 GDI+ 状态。
-                let mut state: u32 = 0;
-                gp::GdipSaveGraphics(self.g, &mut state);
-                let path = self.build_round_path(
-                    Rect::new(ox, oy, diameter, diameter),
-                    Corners::all(diameter / 2.0),
-                );
-                gp::GdipSetClipPath(self.g, path, COMBINE_INTERSECT);
-                gp::GdipDeletePath(path);
-                self.draw_piece(img, ox, oy, diameter, diameter, sx, sy, side, side, attr);
-                gp::GdipRestoreGraphics(self.g, state);
+                self.draw_circle_piece(img, ox, oy, diameter, sx, sy, side, attr);
             }
         }
         if !attr.is_null() {
             gp::GdipDisposeImageAttributes(attr);
         }
+    }
+
+    /// 用图片纹理直接填充抗锯齿椭圆。
+    ///
+    /// GDI+ 的路径裁剪边缘是二值的，即使 Graphics 开启了抗锯齿也会产生锯齿；
+    /// `FillEllipse` 才会为圆周生成正确的半透明覆盖像素。
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn draw_circle_piece(
+        &self,
+        img: *mut gp::GpImage,
+        ox: f32,
+        oy: f32,
+        diameter: f32,
+        sx: f32,
+        sy: f32,
+        side: f32,
+        attr: *mut gp::GpImageAttributes,
+    ) {
+        if diameter <= 0.0 || side <= 0.0 {
+            return;
+        }
+
+        let mut texture: *mut gp::GpTexture = std::ptr::null_mut();
+        if gp::GdipCreateTextureIA(img, attr, sx, sy, side, side, &mut texture) != 0
+            || texture.is_null()
+        {
+            return;
+        }
+
+        // 纹理矩阵把源图裁切方块映射到目标圆的外接正方形。
+        let scale = diameter / side;
+        let mut matrix: *mut gp::Matrix = std::ptr::null_mut();
+        if gp::GdipCreateMatrix2(scale, 0.0, 0.0, scale, ox, oy, &mut matrix) == 0
+            && !matrix.is_null()
+        {
+            gp::GdipSetTextureTransform(texture, matrix);
+            gp::GdipFillEllipse(
+                self.g,
+                texture as *mut gp::GpBrush,
+                ox,
+                oy,
+                diameter,
+                diameter,
+            );
+            gp::GdipDeleteMatrix(matrix);
+        }
+        gp::GdipDeleteBrush(texture as *mut gp::GpBrush);
     }
 
     /// 绘制源矩形→目标矩形（带可选颜色属性）。
@@ -977,6 +1014,54 @@ mod tests {
                 Rect::new(20.0, 20.0, 5.0, 5.0),
             ),
             Rect::new(20.0, 20.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn 圆形图片边缘包含抗锯齿覆盖像素且保持居中裁切() {
+        let _gdiplus = Gdiplus::startup().expect("GDI+ 初始化失败");
+        let bitmap = OffscreenBitmap::new(36, 36).expect("创建离屏位图失败");
+        let mut canvas = GdiCanvas::new(bitmap.graphics());
+        canvas.clear(Color::rgba(0.0, 0.0, 0.0, 0.0));
+        let source = ImageSource::svg(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="60" height="40">
+                  <rect width="30" height="40" fill="#ff0000"/>
+                  <rect x="30" width="30" height="40" fill="#0000ff"/>
+                </svg>"##
+                .to_vec(),
+        );
+        canvas.draw_image(
+            &source,
+            Rect::new(4.0, 4.0, 28.0, 28.0),
+            None,
+            ImageFit::Circle,
+        );
+        drop(canvas);
+
+        assert_eq!(bitmap.get_pixel(4, 4) >> 24, 0, "圆外角落必须保持透明");
+        assert_eq!(bitmap.get_pixel(18, 18) >> 24, 0xff, "圆心必须不透明");
+
+        let mut partial_alpha = 0;
+        for y in 3..33 {
+            for x in 3..33 {
+                let alpha = bitmap.get_pixel(x, y) >> 24;
+                partial_alpha += usize::from(alpha > 0 && alpha < 0xff);
+            }
+        }
+        assert!(
+            partial_alpha >= 16,
+            "圆周必须产生足够的半透明抗锯齿像素，实际 {partial_alpha}"
+        );
+
+        let left = bitmap.get_pixel(11, 18);
+        let right = bitmap.get_pixel(25, 18);
+        assert!(
+            (left >> 16) & 0xff > left & 0xff,
+            "圆心左侧应来自红色源图：{left:#010x}"
+        );
+        assert!(
+            right & 0xff > (right >> 16) & 0xff,
+            "圆心右侧应来自蓝色源图：{right:#010x}"
         );
     }
 
