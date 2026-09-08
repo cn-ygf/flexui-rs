@@ -181,10 +181,7 @@ impl VirtualListDemo {
 fn context_menu(has_selection: bool) -> NativeMenu {
     NativeMenu::new()
         .item(NativeMenuItem::new("virtual_reset", "Reset"))
-        .item(
-            NativeMenuItem::new("virtual_delete_selected", "Delete")
-                .enabled(has_selection),
-        )
+        .item(NativeMenuItem::new("virtual_delete_selected", "Delete").enabled(has_selection))
 }
 
 fn selected_ids(ctx: &mut WindowCtx) -> Vec<u64> {

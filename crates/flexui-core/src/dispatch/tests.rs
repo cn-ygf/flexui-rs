@@ -390,9 +390,7 @@ fn caption_挡住下层且拖动视为空白() {
     let under_id = under.base().id;
     let child = Button::new("child").size(40.0, 20.0).pos(10.0, 10.0);
     let child_id = child.base().id;
-    let caption = Panel::new()
-        .hit(crate::HitPolicy::Caption)
-        .push(child);
+    let caption = Panel::new().hit(crate::HitPolicy::Caption).push(child);
     let caption_id = caption.base().id;
     let mut root = Panel::new().push(under).push(caption);
     layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 100.0), &FakeCanvas);

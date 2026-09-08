@@ -56,12 +56,12 @@ pub fn activate_existing_window(class_name: &str) -> bool {
 }
 
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
+#[cfg(target_os = "linux")]
+use flexui_linux::run_multi as backend_run_multi;
 #[cfg(target_os = "macos")]
 use flexui_macos::run_multi as backend_run_multi;
 #[cfg(target_os = "windows")]
 use flexui_windows::run_multi as backend_run_multi;
-#[cfg(target_os = "linux")]
-use flexui_linux::run_multi as backend_run_multi;
 
 /// 设置应用图标。macOS 用于 Dock/应用切换器；Windows 的 EXE 图标由构建资源提供。
 pub fn set_application_icon(bytes: &[u8]) {

@@ -450,7 +450,11 @@ mod tests {
         layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
 
         let label = &root.base().children[0];
-        assert_eq!(label.base().rect.size.width, 40.0, "固定宽度应优先于父级拉伸");
+        assert_eq!(
+            label.base().rect.size.width,
+            40.0,
+            "固定宽度应优先于父级拉伸"
+        );
 
         label.paint_content(&mut cv, &StyleSpec::default());
         let shown = &cv.绘制文本[0];

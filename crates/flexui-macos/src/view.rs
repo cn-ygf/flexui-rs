@@ -23,8 +23,8 @@ use objc2_foundation::{
 use flexui_core::event::keys;
 use flexui_core::{
     apply_localizations, find_by_id, find_mut_by_id, layout_node, paint_tree_in_rect,
-    widget_rect_to_window, Dispatcher, Event, Mods, MouseButton, NewWindow, Node, Point, Rect, Size,
-    Widget, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle,
+    widget_rect_to_window, Dispatcher, Event, Mods, MouseButton, NewWindow, Node, Point, Rect,
+    Size, Widget, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle,
 };
 
 use crate::canvas::{CgCanvas, ImageCache, SharedImageCache};

@@ -64,10 +64,7 @@ fn window_根解析配置() {
 fn window_根解析窗口类名() {
     let xml = r#"<Window title="演示" window-class="RiverDesktopWindowClass"><Panel/></Window>"#;
     let doc = load_window_str(xml, &Context::new()).unwrap();
-    assert_eq!(
-        doc.config.unwrap().class_name,
-        "RiverDesktopWindowClass"
-    );
+    assert_eq!(doc.config.unwrap().class_name, "RiverDesktopWindowClass");
 }
 
 #[test]
@@ -97,7 +94,10 @@ fn xml_mouse_caption_与drag别名() {
     let solid = load_str(r#"<Panel mouse="solid"/>"#, &Context::new()).unwrap();
     assert_eq!(solid.root.base().hit, flexui_core::HitPolicy::Solid);
     let transparent = load_str(r#"<Panel mouse="transparent"/>"#, &Context::new()).unwrap();
-    assert_eq!(transparent.root.base().hit, flexui_core::HitPolicy::Transparent);
+    assert_eq!(
+        transparent.root.base().hit,
+        flexui_core::HitPolicy::Transparent
+    );
 }
 
 #[test]

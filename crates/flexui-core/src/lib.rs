@@ -25,8 +25,8 @@ pub mod window;
 pub use anim::{AnimProp, Easing, Transition, TransitionEdge};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use dispatch::{
-    hit_test, hit_test_drag, point_wants_text_cursor, widget_rect_to_window, widget_transform_to_window,
-    Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
+    hit_test, hit_test_drag, point_wants_text_cursor, widget_rect_to_window,
+    widget_transform_to_window, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
 };
 pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
