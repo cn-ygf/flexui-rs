@@ -20,19 +20,25 @@ use flexui_xml::{load_str, Context};
 use flexui_core::dialog::{DialogKind, FileDialog};
 
 // 按平台选择后端（编译期三选一）。
+#[cfg(target_os = "linux")]
+use flexui_linux as backend;
 #[cfg(target_os = "macos")]
 use flexui_macos as backend;
 #[cfg(target_os = "windows")]
 use flexui_windows as backend;
-#[cfg(target_os = "linux")]
-use flexui_linux as backend;
 
 /// 库版本（主*10000 + 次*100 + 补丁）。
 #[no_mangle]
 pub extern "C" fn flex_version() -> u32 {
     let mut parts = env!("CARGO_PKG_VERSION").split('.');
-    let major = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-    let minor = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let major = parts
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
     let patch = parts
         .next()
         .and_then(|v| v.split('-').next())
@@ -215,7 +221,11 @@ pub extern "C" fn flex_ctx_set_value(ctx: *mut c_void, name: *const c_char, valu
 
 /// 读控件数值到 *out；返回 1=已取到，0=未找到/出错。
 #[no_mangle]
-pub extern "C" fn flex_ctx_get_value(ctx: *mut c_void, name: *const c_char, out: *mut f32) -> c_int {
+pub extern "C" fn flex_ctx_get_value(
+    ctx: *mut c_void,
+    name: *const c_char,
+    out: *mut f32,
+) -> c_int {
     catch_unwind(AssertUnwindSafe(|| unsafe {
         let (Some(ctx), Some(n)) = (ctx_from(ctx), cstr(name)) else {
             return 0;
@@ -601,7 +611,8 @@ pub struct FlexDelegate {
         extern "C" fn(name: *const c_char, x: f32, y: f32, ctx: *mut c_void, user: *mut c_void),
     >,
     /// 窗口尺寸变化（逻辑像素）。
-    pub on_size: Option<extern "C" fn(width: f32, height: f32, ctx: *mut c_void, user: *mut c_void)>,
+    pub on_size:
+        Option<extern "C" fn(width: f32, height: f32, ctx: *mut c_void, user: *mut c_void)>,
     /// 按键（导航/功能键的平台无关键码）。
     pub on_key: Option<extern "C" fn(key: c_int, ctx: *mut c_void, user: *mut c_void)>,
     pub on_window_state: Option<extern "C" fn(state: c_int, ctx: *mut c_void, user: *mut c_void)>,
@@ -1198,7 +1209,10 @@ mod tests {
         assert_eq!(log.len(), 4, "只应回调 4 个已导出的事件");
         assert_eq!((log[0].0, log[0].1), (FLEX_CTRL_SELECTED_CHANGED, 1));
         assert_eq!((log[1].0, log[1].2), (FLEX_CTRL_VALUE_CHANGED, 0.5));
-        assert_eq!((log[2].0, log[2].3.as_str()), (FLEX_CTRL_TEXT_CHANGED, "hi"));
+        assert_eq!(
+            (log[2].0, log[2].3.as_str()),
+            (FLEX_CTRL_TEXT_CHANGED, "hi")
+        );
         assert_eq!((log[3].0, log[3].1), (FLEX_CTRL_SELECTION_CHANGED, -1));
     }
 }

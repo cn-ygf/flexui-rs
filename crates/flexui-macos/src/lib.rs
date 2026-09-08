@@ -23,7 +23,8 @@ use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSImage, NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSColor, NSImage, NSScreen, NSWindow, NSWindowButton, NSWindowStyleMask,
+    NSWindowTitleVisibility,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSData, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
@@ -31,8 +32,11 @@ use objc2_foundation::{
 };
 
 use flexui_core::{
-    Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate, WindowPresentation,
+    Dispatcher, NewWindow, Node, TitlebarMode, WindowConfig, WindowDelegate, WindowInitialPosition,
+    WindowPresentation,
 };
+
+use std::sync::Mutex;
 
 /// 设置当前进程的应用图标（Dock、应用切换器）。
 pub fn set_application_icon(bytes: &[u8]) {
@@ -138,6 +142,45 @@ impl AppDelegate {
     }
 }
 
+/// 将窗口放到主屏幕可用工作区中央；窗口大于工作区时贴齐左下角。
+fn center_window_on_main_screen(mtm: MainThreadMarker, window: &NSWindow) {
+    let Some(screen) = NSScreen::mainScreen(mtm) else {
+        window.center();
+        return;
+    };
+    let work_area = screen.visibleFrame();
+    let frame = window.frame();
+    window.setFrameOrigin(centered_window_origin(work_area, frame));
+}
+
+/// 让未指定位置的窗口按 AppKit 级联摆放，避免所有窗口重叠或落到 (0, 0)。
+fn cascade_window_on_main_screen(mtm: MainThreadMarker, window: &NSWindow) {
+    static NEXT_TOP_LEFT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+    let Some(screen) = NSScreen::mainScreen(mtm) else {
+        window.center();
+        return;
+    };
+    let work_area = screen.visibleFrame();
+    let fallback = (
+        work_area.origin.x + 20.0,
+        work_area.origin.y + work_area.size.height - 20.0,
+    );
+    let mut next = NEXT_TOP_LEFT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let (x, y) = next.unwrap_or(fallback);
+    let following = window.cascadeTopLeftFromPoint(NSPoint::new(x, y));
+    *next = Some((following.x, following.y));
+}
+
+fn centered_window_origin(work_area: NSRect, frame: NSRect) -> NSPoint {
+    NSPoint::new(
+        work_area.origin.x + (work_area.size.width - frame.size.width).max(0.0) / 2.0,
+        work_area.origin.y + (work_area.size.height - frame.size.height).max(0.0) / 2.0,
+    )
+}
+
 /// 创建一个原生窗口并接入事件循环（定时器由 run loop 保活）。返回窗口句柄。
 pub(crate) fn make_window(
     mtm: MainThreadMarker,
@@ -199,6 +242,12 @@ pub(crate) fn make_window(
     window.setTitle(&NSString::from_str(&config.title));
     window.setAcceptsMouseMovedEvents(true);
 
+    // 与 Windows 分层窗口语义一致：透明仅用于无边框窗口，未绘制区域透出桌面。
+    if config.titlebar != TitlebarMode::System && config.transparent {
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+    }
+
     // 自绘/隐藏模式：标题栏透明且内容铺满窗口。
     if config.titlebar != TitlebarMode::System {
         window.setTitlebarAppearsTransparent(true);
@@ -237,6 +286,7 @@ pub(crate) fn make_window(
             locale_revision,
             localized_title: config.localized_title.clone(),
             drag_region: config.drag_region,
+            transparent: config.titlebar != TitlebarMode::System && config.transparent,
             modal_owner: modal_owner.map(Weak::new),
         },
     );
@@ -259,13 +309,45 @@ pub(crate) fn make_window(
             owner_frame.origin.x + (owner_frame.size.width - frame.size.width) / 2.0,
             owner_frame.origin.y + (owner_frame.size.height - frame.size.height) / 2.0,
         ));
-        owner.beginSheet_completionHandler(&window, None);
+        if config.visible && window.sheetParent().is_none() {
+            owner.beginSheet_completionHandler(&window, None);
+        }
     } else {
-        window.center();
-        window.makeKeyAndOrderFront(None);
+        match config.initial_position {
+            WindowInitialPosition::PlatformDefault => cascade_window_on_main_screen(mtm, &window),
+            WindowInitialPosition::CenterScreen => center_window_on_main_screen(mtm, &window),
+        }
+        if config.visible {
+            window.makeKeyAndOrderFront(None);
+        }
     }
     if close_requested {
         view.close_after_callback(&window);
     }
     window
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    #[test]
+    fn center_uses_visible_work_area() {
+        let work_area = NSRect::new(NSPoint::new(80.0, 40.0), NSSize::new(1920.0, 1040.0));
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(800.0, 600.0));
+        assert_eq!(
+            centered_window_origin(work_area, frame),
+            NSPoint::new(640.0, 260.0)
+        );
+    }
+
+    #[test]
+    fn oversized_window_stays_at_work_area_origin() {
+        let work_area = NSRect::new(NSPoint::new(-1600.0, 20.0), NSSize::new(1600.0, 900.0));
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(2000.0, 1000.0));
+        assert_eq!(
+            centered_window_origin(work_area, frame),
+            NSPoint::new(-1600.0, 20.0)
+        );
+    }
 }

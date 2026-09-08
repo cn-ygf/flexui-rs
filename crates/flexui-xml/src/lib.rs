@@ -6,8 +6,8 @@ mod native_menu;
 mod parser;
 
 pub use build::{
-    build_fragment_res, build_fragment_str, load_res, load_str, load_window_res, load_window_str,
-    Context, LoadError, LoadResult, WindowDoc,
+    build_fragment_res, build_fragment_str, build_fragment_str_res, load_res, load_str,
+    load_window_res, load_window_str, Context, LoadError, LoadResult, WindowDoc,
 };
 pub use native_menu::{load_native_menu_res, load_native_menu_str};
 pub use parser::{parse, Element, ParseError};

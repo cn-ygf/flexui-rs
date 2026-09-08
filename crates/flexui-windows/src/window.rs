@@ -8,12 +8,14 @@ use std::ptr::{null, null_mut};
 
 use flexui_core::event::keys;
 use flexui_core::{
-    apply_localizations, hit_test, layout_node, paint_tree_in_rect, Canvas, Color, Dispatcher,
-    Event, Mods, MouseButton, NewWindow, Node, Point, Rect, TitlebarMode, Widget, WindowConfig,
-    WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
-    widget_rect_to_window,
+    apply_localizations, hit_test_drag, layout_node, paint_tree_in_rect, widget_rect_to_window,
+    Canvas, Color, Dispatcher, Event, Mods, MouseButton, NewWindow, Node, Point, Rect,
+    TitlebarMode, Widget, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowHandle,
+    WindowInitialPosition, WindowPresentation, DEFAULT_WINDOW_CLASS,
 };
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+};
 use windows_sys::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_ENABLED,
     DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -21,7 +23,7 @@ use windows_sys::Win32::Graphics::Dwm::{
 };
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, GetDC, InvalidateRect, ReleaseDC, ScreenToClient, UpdateWindow,
-    ValidateRect, HDC, PAINTSTRUCT,
+    ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, HDC, PAINTSTRUCT,
 };
 use windows_sys::Win32::Graphics::GdiPlus as gp;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -42,7 +44,7 @@ use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW,
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::canvas::{GdiCanvas, ImageCache};
-use crate::gdiplus::{Gdiplus, OffscreenBitmap, UNIT_PIXEL};
+use crate::gdiplus::{Gdiplus, LayeredSurface, OffscreenBitmap, UNIT_PIXEL};
 
 /// 旧配置的默认顶部拖动条高度（逻辑像素）。
 const DEFAULT_DRAG_STRIP: f32 = 40.0;
@@ -98,10 +100,17 @@ struct AppState {
     /// 窗口级持久离屏缓冲；普通局部重绘不再反复分配整窗位图。
     back_buffer: Option<OffscreenBitmap>,
     back_buffer_size: (i32, i32),
+    /// 逐像素 alpha 合成（WS_EX_LAYERED + UpdateLayeredWindow）。
+    layered: bool,
+    /// 分层窗口的整窗提交表面；非分层窗口恒为 None。
+    layered_surface: Option<LayeredSurface>,
+    layered_size: (i32, i32),
     /// 控件几何是否需要在下一帧重新布局；纯 hot 切换可复用现有布局。
     layout_dirty: bool,
     /// 模态子窗口的 owner；销毁时恢复 owner 的输入与激活状态。
     modal_owner: HWND,
+    /// 其它进程投递的激活消息；收到后显示并还原窗口。
+    activate_msg: u32,
 }
 
 /// 应用共享语言环境的最新修订，并返回是否发生变化。
@@ -138,6 +147,7 @@ impl WindowHandle for WinWindowHandle {
                 ShowWindow(self.hwnd, SW_SHOW);
             }
             SetForegroundWindow(self.hwnd);
+            BringWindowToTop(self.hwnd);
         }
     }
     fn hide(&mut self) {
@@ -182,6 +192,68 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// 其它进程用来激活本窗口的消息名，与窗口类名一一对应。
+fn activate_message_name(class_name: &str) -> String {
+    format!("FlexUi.Activate.{class_name}")
+}
+
+fn register_activate_message(class_name: &str) -> u32 {
+    let name = wide(&activate_message_name(class_name));
+    unsafe {
+        let message = RegisterWindowMessageW(name.as_ptr());
+        if message == 0 {
+            WM_APP + 201
+        } else {
+            message
+        }
+    }
+}
+
+unsafe fn register_window_class(class_name: &[u16]) -> bool {
+    let hinstance = GetModuleHandleW(null());
+    // 资源 ID 1 是 Windows 约定的主应用图标；未嵌入时 LoadIconW 返回空。
+    let app_icon = LoadIconW(hinstance, int_resource(1));
+    let wc = WNDCLASSW {
+        // 尺寸变化由 WM_SIZE 显式失效；HREDRAW/VREDRAW 会在还原时制造额外整窗重绘。
+        style: CS_DBLCLKS,
+        lpfnWndProc: Some(wndproc),
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        hInstance: hinstance,
+        hIcon: app_icon,
+        hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+        hbrBackground: null_mut(),
+        lpszMenuName: null(),
+        lpszClassName: class_name.as_ptr(),
+    };
+    if RegisterClassW(&wc) != 0 {
+        return true;
+    }
+    GetLastError() == ERROR_CLASS_ALREADY_EXISTS
+}
+
+/// 查找已运行的同名窗口并请它显示、还原、置前。
+pub fn activate_existing_window(class_name: &str) -> bool {
+    let class = if class_name.is_empty() {
+        DEFAULT_WINDOW_CLASS
+    } else {
+        class_name
+    };
+    let class_w = wide(class);
+    unsafe {
+        let hwnd = FindWindowW(class_w.as_ptr(), null());
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut process_id = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        if process_id != 0 {
+            AllowSetForegroundWindow(process_id);
+        }
+        PostMessageW(hwnd, register_activate_message(class), 0, 0) != 0
+    }
+}
+
 /// Win32 `MAKEINTRESOURCEW`：把 16 位资源 ID 编码进指针值，API 不会解引用它。
 #[allow(clippy::manual_dangling_ptr)]
 const fn int_resource(id: u16) -> *const u16 {
@@ -212,25 +284,6 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     unsafe {
         // 开启 Per-Monitor V2 DPI 感知（若宿主未嵌入清单，此调用作为运行期兜底）。
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
-        let hinstance = GetModuleHandleW(null());
-        let class_name = wide("FlexUiWindowClass");
-        // 资源 ID 1 是 Windows 约定的主应用图标；未嵌入时 LoadIconW 返回空。
-        let app_icon = LoadIconW(hinstance, int_resource(1));
-        let wc = WNDCLASSW {
-            // 尺寸变化由 WM_SIZE 显式失效；HREDRAW/VREDRAW 会在还原时制造额外整窗重绘。
-            style: CS_DBLCLKS,
-            lpfnWndProc: Some(wndproc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: hinstance,
-            hIcon: app_icon,
-            hCursor: LoadCursorW(null_mut(), IDC_ARROW),
-            hbrBackground: null_mut(),
-            lpszMenuName: null(),
-            lpszClassName: class_name.as_ptr(),
-        };
-        RegisterClassW(&wc);
 
         for spec in windows {
             create_window(spec, null_mut());
@@ -306,10 +359,24 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         locale_revision,
     } = spec;
     let hinstance = GetModuleHandleW(null());
-    let class_name = wide("FlexUiWindowClass");
+    let class_name = if config.class_name.is_empty() {
+        DEFAULT_WINDOW_CLASS
+    } else {
+        config.class_name.as_str()
+    };
+    let class_name_w = wide(class_name);
+    if !register_window_class(&class_name_w) {
+        eprintln!("[flexui] RegisterClassW 失败");
+        return null_mut();
+    }
+    let activate_msg = register_activate_message(class_name);
 
     let frameless = config.titlebar != TitlebarMode::System;
-    let keep_dwm_frame = config.resizable || config.system_corners || config.system_shadow;
+    // 逐像素 alpha 由 UpdateLayeredWindow 提交，此时系统不会给窗口套圆角与投影，
+    // 圆角和阴影一律来自绘制内容本身，故忽略这两项配置。
+    let layered = frameless && config.transparent;
+    let keep_dwm_frame =
+        config.resizable || (!layered && (config.system_corners || config.system_shadow));
     let mut style = if frameless {
         // 保留 WS_CAPTION 的标准顶层窗口语义，让 Shell/DWM 提供最小化、最大化和还原动画；
         // 可见标题栏仍由 WM_NCCALCSIZE 完全移除。
@@ -352,15 +419,37 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     let outer_width = (outer.right - outer.left).max(1);
     let outer_height = (outer.bottom - outer.top).max(1);
 
+    let (initial_x, initial_y) = match config.initial_position {
+        WindowInitialPosition::PlatformDefault => (CW_USEDEFAULT, CW_USEDEFAULT),
+        WindowInitialPosition::CenterScreen => {
+            let mut work_area: RECT = std::mem::zeroed();
+            if SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                &mut work_area as *mut RECT as *mut std::ffi::c_void,
+                0,
+            ) == 0
+            {
+                eprintln!("[flexui] 读取主屏幕工作区失败，回退到平台默认窗口位置");
+                (CW_USEDEFAULT, CW_USEDEFAULT)
+            } else {
+                centered_window_origin(&work_area, outer_width, outer_height)
+            }
+        }
+    };
+
     let title = wide(&config.title);
-    let ex_style = if is_modal { WS_EX_TOOLWINDOW } else { 0 };
+    let mut ex_style = if is_modal { WS_EX_TOOLWINDOW } else { 0 };
+    if layered {
+        ex_style |= WS_EX_LAYERED;
+    }
     let hwnd = CreateWindowExW(
         ex_style,
-        class_name.as_ptr(),
+        class_name_w.as_ptr(),
         title.as_ptr(),
         style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        initial_x,
+        initial_y,
         outer_width,
         outer_height,
         if is_modal { owner } else { null_mut() },
@@ -395,15 +484,27 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
         redraw_after_restore: false,
         back_buffer: None,
         back_buffer_size: (0, 0),
+        layered,
+        layered_surface: None,
+        layered_size: (0, 0),
         layout_dirty: true,
         modal_owner: if is_modal { owner } else { null_mut() },
+        activate_msg,
     }));
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+    // 32 位下 SetWindowLongPtrW 就是 SetWindowLongW，形参为 i32；64 位则为 isize。
+    // 先转 isize 再按目标宽度收窄：指针宽度与 isize 一致，两种架构下都不丢位。
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize as _);
     THREAD_WINDOWS.with(|windows| windows.borrow_mut().push(hwnd));
     WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     if frameless {
-        configure_frameless_dwm(hwnd, config.system_corners, config.system_shadow);
+        // 分层窗口的圆角与阴影全部由绘制内容提供，系统效果必须一并关掉。
+        let (corners, shadow) = if layered {
+            (false, false)
+        } else {
+            (config.system_corners, config.system_shadow)
+        };
+        configure_frameless_dwm(hwnd, corners, shadow);
         // CreateWindowExW 期间 AppState 尚未挂到 HWND，首次 WM_NCCALCSIZE 仍按系统标题栏计算。
         // 状态就绪后强制重算边框，隐藏标题栏但保留 WS_CAPTION 的 Shell/DWM 动画语义。
         SetWindowPos(
@@ -482,19 +583,31 @@ unsafe fn create_window(spec: NewWindow, owner: HWND) -> HWND {
     // 窗口保持隐藏，先完成首次布局、图片解码和离屏帧预热。否则 WS_VISIBLE/CreateWindowExW
     // 会让 DWM 在首帧准备完成前展示空白表面，主窗口和模态窗口都会出现白闪。
     prepare_first_frame(hwnd, &mut *state);
-    if is_modal {
+    if is_modal && config.visible {
         // 子窗口首帧就绪后再冻结 owner，避免 owner 已禁用而对话框仍未出现的空档。
         EnableWindow(owner, 0);
     }
-    ShowWindow(hwnd, SW_SHOW);
-    // 显示会产生新的更新区；此时布局和图片均已缓存，同步提交不会再暴露半成品帧。
-    InvalidateRect(hwnd, null(), 0);
-    UpdateWindow(hwnd);
+    if config.visible {
+        ShowWindow(hwnd, SW_SHOW);
+        // 显示会产生新的更新区；此时布局和图片均已缓存，同步提交不会再暴露半成品帧。
+        invalidate(hwnd, null());
+        UpdateWindow(hwnd);
+    }
 
     for w in new_wins {
         create_window(w, hwnd);
     }
     hwnd
+}
+
+/// 计算窗口在工作区内的居中左上角；窗口大于工作区时贴齐左上角。
+fn centered_window_origin(work_area: &RECT, width: i32, height: i32) -> (i32, i32) {
+    let available_width = (work_area.right - work_area.left).max(0);
+    let available_height = (work_area.bottom - work_area.top).max(0);
+    (
+        work_area.left + (available_width - width).max(0) / 2,
+        work_area.top + (available_height - height).max(0) / 2,
+    )
 }
 
 /// 在窗口尚未显示时生成完整离屏帧，预热布局、图片缓存和持久离屏缓冲。
@@ -514,6 +627,18 @@ unsafe fn prepare_first_frame(hwnd: HWND, state: &mut AppState) {
 /// 取窗口关联的 AppState（可能为空）。
 unsafe fn app_state(hwnd: HWND) -> *mut AppState {
     GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState
+}
+
+/// 请求重绘；`rect` 为空指针表示整窗。
+///
+/// 分层窗口没有可重定向的绘制表面，`InvalidateRect` 不会引发 `WM_PAINT`，
+/// 必须自己补投一条，否则界面会停在首帧不再更新。
+unsafe fn invalidate(hwnd: HWND, rect: *const RECT) {
+    InvalidateRect(hwnd, rect, 0);
+    let state = app_state(hwnd);
+    if !state.is_null() && (*state).layered {
+        PostMessageW(hwnd, WM_PAINT, 0, 0);
+    }
 }
 
 /// 鼠标消息 lparam（客户区物理像素）→ 逻辑像素坐标（按 DPI 缩放，与布局一致）。
@@ -625,12 +750,12 @@ unsafe fn dispatch(hwnd: HWND, state: *mut AppState, ev: Event) -> bool {
     // 整窗重绘优先，否则只失效脏矩形（BeginPaint 的 HDC 会裁剪到更新区域）。
     if need || opened {
         st.layout_dirty |= layout;
-        InvalidateRect(hwnd, null(), 0);
+        invalidate(hwnd, null());
         true
     } else if let Some(r) = dirty {
         st.layout_dirty |= layout;
         let rc = to_physical_rect(hwnd, r);
-        InvalidateRect(hwnd, &rc, 0);
+        invalidate(hwnd, &rc);
         true
     } else {
         false
@@ -673,9 +798,9 @@ unsafe fn fire_window_event(hwnd: HWND, st: &mut AppState, event: flexui_core::W
     let dirty = st.disp.take_dirty();
     if layout || redraw || opened {
         st.layout_dirty |= layout;
-        InvalidateRect(hwnd, null(), 0);
+        invalidate(hwnd, null());
     } else if let Some(rect) = dirty {
-        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
+        invalidate(hwnd, &to_physical_rect(hwnd, rect));
     }
 }
 
@@ -745,7 +870,7 @@ unsafe fn set_marked_on_focus(hwnd: HWND, state: *mut AppState, text: &str) {
         let st = &mut *state;
         st.disp.reset_caret_blink(st.root.as_mut());
         let rc = to_physical_rect(hwnd, r);
-        InvalidateRect(hwnd, &rc, 0);
+        invalidate(hwnd, &rc);
         // 候选窗位置依赖 paint_content 刷新的 caret_rect，必须先同步提交当前组合串。
         UpdateWindow(hwnd);
     }
@@ -759,7 +884,7 @@ unsafe fn clear_marked_on_focus(hwnd: HWND, state: *mut AppState) {
         let st = &mut *state;
         st.disp.reset_caret_blink(st.root.as_mut());
         let rc = to_physical_rect(hwnd, r);
-        InvalidateRect(hwnd, &rc, 0);
+        invalidate(hwnd, &rc);
     }
 }
 
@@ -817,7 +942,7 @@ unsafe fn position_ime(hwnd: HWND, state: *mut AppState) {
 unsafe fn invalidate_dirty(hwnd: HWND, st: &mut AppState) {
     if let Some(r) = st.disp.take_dirty() {
         let rc = to_physical_rect(hwnd, r);
-        InvalidateRect(hwnd, &rc, 0);
+        invalidate(hwnd, &rc);
     }
 }
 
@@ -873,9 +998,9 @@ unsafe fn fire_drop(hwnd: HWND, state: *mut AppState, paths: Vec<String>) {
     let dirty = st.disp.take_dirty();
     if layout || redraw {
         st.layout_dirty |= layout;
-        InvalidateRect(hwnd, null(), 0);
+        invalidate(hwnd, null());
     } else if let Some(rect) = dirty {
-        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
+        invalidate(hwnd, &to_physical_rect(hwnd, rect));
     }
 }
 
@@ -892,6 +1017,14 @@ unsafe fn clipboard_select_all(hwnd: HWND, state: *mut AppState) {
 /// 窗口过程。
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let state = app_state(hwnd);
+    if !state.is_null() {
+        let activate = (*state).activate_msg;
+        if activate != 0 && msg == activate {
+            let mut handle = WinWindowHandle { hwnd };
+            handle.show();
+            return 0;
+        }
+    }
     match msg {
         // 交给默认过程维护激活状态；lParam=-1 仅禁止重绘不可见的非客户区，避免失焦白边。
         WM_NCACTIVATE if !state.is_null() && (*state).frameless => {
@@ -930,7 +1063,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if (*state).minimized {
                     (*state).redraw_after_restore = true;
                 } else {
-                    InvalidateRect(hwnd, null(), 0);
+                    invalidate(hwnd, null());
                 }
             }
             0
@@ -1277,7 +1410,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if restored_from_minimized {
                 PostMessageW(hwnd, WM_APP_RESTORE_REDRAW, 0, 0);
             } else {
-                InvalidateRect(hwnd, null(), 0);
+                invalidate(hwnd, null());
             }
             0
         }
@@ -1354,9 +1487,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         st.redraw_after_restore |= full_redraw || dirty.is_some();
                     } else if full_redraw {
                         st.layout_dirty |= layout || locale_changed;
-                        InvalidateRect(hwnd, null(), 0);
+                        invalidate(hwnd, null());
                     } else if let Some(rect) = dirty {
-                        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
+                        invalidate(hwnd, &to_physical_rect(hwnd, rect));
                     }
                 } else if !st.minimized && IsWindowVisible(hwnd) != 0 {
                     let blink = st.disp.blink(st.root.as_mut());
@@ -1364,10 +1497,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let layout = st.disp.take_layout();
                     if st.disp.take_redraw() || layout {
                         st.layout_dirty |= layout;
-                        InvalidateRect(hwnd, null(), 0);
+                        invalidate(hwnd, null());
                     } else if let Some(r) = blink {
                         let rc = to_physical_rect(hwnd, r);
-                        InvalidateRect(hwnd, &rc, 0);
+                        invalidate(hwnd, &rc);
                     }
                 }
             }
@@ -1375,7 +1508,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_APP_LOCALE_CHANGED => {
             if !state.is_null() && refresh_localizations(hwnd, &mut *state) {
-                InvalidateRect(hwnd, null(), 0);
+                invalidate(hwnd, null());
             }
             0
         }
@@ -1386,7 +1519,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         // 模态 owner 重新启用时保证应用共享环境已应用；disabled 窗口可能延迟处理普通消息。
         WM_ENABLE if wparam != 0 => {
             if !state.is_null() && refresh_localizations(hwnd, &mut *state) {
-                InvalidateRect(hwnd, null(), 0);
+                invalidate(hwnd, null());
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -1434,9 +1567,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let dirty = st.disp.take_dirty();
                     if layout || redraw {
                         st.layout_dirty |= layout;
-                        InvalidateRect(hwnd, null(), 0);
+                        invalidate(hwnd, null());
                     } else if let Some(rect) = dirty {
-                        InvalidateRect(hwnd, &to_physical_rect(hwnd, rect), 0);
+                        invalidate(hwnd, &to_physical_rect(hwnd, rect));
                     }
                 }
                 (allow, new_windows)
@@ -1493,7 +1626,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 WindowDragRegion::Disabled => false,
                 WindowDragRegion::Rect(rect) => rect.contains(lp),
             };
-            if in_drag_region && hit_test(st.root.as_ref(), lp).is_none() {
+            if in_drag_region && hit_test_drag(st.root.as_ref(), lp).is_none() {
                 HTCAPTION as isize
             } else {
                 HTCLIENT as isize
@@ -1521,7 +1654,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if !state.is_null() {
                 (*state).layout_dirty = true;
             }
-            InvalidateRect(hwnd, null(), 0);
+            invalidate(hwnd, null());
             0
         }
         WM_DESTROY => {
@@ -1555,6 +1688,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 /// 先画到 32bpp 离屏位图（抗锯齿/ClearType 在位图上效果最佳），再整块 blit 到窗口，
 /// 既消除 resize 闪烁，也保证边缘平滑。逻辑坐标经 world transform 按 DPI 放大到物理像素。
 unsafe fn paint_window(hwnd: HWND, hdc: HDC, paint: RECT, state: &mut AppState) {
+    if state.layered {
+        paint_layered_window(hwnd, state);
+        return;
+    }
     let mut rc: RECT = std::mem::zeroed();
     GetClientRect(hwnd, &mut rc);
     let w = (rc.right - rc.left).max(1);
@@ -1650,10 +1787,96 @@ unsafe fn paint_window(hwnd: HWND, hdc: HDC, paint: RECT, state: &mut AppState) 
     }
 }
 
+/// 分层窗口绘制：整窗按逐像素 alpha 合成后一次性提交。
+///
+/// `UpdateLayeredWindow` 只接受整窗提交，因此这里不做脏区优化，每帧全量重绘。
+/// 透明像素由系统直接合成到桌面，圆角、阴影全部来自绘制内容本身。
+unsafe fn paint_layered_window(hwnd: HWND, state: &mut AppState) {
+    let mut rc: RECT = std::mem::zeroed();
+    GetClientRect(hwnd, &mut rc);
+    let w = (rc.right - rc.left).max(1);
+    let h = (rc.bottom - rc.top).max(1);
+
+    let dpi = GetDpiForWindow(hwnd);
+    let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+
+    // 尺寸不变时复用表面，避免每帧重建 DIB 与内存 DC。
+    let rebuilt = state.layered_size != (w, h);
+    if rebuilt {
+        state.layered_surface = LayeredSurface::new(w, h);
+        state.layered_size = if state.layered_surface.is_some() {
+            (w, h)
+        } else {
+            (0, 0)
+        };
+    }
+    let Some(surface) = state.layered_surface.as_ref() else {
+        return;
+    };
+
+    gp::GdipResetWorldTransform(surface.graphics());
+    gp::GdipResetClip(surface.graphics());
+    let mut cv = GdiCanvas::with_cache(surface.graphics(), &mut state.image_cache);
+    // 先在无变换状态下整表面清成全透明；这是覆写而非混合，避免上一帧残留。
+    cv.clear(Color::rgba(0.0, 0.0, 0.0, 0.0));
+    cv.set_dpi_scale(scale);
+
+    let lw = w as f32 / scale;
+    let lh = h as f32 / scale;
+    let full = Rect::new(0.0, 0.0, lw, lh);
+    if rebuilt || state.layout_dirty {
+        layout_node(state.root.as_mut(), full, &cv);
+        state.layout_dirty = false;
+    }
+    paint_tree_in_rect(state.root.as_ref(), &mut cv, full);
+    state
+        .disp
+        .paint_overlays(&mut cv, flexui_core::Size::new(lw, lh));
+
+    // 提交：目标位置取窗口在屏幕上的左上角，源为已选入 DIB 的内存 DC。
+    let mut win: RECT = std::mem::zeroed();
+    GetWindowRect(hwnd, &mut win);
+    let mut pos = POINT {
+        x: win.left,
+        y: win.top,
+    };
+    let mut size = SIZE { cx: w, cy: h };
+    let mut src = POINT { x: 0, y: 0 };
+    let blend = BLENDFUNCTION {
+        BlendOp: AC_SRC_OVER as u8,
+        BlendFlags: 0,
+        SourceConstantAlpha: 255,
+        AlphaFormat: AC_SRC_ALPHA as u8,
+    };
+    UpdateLayeredWindow(
+        hwnd,
+        null_mut(),
+        &mut pos,
+        &mut size,
+        surface.dc(),
+        &mut src,
+        0,
+        &blend,
+        ULW_ALPHA,
+    );
+}
+
 #[cfg(test)]
 mod cursor_tests {
     use super::*;
     use flexui_core::{Edit, HitPolicy, Panel};
+
+    #[test]
+    fn 初始居中使用工作区且超大窗口贴齐左上角() {
+        let work_area = RECT {
+            left: 100,
+            top: 50,
+            right: 1700,
+            bottom: 950,
+        };
+        assert_eq!(centered_window_origin(&work_area, 400, 300), (700, 350));
+        assert_eq!(centered_window_origin(&work_area, 2000, 1200), (100, 50));
+    }
 
     #[test]
     fn edit_hit_uses_text_cursor() {

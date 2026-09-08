@@ -22,11 +22,11 @@ pub mod widgets;
 pub mod window;
 
 // 常用类型再导出，方便上层与后端使用。
-pub use anim::{AnimProp, Easing};
+pub use anim::{AnimProp, Easing, Transition, TransitionEdge};
 pub use dialog::{DialogKind, FileDialog, FileFilter};
 pub use dispatch::{
-    hit_test, point_wants_text_cursor, widget_rect_to_window, widget_transform_to_window,
-    Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
+    hit_test, hit_test_drag, point_wants_text_cursor, widget_rect_to_window,
+    widget_transform_to_window, Dispatcher, EventCtx, Invalidation, MainProxy, UiTask,
 };
 pub use event::{ControlEvent, Event, EventFlow, Mods, MouseButton, WindowEvent};
 pub use frame_animation::{FrameAnimation, FrameFinish, FrameLayer, FramePlayback};
@@ -65,7 +65,8 @@ pub use widgets::{
 };
 pub use window::{
     AnimRequest, NewWindow, NoopDelegate, OverlayRequest, TitlebarMode, WindowConfig, WindowCtx,
-    WindowDelegate, WindowDragRegion, WindowHandle, WindowPresentation,
+    WindowDelegate, WindowDragRegion, WindowHandle, WindowInitialPosition, WindowPresentation,
+    DEFAULT_WINDOW_CLASS,
 };
 
 // 几何/绘图类型透传，便于上层一次性引入。

@@ -9,7 +9,6 @@ use flexui_gfx::{Color, Point, Rect, Size};
 use crate::common_builders;
 use crate::event::{Event, EventFlow, MouseButton};
 use crate::layout;
-use crate::paint::draw_aligned_text;
 use crate::style::StyleSpec;
 use crate::theme::WidgetKind;
 use crate::widget::{Base, TextControl, Widget, WidgetProperty, WidgetRole};
@@ -174,6 +173,43 @@ impl Label {
         (lines, line_h, total)
     }
 
+    /// 单行超出内容宽时做尾部省略；宽度放得下则返回 None，直接复用原排版。
+    ///
+    /// 必须与 `compute_lines` 走同一套排版（`layout_text`），否则在「控件宽度按内容
+    /// 自适应」时会误判：布局分配的宽度恰好等于排版宽度，若改用另一套引擎度量，
+    /// 只要它算出的宽度大一点点就会截断本来放得下的文本。
+    fn elide_layout(
+        cv: &dyn Canvas,
+        line: &CachedLine,
+        font: &Font,
+        max_w: f32,
+    ) -> Option<TextLayout> {
+        if line.width <= max_w {
+            return None;
+        }
+        const ELL: &str = "…";
+        let ellipsis = cv.layout_text(ELL, font);
+        let budget = max_w - ellipsis.width();
+        if budget <= 0.0 {
+            return Some(ellipsis);
+        }
+        // 先用已有排版的字符边界定位可保留的前缀长度，避免逐字重新排版。
+        let mut n = line.layout.char_count();
+        while n > 0 && line.layout.x_for_char(n) > budget {
+            n -= 1;
+        }
+        // 前缀加省略号后整体重新排版校验；连写宽度略有出入时再退一个字符。
+        loop {
+            let mut shown: String = line.layout.text().chars().take(n).collect();
+            shown.push_str(ELL);
+            let candidate = cv.layout_text(&shown, font);
+            if n == 0 || candidate.width() <= max_w {
+                return Some(candidate);
+            }
+            n -= 1;
+        }
+    }
+
     /// 某行相对内容区左缘的绘制起点 x（按对齐）。
     fn line_origin_x(content: Rect, width: f32, align: TextAlign) -> f32 {
         match align {
@@ -250,17 +286,29 @@ impl Widget for Label {
 
         for (idx, line) in c.lines.iter().enumerate() {
             let y = top + idx as f32 * c.line_h;
-            let ox = Self::line_origin_x(content, line.width, align);
-            // 选区高亮（与本行相交部分）。
+            // 换行模式下每行已按预算宽度断好，只有单行模式需要按内容宽做尾部省略。
+            let elided = if self.wrap_width.is_some() {
+                None
+            } else {
+                Self::elide_layout(cv, line, &self.base.font, content.size.width)
+            };
+            let layout = elided.as_ref().unwrap_or(&line.layout);
+            // 换行模式按行宽左对齐，单行模式在内容区内按对齐方式摆放。
+            let ox = if self.wrap_width.is_some() {
+                Self::line_origin_x(content, line.width, align)
+            } else {
+                Self::line_origin_x(content, layout.width(), align)
+            };
+
+            // 选区高亮（与本行相交部分；截断后只高亮实际显示出来的字符）。
             if let Some((lo, hi)) = sel {
                 let l0 = lo.max(line.start);
                 let l1 = hi.min(line.start + line.len);
                 if l1 > l0 {
-                    for r in line.layout.selection_rects(
-                        (l0 - line.start)..(l1 - line.start),
-                        y,
-                        c.line_h,
-                    ) {
+                    let shown = layout.char_count();
+                    let r0 = (l0 - line.start).min(shown);
+                    let r1 = (l1 - line.start).min(shown);
+                    for r in layout.selection_rects(r0..r1, y, c.line_h) {
                         cv.fill_rect(
                             Rect::new(ox + r.left(), r.top(), r.size.width, r.size.height),
                             sel_color,
@@ -268,30 +316,10 @@ impl Widget for Label {
                     }
                 }
             }
-            // 换行模式：逐行按预算宽度左对齐绘制；单行模式：铺满内容区并按对齐 + 越界省略（沿用旧行为）。
-            if self.wrap_width.is_some() {
-                let line_rect = Rect::new(ox, y, line.width.max(1.0), c.line_h);
-                draw_aligned_text(
-                    cv,
-                    line.layout.text(),
-                    line_rect,
-                    &self.base.font,
-                    color,
-                    TextAlign::Left,
-                    true,
-                );
-            } else {
-                let line_rect = Rect::new(content.left(), y, content.size.width, c.line_h);
-                draw_aligned_text(
-                    cv,
-                    line.layout.text(),
-                    line_rect,
-                    &self.base.font,
-                    color,
-                    align,
-                    true,
-                );
-            }
+
+            // 直接消费排版结果绘制，保证绘制与测量、截断判断三者用的是同一套排版。
+            let ty = y + ((c.line_h - layout.height()) * 0.5).max(0.0);
+            cv.draw_text_layout(layout, Point::new(ox, ty), color);
         }
     }
 
@@ -350,6 +378,92 @@ impl TextControl for Label {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::layout_node;
+    use crate::sizing::Align;
+    use crate::style::StyleSpec;
+    use crate::widgets::VBox;
+    use flexui_gfx::{Color, Corners, Size};
+
+    /// 模拟 Windows 后端的两套文字引擎：`measure_text` 是 GDI+ 包围盒（偏宽），
+    /// `measure_text_advance_size` 是排版前进宽度（`layout_text` 默认实现走它）。
+    /// 两者差值即为历史 bug 的触发条件。
+    #[derive(Default)]
+    struct 双引擎画布 {
+        绘制文本: Vec<String>,
+    }
+
+    impl 双引擎画布 {
+        /// 前进宽度：每字符按 0.5 字号。
+        fn 前进宽度(text: &str, font: &Font) -> f32 {
+            text.chars().count() as f32 * font.size * 0.5
+        }
+    }
+
+    impl Canvas for 双引擎画布 {
+        fn fill_rect(&mut self, _rect: Rect, _color: Color) {}
+        fn stroke_rect(&mut self, _rect: Rect, _color: Color, _width: f32) {}
+        fn fill_round_rect(&mut self, _rect: Rect, _radius: Corners, _color: Color) {}
+        fn stroke_round_rect(&mut self, _r: Rect, _c: Corners, _col: Color, _w: f32) {}
+        fn draw_text(&mut self, text: &str, _origin: Point, _font: &Font, _color: Color) {
+            self.绘制文本.push(text.to_owned());
+        }
+        /// 包围盒比前进宽度多 4px，模拟 GDI+ 的 overhang 余量。
+        fn measure_text(&self, text: &str, font: &Font) -> Size {
+            Size::new(Self::前进宽度(text, font) + 4.0, font.size * 1.2)
+        }
+        fn measure_text_advance_size(&self, text: &str, font: &Font) -> Size {
+            Size::new(Self::前进宽度(text, font), font.size * 1.2)
+        }
+    }
+
+    /// 回归：控件宽度按内容自适应时，布局分配的宽度恰好等于排版宽度，
+    /// 绘制不得因为改用另一套引擎度量而误加省略号。
+    #[test]
+    fn 内容自适应宽度不应误加省略号() {
+        let mut cv = 双引擎画布::default();
+        // 交叉轴用 Start，子控件才按自身内容宽度收敛；Stretch 会拉满而测不出问题。
+        let mut root = VBox::new()
+            .align(Align::Start)
+            .push(Label::new("未连接").font_size(24.0));
+        layout_node(&mut root, Rect::new(0.0, 0.0, 800.0, 100.0), &cv);
+
+        let label = &root.base().children[0];
+        assert_eq!(
+            label.base().rect.size.width,
+            双引擎画布::前进宽度("未连接", &label.base().font),
+            "内容自适应宽度应等于排版前进宽度"
+        );
+
+        label.paint_content(&mut cv, &StyleSpec::default());
+        assert_eq!(
+            cv.绘制文本,
+            vec!["未连接".to_owned()],
+            "宽度刚好放得下时不应截断"
+        );
+    }
+
+    /// 宽度确实不够时仍要正常截断，且截断结果必须放得进内容区。
+    #[test]
+    fn 宽度不足时按排版宽度截断() {
+        let mut cv = 双引擎画布::default();
+        let mut root = VBox::new().push(Label::new("一二三四五六").font_size(20.0).width(40.0));
+        layout_node(&mut root, Rect::new(0.0, 0.0, 200.0, 60.0), &cv);
+
+        let label = &root.base().children[0];
+        assert_eq!(
+            label.base().rect.size.width,
+            40.0,
+            "固定宽度应优先于父级拉伸"
+        );
+
+        label.paint_content(&mut cv, &StyleSpec::default());
+        let shown = &cv.绘制文本[0];
+        assert!(shown.ends_with('…'), "应以省略号结尾：{shown}");
+        assert!(
+            双引擎画布::前进宽度(shown, &label.base().font) <= 40.0,
+            "截断结果应放得进内容区：{shown}"
+        );
+    }
 
     #[test]
     fn 选中子串按字符切片() {

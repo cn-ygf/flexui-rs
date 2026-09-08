@@ -218,6 +218,11 @@ macro_rules! common_builders {
                 self.base.enabled = e;
                 self
             }
+            /// 设置初始可见状态。
+            pub fn visible(mut self, visible: bool) -> Self {
+                self.base.visible = visible;
+                self
+            }
             /// 文本是否可选中（拖选 + Cmd+C 复制）。开启即让控件可获得焦点。
             /// 目前 Label 已实现选区行为，其它有 `base.text` 的控件后续可复用同一机制。
             pub fn selectable(mut self, on: bool) -> Self {
@@ -227,7 +232,7 @@ macro_rules! common_builders {
                 }
                 self
             }
-            /// 命中策略（穿透/不穿透）。
+            /// 命中策略：不穿透、穿透，或标题栏空白（挡住下层、仍可拖窗口）。
             pub fn hit(mut self, h: $crate::widget::HitPolicy) -> Self {
                 self.base.hit = h;
                 self
@@ -235,6 +240,11 @@ macro_rules! common_builders {
             /// 视觉平移控件及其子树，不改变布局占位。
             pub fn translate(mut self, x: f32, y: f32) -> Self {
                 self.base.transform.translation = flexui_gfx::Point::new(x, y);
+                self
+            }
+            /// 设置由 `WindowCtx::set_visible_animated` 驱动的声明式显隐过渡。
+            pub fn transition(mut self, transition: $crate::anim::Transition) -> Self {
+                self.base.transition = Some(transition);
                 self
             }
             /// 等比缩放控件及其子树，不改变布局占位。

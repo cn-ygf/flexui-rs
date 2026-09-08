@@ -268,9 +268,19 @@ impl Dispatcher {
         let Some(id) = find_by_name(root, name) else {
             return false;
         };
-        let mut from = None;
-        visit_mut(root, id, &mut |w| from = w.animation_value(prop));
-        let Some(from) = from else { return false };
+        let mut start = None;
+        visit_mut(root, id, &mut |w| {
+            start = animation_value(w, prop).map(|from| {
+                let visibility_transition = w.base().transition_target_visible.is_some()
+                    && w.base()
+                        .transition
+                        .is_some_and(|value| value.prop() == prop);
+                (from, visibility_transition)
+            });
+        });
+        let Some((from, visibility_transition)) = start else {
+            return false;
+        };
         self.anims.retain(|a| !(a.target == id && a.prop == prop));
         self.anims.push(Anim {
             target: id,
@@ -280,6 +290,7 @@ impl Dispatcher {
             dur: dur_secs.max(0.001),
             elapsed: 0.0,
             easing,
+            visibility_transition,
         });
         true
     }
@@ -292,17 +303,44 @@ impl Dispatcher {
                 a.elapsed += dt;
             }
             // 快照 (target, prop, value) 后应用，避免与 self 的可变借用冲突。
-            let apply: Vec<(WidgetId, AnimProp, f32)> = self
+            let apply: Vec<(WidgetId, AnimProp, f32, bool)> = self
                 .anims
                 .iter()
-                .map(|a| (a.target, a.prop, a.value_at()))
+                .map(|a| (a.target, a.prop, a.value_at(), a.visibility_transition))
                 .collect();
-            for (id, prop, v) in apply {
+            for (id, prop, v, visibility_transition) in apply {
                 visit_mut(root, id, &mut |w| {
-                    w.set_animation_value(prop, v);
+                    if !visibility_transition || w.base().transition_target_visible.is_some() {
+                        set_animation_value(w, prop, v);
+                    }
                 });
             }
+            let completed_transitions: Vec<WidgetId> = self
+                .anims
+                .iter()
+                .filter(|animation| animation.visibility_transition && animation.done())
+                .map(|animation| animation.target)
+                .collect();
             self.anims.retain(|a| !a.done());
+            for id in completed_transitions {
+                let mut hidden = false;
+                visit_mut(root, id, &mut |w| {
+                    let base = w.base_mut();
+                    let Some(target_visible) = base.transition_target_visible.take() else {
+                        return;
+                    };
+                    if let Some(origin) = base.transition_origin.take() {
+                        base.transform.translation = origin;
+                    }
+                    if !target_visible {
+                        base.visible = false;
+                        hidden = true;
+                    }
+                });
+                if hidden {
+                    self.needs_layout = true;
+                }
+            }
             changed = true;
         }
 
@@ -1416,6 +1454,28 @@ impl Dispatcher {
     }
 }
 
+fn animation_value(widget: &dyn Widget, prop: AnimProp) -> Option<f32> {
+    match prop {
+        AnimProp::TranslateX => Some(widget.base().transform.translation.x),
+        AnimProp::TranslateY => Some(widget.base().transform.translation.y),
+        _ => widget.animation_value(prop),
+    }
+}
+
+fn set_animation_value(widget: &mut dyn Widget, prop: AnimProp, value: f32) -> bool {
+    match prop {
+        AnimProp::TranslateX => {
+            widget.base_mut().transform.translation.x = value;
+            true
+        }
+        AnimProp::TranslateY => {
+            widget.base_mut().transform.translation.y = value;
+            true
+        }
+        _ => widget.set_animation_value(prop, value),
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct ControlSnapshot {
     text: String,
@@ -1466,30 +1526,70 @@ impl Default for Dispatcher {
 /// 命中测试：返回最上层「不穿透」且包含该点的可见控件 id。
 /// 子控件绘制在父之上，故逆序遍历子控件优先命中。
 pub fn hit_test(node: &dyn Widget, p: Point) -> Option<WidgetId> {
-    hit_test_impl(node, p, Affine::IDENTITY)
+    hit_probe_to_widget(hit_test_impl(node, p, Affine::IDENTITY, false))
 }
 
-fn hit_test_impl(node: &dyn Widget, p: Point, parent_transform: Affine) -> Option<WidgetId> {
+/// 窗口拖动用的命中测试：`Caption` 空白不报控件，同时仍挡住下层，好交给系统拖窗口。
+pub fn hit_test_drag(node: &dyn Widget, p: Point) -> Option<WidgetId> {
+    hit_probe_to_widget(hit_test_impl(node, p, Affine::IDENTITY, true))
+}
+
+/// 内部命中结果。`Blocked` 表示 Caption 空白：停止向下层继续，对外仍算未点到控件。
+enum HitProbe {
+    Miss,
+    Widget(WidgetId),
+    Blocked,
+}
+
+fn hit_probe_to_widget(probe: HitProbe) -> Option<WidgetId> {
+    match probe {
+        HitProbe::Widget(id) => Some(id),
+        HitProbe::Miss | HitProbe::Blocked => None,
+    }
+}
+
+fn hit_test_impl(
+    node: &dyn Widget,
+    p: Point,
+    parent_transform: Affine,
+    for_drag: bool,
+) -> HitProbe {
     let b = node.base();
     if !b.visible {
-        return None;
+        return HitProbe::Miss;
     }
     let transform = b.transform.affine(b.rect).then(parent_transform);
-    let local_point = transform.inverse()?.transform_point(p);
+    let Some(inverse) = transform.inverse() else {
+        return HitProbe::Miss;
+    };
+    let local_point = inverse.transform_point(p);
     if !b.rect.contains(local_point) {
-        return None;
+        return HitProbe::Miss;
     }
     if node.children_viewport().contains(local_point) {
         for child in b.children.iter().rev() {
-            if let Some(id) = hit_test_impl(child.as_ref(), p, transform) {
-                return Some(id);
+            match hit_test_impl(child.as_ref(), p, transform, for_drag) {
+                HitProbe::Miss => {}
+                other => return other,
             }
         }
     }
     match b.hit {
-        HitPolicy::Solid if b.hit_shape.contains(b.rect, local_point) => Some(b.id),
-        HitPolicy::Transparent => None,
-        HitPolicy::Solid => None,
+        HitPolicy::Transparent => HitProbe::Miss,
+        HitPolicy::Caption if for_drag => {
+            if b.hit_shape.contains(b.rect, local_point) {
+                HitProbe::Blocked
+            } else {
+                HitProbe::Miss
+            }
+        }
+        HitPolicy::Solid | HitPolicy::Caption => {
+            if b.hit_shape.contains(b.rect, local_point) {
+                HitProbe::Widget(b.id)
+            } else {
+                HitProbe::Miss
+            }
+        }
     }
 }
 

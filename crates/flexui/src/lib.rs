@@ -10,9 +10,9 @@ pub use flexui_core::*;
 
 // XML 布局加载。
 pub use flexui_xml::{
-    build_fragment_res, build_fragment_str, load_native_menu_res, load_native_menu_str, load_res,
-    load_str as load_xml_str, load_window_res, load_window_str, Context, LoadError, LoadResult,
-    WindowDoc,
+    build_fragment_res, build_fragment_str, build_fragment_str_res, load_native_menu_res,
+    load_native_menu_str, load_res, load_str as load_xml_str, load_window_res, load_window_str,
+    Context, LoadError, LoadResult, WindowDoc,
 };
 
 // 资源系统（RM1-5）。
@@ -49,13 +49,19 @@ pub fn application_localizer() -> Option<Localizer> {
     application_localizer_slot().read().unwrap().clone()
 }
 
+/// 查找已运行的同名窗口并请它显示、还原、置前。找不到窗口时返回 false。
+#[cfg(target_os = "windows")]
+pub fn activate_existing_window(class_name: &str) -> bool {
+    flexui_windows::activate_existing_window(class_name)
+}
+
 // —— 平台后端选择（仅内部使用，不再暴露自由函数 run/run_xml）——
+#[cfg(target_os = "linux")]
+use flexui_linux::run_multi as backend_run_multi;
 #[cfg(target_os = "macos")]
 use flexui_macos::run_multi as backend_run_multi;
 #[cfg(target_os = "windows")]
 use flexui_windows::run_multi as backend_run_multi;
-#[cfg(target_os = "linux")]
-use flexui_linux::run_multi as backend_run_multi;
 
 /// 设置应用图标。macOS 用于 Dock/应用切换器；Windows 的 EXE 图标由构建资源提供。
 pub fn set_application_icon(bytes: &[u8]) {
@@ -187,6 +193,12 @@ pub trait WindowImpl: 'static {
     fn config(&self) -> WindowConfig {
         WindowConfig::default()
     }
+    /// Win32 窗口类名；返回 Some 时覆盖 XML / `config()` 里的类名。
+    ///
+    /// 单实例激活靠这个名字 `FindWindowW`。默认沿用配置，不覆盖。
+    fn window_class(&self) -> Option<&str> {
+        None
+    }
     /// 界面来源（XML / 资源路径 / 控件树）。
     fn skin(&self) -> Skin;
 
@@ -298,13 +310,14 @@ impl<W: WindowImpl> WindowDelegate for ImplDelegate<W> {
 ///
 /// 可用于多窗口：在任意窗口回调里用 `build_window` 构造规格后传给 `ctx.open_window`。
 pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
+    let class_override = imp.window_class().map(str::to_owned);
     let localizer = imp.localizer();
     let mut ctx = Context::new();
     if let Some(value) = localizer.clone() {
         ctx.set_localizer(value);
     }
     // 皮肤 XML 若以 <Window> 为根，则其属性提供窗口配置（W6），否则用 imp.config()。
-    let (config, mut root, bindings) = match imp.skin() {
+    let (mut config, mut root, bindings) = match imp.skin() {
         Skin::Xml(xml) => {
             let doc = load_window_str(&xml, &ctx)?;
             (
@@ -324,6 +337,9 @@ pub fn build_window<W: WindowImpl>(imp: W) -> Result<NewWindow, LoadError> {
         }
         Skin::Tree(node) => (imp.config(), node, Vec::new()),
     };
+    if let Some(class_name) = class_override {
+        config.class_name = class_name;
+    }
     if let Some(localizer) = localizer.as_ref() {
         apply_localizations(&mut root, localizer);
     }
@@ -352,29 +368,37 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 /// 窗口驱动（≈ duilib Window）：加载皮肤、建原生窗口、进事件循环。用户不继承，直接用。
 pub struct Window<W: WindowImpl> {
     imp: W,
+    initial_position_override: Option<WindowInitialPosition>,
 }
 
 impl<W: WindowImpl> Window<W> {
     /// 用一个 WindowImpl 创建窗口驱动。
     pub fn new(imp: W) -> Self {
-        Self { imp }
+        Self {
+            imp,
+            initial_position_override: None,
+        }
     }
 
-    /// 居中显示（≈ CenterWindow；当前后端默认即居中，保留以对齐习惯用法）。
-    pub fn center(self) -> Self {
+    /// 覆盖代码或 XML 配置，使窗口首次创建时在主屏幕工作区居中。
+    pub fn center(mut self) -> Self {
+        self.initial_position_override = Some(WindowInitialPosition::CenterScreen);
         self
     }
 
     /// 启动：加载皮肤 → 建窗 → 初始化生命周期 → 进主事件循环（阻塞）。
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     pub fn run(self) {
-        let spec = match build_window(self.imp) {
+        let mut spec = match build_window(self.imp) {
             Ok(spec) => spec,
             Err(e) => {
                 eprintln!("[flexui] 窗口加载失败: {e}");
                 return;
             }
         };
+        if let Some(position) = self.initial_position_override {
+            spec.config.initial_position = position;
+        }
         // 保留完整 NewWindow，确保主窗口与后续窗口共享本地化环境及其修订号。
         backend_run_multi(vec![spec]);
     }
@@ -453,6 +477,16 @@ mod lifecycle_tests {
                 "close_compat",
                 "closed"
             ]
+        );
+    }
+
+    #[test]
+    fn window_center_覆盖初始位置() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let window = Window::new(LifecycleWindow { calls }).center();
+        assert_eq!(
+            window.initial_position_override,
+            Some(WindowInitialPosition::CenterScreen)
         );
     }
 }

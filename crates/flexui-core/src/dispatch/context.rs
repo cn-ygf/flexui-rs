@@ -108,10 +108,28 @@ impl<'a> EventCtx<'a> {
 
     /// 便捷：设置某控件及其子树是否参与布局、绘制与命中测试。
     pub fn set_visible(&mut self, name: &str, visible: bool) {
-        if self.is_visible(name) == Some(visible) {
+        let state = self.get(name, |w| {
+            (
+                w.base().visible,
+                w.base().transition_target_visible,
+                w.base().transition_origin,
+            )
+        });
+        let Some((current, transition_target, transition_origin)) = state else {
+            return;
+        };
+        if current == visible && transition_target.is_none() {
             return;
         }
-        self.with(name, move |w| w.base_mut().visible = visible);
+        self.with(name, move |w| {
+            let base = w.base_mut();
+            base.visible = visible;
+            if let Some(origin) = transition_origin {
+                base.transform.translation = origin;
+            }
+            base.transition_origin = None;
+            base.transition_target_visible = None;
+        });
     }
 
     /// 设置 CheckBox/Radio 等控件的选中状态。

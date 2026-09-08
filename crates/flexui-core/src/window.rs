@@ -36,6 +36,19 @@ pub enum WindowDragRegion {
     Rect(Rect),
 }
 
+/// 未指定时使用的 Win32 窗口类名。
+pub const DEFAULT_WINDOW_CLASS: &str = "FlexUiWindowClass";
+
+/// 顶层窗口首次创建时的位置策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowInitialPosition {
+    /// 由平台窗口管理器决定初始位置。
+    #[default]
+    PlatformDefault,
+    /// 在主屏幕工作区内居中，不覆盖任务栏。
+    CenterScreen,
+}
+
 /// 窗口配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -44,6 +57,10 @@ pub struct WindowConfig {
     pub localized_title: Option<LocalizedStringResource>,
     pub width: f32,
     pub height: f32,
+    /// 原生窗口首次创建时的位置。
+    pub initial_position: WindowInitialPosition,
+    /// 原生窗口创建完成后是否立即显示；设为 false 时由业务就绪后调用 `show()`。
+    pub visible: bool,
     /// false = 禁止改变大小。
     pub resizable: bool,
     pub titlebar: TitlebarMode,
@@ -51,8 +68,16 @@ pub struct WindowConfig {
     pub system_corners: bool,
     /// 是否使用平台提供的窗口阴影。
     pub system_shadow: bool,
+    /// 窗口是否按逐像素 alpha 合成。
+    ///
+    /// 开启后整个客户区可以有透明和半透明像素，透明处直接透出桌面，可用于自绘
+    /// 圆角与阴影切图；窗口尺寸即包含这圈透明外沿，边距由布局自行让出。
+    /// 代价是提交方式变为整窗提交，脏区局部刷新失效。
+    pub transparent: bool,
     /// 无边框窗口内容区的可拖动范围。
     pub drag_region: WindowDragRegion,
+    /// Win32 窗口类名，供 `FindWindowW` 查找已运行实例。其它平台忽略。
+    pub class_name: String,
 }
 
 impl Default for WindowConfig {
@@ -62,11 +87,15 @@ impl Default for WindowConfig {
             localized_title: None,
             width: 640.0,
             height: 440.0,
+            initial_position: WindowInitialPosition::PlatformDefault,
+            visible: true,
             resizable: true,
             titlebar: TitlebarMode::System,
             system_corners: true,
             system_shadow: true,
+            transparent: false,
             drag_region: WindowDragRegion::PlatformDefault,
+            class_name: DEFAULT_WINDOW_CLASS.to_owned(),
         }
     }
 }
@@ -84,6 +113,20 @@ impl WindowConfig {
         self.resizable = v;
         self
     }
+    /// 设置窗口首次创建时的位置策略。
+    pub fn initial_position(mut self, position: WindowInitialPosition) -> Self {
+        self.initial_position = position;
+        self
+    }
+    /// 首次创建时在主屏幕工作区居中。
+    pub fn centered(self) -> Self {
+        self.initial_position(WindowInitialPosition::CenterScreen)
+    }
+    /// 设置窗口是否在初始化结束后立即显示。
+    pub fn visible(mut self, v: bool) -> Self {
+        self.visible = v;
+        self
+    }
     pub fn titlebar(mut self, m: TitlebarMode) -> Self {
         self.titlebar = m;
         self
@@ -96,12 +139,22 @@ impl WindowConfig {
         self.system_shadow = v;
         self
     }
+    /// 开启逐像素 alpha 合成；自绘圆角与阴影切图时使用。
+    pub fn transparent(mut self, v: bool) -> Self {
+        self.transparent = v;
+        self
+    }
     pub fn drag_region(mut self, region: WindowDragRegion) -> Self {
         self.drag_region = region;
         self
     }
     pub fn drag_area(mut self, rect: Rect) -> Self {
         self.drag_region = WindowDragRegion::Rect(rect);
+        self
+    }
+    /// 设置 Win32 窗口类名；单实例激活靠这个名字查找窗口。
+    pub fn class_name(mut self, name: impl Into<String>) -> Self {
+        self.class_name = name.into();
         self
     }
 }
@@ -472,6 +525,69 @@ impl<'a> WindowCtx<'a> {
     pub fn set_visible(&mut self, name: &str, visible: bool) {
         self.event_ctx(|ctx| ctx.set_visible(name, visible));
     }
+    /// 使用控件声明的 `Transition` 切换可见状态。
+    ///
+    /// 显示时先让控件参与布局，再从指定边缘滑入；隐藏时先滑出，动画完成后才退出布局。
+    /// 没有声明过渡的控件会直接切换可见状态。
+    pub fn set_visible_animated(&mut self, name: &str, visible: bool) {
+        let request = self.event_ctx(|ctx| {
+            let state = ctx.get(name, |w| {
+                let base = w.base();
+                (
+                    base.visible,
+                    base.transition,
+                    base.transition_target_visible,
+                    base.transition_origin,
+                    base.transform.translation,
+                )
+            });
+            let (current, transition, current_target, origin, translation) = state?;
+            let Some(transition) = transition else {
+                ctx.set_visible(name, visible);
+                return None;
+            };
+
+            if current_target == Some(visible) || (current_target.is_none() && current == visible) {
+                return None;
+            }
+            if !current && !visible {
+                return None;
+            }
+
+            let origin = origin.unwrap_or(translation);
+            let (offset_x, offset_y) = transition.offset();
+            ctx.with(name, |w| {
+                let base = w.base_mut();
+                base.transition_origin = Some(origin);
+                base.transition_target_visible = Some(visible);
+                if visible && !current {
+                    base.visible = true;
+                    base.transform.translation.x = origin.x + offset_x;
+                    base.transform.translation.y = origin.y + offset_y;
+                }
+            });
+
+            let to = match transition.prop() {
+                crate::anim::AnimProp::TranslateX => {
+                    origin.x + if visible { 0.0 } else { offset_x }
+                }
+                crate::anim::AnimProp::TranslateY => {
+                    origin.y + if visible { 0.0 } else { offset_y }
+                }
+                _ => unreachable!("显隐过渡只使用位移动画"),
+            };
+            Some((
+                transition.prop(),
+                to,
+                transition.duration_secs(),
+                transition.easing_curve(),
+            ))
+        });
+
+        if let Some((prop, to, duration, easing)) = request {
+            self.animate(name, prop, to, duration, easing);
+        }
+    }
     pub fn set_property(&mut self, name: &str, property: WidgetProperty) -> bool {
         self.event_ctx(|ctx| ctx.set_property(name, property))
     }
@@ -623,3 +739,7 @@ pub trait WindowDelegate {
 /// 空委托：所有钩子用默认实现。供不需要窗口钩子的底层调用方（FFI/示例）使用。
 pub struct NoopDelegate;
 impl WindowDelegate for NoopDelegate {}
+
+#[cfg(test)]
+#[path = "window_tests.rs"]
+mod tests;

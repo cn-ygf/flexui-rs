@@ -9,8 +9,9 @@ use flexui_core::{
     Insets, Justify, Label, ListView, Node, Panel, PlaceholderStyleSet, PlaceholderStyleSpec,
     Progress, Radio, Rect, ScrollBarVisibility, Separator, Shadow, Sizing, Slider, StyleSet,
     StyleSpec, Switch, TabBox, TextAlign, ThemeColorBinding, ThemeColorProperty, TitlebarMode,
-    VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows, VirtualSelectionMode,
-    VisualState, Widget, WidgetId, WidgetProperty, WindowConfig, WindowDragRegion,
+    Transition, TransitionEdge, VBox, VirtualColumn, VirtualList, VirtualListRow, VirtualListRows,
+    VirtualSelectionMode, VisualState, Widget, WidgetId, WidgetProperty, WindowConfig,
+    WindowDragRegion, WindowInitialPosition,
 };
 use flexui_i18n::{LocalizationValue, LocalizedStringResource, Localizer};
 use flexui_resource::ResourceManager;
@@ -115,8 +116,23 @@ pub fn load_res(res: &ResourceManager, path: &str, ctx: &Context) -> Result<Load
 }
 
 /// 动态从 XML 字符串构建一个布局片段（根为普通容器，非 `<Window>`）。供代码动态 build（W8）。
+///
+/// 图片按文件系统路径解析。若片段里的 `src` / `bgimage` 来自资源包，应改用
+/// [`build_fragment_str_res`]。
 pub fn build_fragment_str(xml: &str, ctx: &Context) -> Result<Node, LoadError> {
     Ok(load_str(xml, ctx)?.root)
+}
+
+/// 动态从 XML 字符串构建布局片段，图片走资源系统。
+///
+/// 与 [`build_fragment_str`] 的差别只在图片解析：`src` / `bgimage` / `fgimage`
+/// 经 `ResourceManager` 读取，可引用内嵌 zip 或目录里的资源。
+pub fn build_fragment_str_res(
+    xml: &str,
+    res: &ResourceManager,
+    ctx: &Context,
+) -> Result<Node, LoadError> {
+    Ok(load_root(xml, ctx, Some(res))?.root)
 }
 
 /// 动态从资源路径构建布局片段（W8）。
@@ -244,6 +260,20 @@ fn parse_window_config(
             .unwrap_or(440.0),
     );
     cfg.localized_title = localized_title;
+    if let Some(v) = el.attr("initial-position") {
+        cfg.initial_position = match v.trim().to_ascii_lowercase().as_str() {
+            "platform" => WindowInitialPosition::PlatformDefault,
+            "center" => WindowInitialPosition::CenterScreen,
+            _ => {
+                return Err(LoadError(format!(
+                    "initial-position 仅支持 platform 或 center: {v}"
+                )))
+            }
+        };
+    }
+    if let Some(v) = el.attr("visible") {
+        cfg.visible = parse_bool(v);
+    }
     if let Some(r) = el.attr("resizable") {
         cfg.resizable = parse_bool(r);
     }
@@ -260,8 +290,16 @@ fn parse_window_config(
     if let Some(v) = el.attr("system-shadow") {
         cfg.system_shadow = parse_bool(v);
     }
+    if let Some(v) = el.attr("transparent") {
+        cfg.transparent = parse_bool(v);
+    }
     if let Some(v) = el.attr("drag-region") {
         cfg.drag_region = parse_drag_region(v)?;
+    }
+    if let Some(v) = el.attr("window-class") {
+        if !v.is_empty() {
+            cfg.class_name = v.to_owned();
+        }
     }
     Ok(cfg)
 }
@@ -603,6 +641,7 @@ fn apply_attrs(
 ) -> Result<(), LoadError> {
     let res = env.res;
     apply_transform_and_hit_shape(node, attrs);
+    apply_transition_attrs(node, attrs)?;
     // 分状态样式槽临时表（键含 base/focus/selected 维度）。
     let mut slots: HashMap<VisualState, StyleSpec> = HashMap::new();
     let mut placeholder_slots: HashMap<VisualState, PlaceholderStyleSpec> = HashMap::new();
@@ -613,12 +652,41 @@ fn apply_attrs(
         match key.as_str() {
             // 已在别处处理的属性（Separator orientation/thickness、Image src、
             // ComboBox options、ListView items/row-height）。
-            "v-if" | "src" | "bindgroup" | "orientation" | "thickness" | "options" | "items"
-            | "options-args" | "items-args" | "row-height" | "header-height" | "show-header"
-            | "striped" | "fill-last-column" | "overscan" | "selection-mode" | "text-args"
-            | "placeholder-args" | "tooltip-args" | "title-args" | "translate" | "translate-x"
-            | "translate-y" | "scale" | "scale-x" | "scale-y" | "rotation" | "rotate"
-            | "transform-origin" | "hit-shape" | "hit-radius" => {}
+            "v-if"
+            | "src"
+            | "bindgroup"
+            | "orientation"
+            | "thickness"
+            | "options"
+            | "items"
+            | "options-args"
+            | "items-args"
+            | "row-height"
+            | "header-height"
+            | "show-header"
+            | "striped"
+            | "fill-last-column"
+            | "overscan"
+            | "selection-mode"
+            | "text-args"
+            | "placeholder-args"
+            | "tooltip-args"
+            | "title-args"
+            | "translate"
+            | "translate-x"
+            | "translate-y"
+            | "scale"
+            | "scale-x"
+            | "scale-y"
+            | "rotation"
+            | "rotate"
+            | "transform-origin"
+            | "hit-shape"
+            | "hit-radius"
+            | "transition"
+            | "transition-distance"
+            | "transition-duration"
+            | "transition-easing" => {}
             "name" => node.base_mut().name = Some(v.clone()),
             "variant" => node.base_mut().variant = v.trim().to_owned(),
             "class" | "classes" => {
@@ -771,6 +839,8 @@ fn apply_attrs(
             "mouse" => {
                 node.base_mut().hit = if v.eq_ignore_ascii_case("transparent") {
                     HitPolicy::Transparent
+                } else if v.eq_ignore_ascii_case("caption") || v.eq_ignore_ascii_case("drag") {
+                    HitPolicy::Caption
                 } else {
                     HitPolicy::Solid
                 };
@@ -880,6 +950,57 @@ fn apply_transform_and_hit_shape(node: &mut dyn Widget, attrs: &[(String, String
         None => radius.map_or(current_shape, HitShape::Rounded),
     };
     node.base_mut().hit_shape = hit_shape;
+}
+
+/// 解析 SwiftUI 风格的边缘移动显隐过渡。
+fn apply_transition_attrs(
+    node: &mut dyn Widget,
+    attrs: &[(String, String)],
+) -> Result<(), LoadError> {
+    let Some(kind) = attr_value(attrs, "transition") else {
+        return Ok(());
+    };
+    let edge = match kind.trim().to_ascii_lowercase().as_str() {
+        "slide-top" => TransitionEdge::Top,
+        "slide-bottom" => TransitionEdge::Bottom,
+        "slide-left" => TransitionEdge::Left,
+        "slide-right" => TransitionEdge::Right,
+        other => {
+            return Err(LoadError(format!(
+                "transition 不支持 {other:?}，应为 slide-top/slide-bottom/slide-left/slide-right"
+            )))
+        }
+    };
+    let distance = attr_value(attrs, "transition-distance")
+        .ok_or_else(|| LoadError("显隐过渡缺少 transition-distance".into()))?
+        .parse::<f32>()
+        .map_err(|_| LoadError("transition-distance 必须是数字".into()))?;
+    if !distance.is_finite() || distance <= 0.0 {
+        return Err(LoadError("transition-distance 必须大于 0".into()));
+    }
+
+    let mut transition = Transition::slide(edge, distance);
+    if let Some(value) = attr_value(attrs, "transition-duration") {
+        let duration = value
+            .parse::<f32>()
+            .map_err(|_| LoadError("transition-duration 必须是秒数".into()))?;
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(LoadError("transition-duration 必须大于 0".into()));
+        }
+        transition = transition.duration(duration);
+    }
+    if let Some(value) = attr_value(attrs, "transition-easing") {
+        let easing = match value.trim().to_ascii_lowercase().as_str() {
+            "linear" => flexui_core::Easing::Linear,
+            "ease-in" => flexui_core::Easing::EaseIn,
+            "ease-out" => flexui_core::Easing::EaseOut,
+            "ease-in-out" => flexui_core::Easing::EaseInOut,
+            other => return Err(LoadError(format!("未知 transition-easing: {other}"))),
+        };
+        transition = transition.easing(easing);
+    }
+    node.base_mut().transition = Some(transition);
+    Ok(())
 }
 
 fn split_numbers(value: &str) -> Option<Vec<f32>> {
@@ -1384,7 +1505,7 @@ fn parse_shadow(v: &str) -> Option<Shadow> {
     Some(Shadow { dx, dy, color })
 }
 
-/// 解析渲染方式：stretch/center/tile/ninepatch(l,t,r,b)。
+/// 解析渲染方式：stretch/center/tile/circle/ninepatch(l,t,r,b)。
 fn parse_fit(v: &str) -> Option<ImageFit> {
     let s = v.trim().to_lowercase();
     if s == "stretch" {
@@ -1393,6 +1514,8 @@ fn parse_fit(v: &str) -> Option<ImageFit> {
         Some(ImageFit::Center)
     } else if s == "tile" {
         Some(ImageFit::Tile)
+    } else if s == "circle" {
+        Some(ImageFit::Circle)
     } else if let Some(inner) = s.strip_prefix("ninepatch") {
         // ninepatch 或 ninepatch(l,t,r,b)
         let nums: Vec<f32> = inner

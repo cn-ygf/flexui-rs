@@ -39,7 +39,7 @@ fn 内置平台谓词覆盖三个后端() {
 
 #[test]
 fn window_根解析配置() {
-    let xml = r#"<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false"
+    let xml = r#"<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false" initial-position="center"
             system-corners="false" system-shadow="false" drag-region="12 8 760 36">
             <VBox><Label name="hello" text="hi"/></VBox>
         </Window>"#;
@@ -48,6 +48,10 @@ fn window_根解析配置() {
     assert_eq!(cfg.title, "演示");
     assert_eq!(cfg.width, 800.0);
     assert!(!cfg.resizable);
+    assert_eq!(
+        cfg.initial_position,
+        flexui_core::WindowInitialPosition::CenterScreen
+    );
     assert_eq!(cfg.titlebar, flexui_core::TitlebarMode::HiddenKeepControls);
     assert!(!cfg.system_corners);
     assert!(!cfg.system_shadow);
@@ -57,6 +61,20 @@ fn window_根解析配置() {
     );
     // 内容根含具名控件
     assert!(find_by_name(doc.root.as_ref(), "hello").is_some());
+    assert_eq!(cfg.class_name, flexui_core::DEFAULT_WINDOW_CLASS);
+}
+
+#[test]
+fn window_初始位置非法值会报错() {
+    let xml = r#"<Window initial-position="unknown"><Panel/></Window>"#;
+    assert!(load_window_str(xml, &Context::new()).is_err());
+}
+
+#[test]
+fn window_根解析窗口类名() {
+    let xml = r#"<Window title="演示" window-class="RiverDesktopWindowClass"><Panel/></Window>"#;
+    let doc = load_window_str(xml, &Context::new()).unwrap();
+    assert_eq!(doc.config.unwrap().class_name, "RiverDesktopWindowClass");
 }
 
 #[test]
@@ -75,6 +93,21 @@ fn window_拖动区域支持关闭和平台默认值() {
 fn window_拖动区域格式错误会报错() {
     let xml = r#"<Window drag-region="0 bad 100 30"><Panel/></Window>"#;
     assert!(load_window_str(xml, &Context::new()).is_err());
+}
+
+#[test]
+fn xml_mouse_caption_与drag别名() {
+    let caption = load_str(r#"<Panel mouse="caption"/>"#, &Context::new()).unwrap();
+    assert_eq!(caption.root.base().hit, flexui_core::HitPolicy::Caption);
+    let drag = load_str(r#"<Panel mouse="drag"/>"#, &Context::new()).unwrap();
+    assert_eq!(drag.root.base().hit, flexui_core::HitPolicy::Caption);
+    let solid = load_str(r#"<Panel mouse="solid"/>"#, &Context::new()).unwrap();
+    assert_eq!(solid.root.base().hit, flexui_core::HitPolicy::Solid);
+    let transparent = load_str(r#"<Panel mouse="transparent"/>"#, &Context::new()).unwrap();
+    assert_eq!(
+        transparent.root.base().hit,
+        flexui_core::HitPolicy::Transparent
+    );
 }
 
 #[test]
@@ -137,6 +170,19 @@ fn build_fragment_动态构建() {
     )
     .unwrap();
     assert!(find_by_name(frag.as_ref(), "ok").is_some());
+}
+
+#[test]
+fn build_fragment_str_res_走资源系统() {
+    // 资源里没有这张图时不会失败，只是 ImageSource 回退成路径；此处只验证
+    // 带 ResourceManager 的入口能把片段建出来，与 build_fragment_str 并列可用。
+    let frag = build_fragment_str_res(
+        r#"<Image name="flag" src="flags/jp.png" fgfit="circle"/>"#,
+        &ResourceManager::new(),
+        &Context::new(),
+    )
+    .unwrap();
+    assert!(find_by_name(frag.as_ref(), "flag").is_some());
 }
 
 struct FakeCanvas;
