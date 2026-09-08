@@ -60,13 +60,17 @@
 | `width` | 数字 | `640` | 逻辑像素宽 |
 | `height` | 数字 | `440` | 逻辑像素高 |
 | `initial-position` | `platform` / `center` | `platform` | 初始位置由平台决定，或在主屏幕工作区居中 |
+| `visible` | 布尔 | `true` | 初始化结束后是否立即显示；为 `false` 时可由业务稍后调用 `show()` |
 | `resizable` | 布尔 | `true` | 是否允许改变大小 |
 | `titlebar` | `system` / `hidden`(=`hiddenkeepcontrols`) / `none`(=`borderless`) | `system` | 标题栏模式：系统栏 / 隐藏标题栏保留窗口控制（macOS 保留交通灯）/ 无边框自绘 |
+| `system-corners` | 布尔 | `true` | 无边框窗口是否使用平台圆角；透明窗口的边缘由内容 alpha 决定 |
+| `system-shadow` | 布尔 | `true` | 是否使用平台窗口阴影 |
+| `transparent` | 布尔 | `false` | 无边框窗口启用逐像素 alpha；Linux 需要 X11 合成器和 ARGB visual |
 | `window-class` | 字符串 | `FlexUiWindowClass` | Win32 窗口类名，供单实例 `FindWindowW` 查找；其它平台忽略 |
 
 ```xml
-<Window title="演示" width="800" height="560" titlebar="hidden" resizable="false"
-        initial-position="center">
+<Window title="演示" width="800" height="560" titlebar="none" resizable="false"
+        initial-position="center" visible="true" transparent="true">
   <VBox padding="16"> … </VBox>
 </Window>
 ```

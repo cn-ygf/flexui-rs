@@ -17,7 +17,7 @@ use core_foundation::base::{CFRange, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::string::CFString;
 use core_graphics::context::CGContext;
-use core_graphics::geometry::CGAffineTransform;
+use core_graphics::geometry::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use core_text::font::{self as ct_font, CTFont};
 use core_text::font_descriptor::{kCTFontBoldTrait, kCTFontItalicTrait};
 use core_text::line::CTLine;
@@ -79,6 +79,20 @@ impl CgCanvas {
             backing_scale: valid_scale(backing_scale),
             image_cache,
         }
+    }
+
+    /// 将当前窗口上下文的一块区域清为透明，供透明窗口每帧消除旧像素。
+    pub(crate) fn clear_rect(&mut self, rect: Rect) {
+        let Some(ns_context) = NSGraphicsContext::currentContext() else {
+            return;
+        };
+        let ns_cg = ns_context.CGContext();
+        let raw = Retained::as_ptr(&ns_cg).cast_mut().cast();
+        let cg = unsafe { CGContext::from_existing_context_ptr(raw) };
+        cg.clear_rect(CGRect::new(
+            &CGPoint::new(rect.origin.x as f64, rect.origin.y as f64),
+            &CGSize::new(rect.size.width as f64, rect.size.height as f64),
+        ));
     }
 
     /// 将描边中心路径收进原矩形，并对齐到物理像素网格。

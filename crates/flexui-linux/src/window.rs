@@ -4,7 +4,9 @@
 //! 事件：X 事件翻译成 `flexui_core::Event` 交 `Dispatcher::handle`；~60fps 帧循环
 //! 推进动画、排空后台消息、按需重绘。
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -14,22 +16,25 @@ use flexui_core::{
     find_mut_by_id, hit_test_drag, layout_node, paint_tree_in_rect, Dispatcher, Event,
     Invalidation, MouseButton, NativeMenu, NativeMenuPopupAnchor, NewWindow, Node, Point, Rect,
     Size, TitlebarMode, WindowConfig, WindowCtx, WindowDelegate, WindowDragRegion, WindowEvent,
-    WindowHandle, WindowPresentation,
+    WindowHandle, WindowInitialPosition, WindowPresentation,
 };
 
 use crate::ime::Ime;
 
 use x11rb::connection::Connection;
+use x11rb::properties::{WmSizeHints, WmSizeHintsSpecification};
+use x11rb::protocol::randr::ConnectionExt as _;
+use x11rb::protocol::render::{ConnectionExt as _, PictType};
 use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
 use x11rb::protocol::xproto::{
-    AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ClipOrdering, ConnectionExt as _,
-    CreateGCAux, CreateWindowAux, Cursor, EventMask, ImageFormat, KeyButMask, PropMode, Rectangle,
-    Window, WindowClass,
+    AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ClipOrdering, Colormap, ColormapAlloc,
+    ConnectionExt as _, CreateGCAux, CreateWindowAux, Cursor, EventMask, ImageFormat, KeyButMask,
+    PropMode, Rectangle, Screen, Window, WindowClass,
 };
 use x11rb::protocol::Event as XEvent;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
-use x11rb::{COPY_DEPTH_FROM_PARENT, CURRENT_TIME};
+use x11rb::CURRENT_TIME;
 
 use crate::canvas::{new_image_cache, CairoCanvas, SharedImageCache};
 use crate::xdnd::{XdndAtoms, XdndOutcome, XdndTarget};
@@ -63,6 +68,8 @@ struct WinState {
     pending_windows: Vec<NewWindow>,
     /// Xdnd 文件拖放目标状态。
     xdnd: XdndTarget,
+    /// 当前是否已映射；隐藏窗口继续处理任务，但暂停动画和提交绘制。
+    mapped: Rc<Cell<bool>>,
     open: bool,
 }
 
@@ -70,14 +77,16 @@ struct WinState {
 struct LinuxWindowHandle<'a> {
     conn: &'a RustConnection,
     xid: Window,
+    mapped: Rc<Cell<bool>>,
     close_requested: bool,
 }
 
 impl<'a> LinuxWindowHandle<'a> {
-    fn new(conn: &'a RustConnection, xid: Window) -> Self {
+    fn new(conn: &'a RustConnection, xid: Window, mapped: Rc<Cell<bool>>) -> Self {
         Self {
             conn,
             xid,
+            mapped,
             close_requested: false,
         }
     }
@@ -96,6 +105,7 @@ impl WindowHandle for LinuxWindowHandle<'_> {
     }
     fn show(&mut self) {
         let _ = self.conn.map_window(self.xid);
+        self.mapped.set(true);
         // 从托盘恢复时同时请求窗口管理器激活窗口，避免只映射却仍留在后台。
         if let (Some(root), Some(active)) = (
             self.conn.setup().roots.first().map(|screen| screen.root),
@@ -118,12 +128,15 @@ impl WindowHandle for LinuxWindowHandle<'_> {
     }
     fn hide(&mut self) {
         let _ = self.conn.unmap_window(self.xid);
+        self.mapped.set(false);
         let _ = self.conn.flush();
     }
     fn close(&mut self) {
+        self.mapped.set(false);
         self.close_requested = true;
     }
     fn minimize(&mut self) {
+        self.mapped.set(false);
         // EWMH/ICCCM：发 WM_CHANGE_STATE(IconicState=3) 给根窗口。
         let Some(root) = self.conn.setup().roots.first().map(|s| s.root) else {
             return;
@@ -153,6 +166,7 @@ impl WindowHandle for LinuxWindowHandle<'_> {
     }
     fn restore(&mut self) {
         let _ = self.conn.map_window(self.xid); // 取消最小化
+        self.mapped.set(true);
         self.set_maximized(false); // 取消最大化
         let _ = self.conn.flush();
     }
@@ -303,9 +317,220 @@ struct WinFactory {
     net_wm_icon: u32,
     xdnd: XdndAtoms,
     scale: f32,
+    /// 当前桌面的可用工作区（物理像素），用于首次居中。
+    work_area: PhysicalRect,
+    /// 合成器可用时的 32 位 ARGB visual 与专用 colormap。
+    argb_visual: Option<ArgbVisual>,
     /// 预建的箭头 / I 型光标（cursor 字体字形），供悬停文本时切换。
     cursor_arrow: Cursor,
     cursor_text: Cursor,
+}
+
+#[derive(Clone, Copy)]
+struct PhysicalRect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[derive(Clone, Copy)]
+struct ArgbVisual {
+    depth: u8,
+    visual: u32,
+    colormap: Colormap,
+}
+
+/// 读取 EWMH 当前桌面工作区；窗口管理器未提供时回退为整块屏幕。
+fn detect_work_area(conn: &RustConnection, screen: &Screen) -> PhysicalRect {
+    let fallback = PhysicalRect {
+        x: 0,
+        y: 0,
+        width: i32::from(screen.width_in_pixels),
+        height: i32::from(screen.height_in_pixels),
+    };
+    let (Some(work_area_atom), Some(current_desktop_atom)) = (
+        intern(conn, b"_NET_WORKAREA"),
+        intern(conn, b"_NET_CURRENT_DESKTOP"),
+    ) else {
+        return fallback;
+    };
+    let desktop = conn
+        .get_property(
+            false,
+            screen.root,
+            current_desktop_atom,
+            AtomEnum::CARDINAL,
+            0,
+            1,
+        )
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .and_then(|reply| reply.value32()?.next())
+        .unwrap_or(0) as usize;
+    let values: Vec<u32> = conn
+        .get_property(
+            false,
+            screen.root,
+            work_area_atom,
+            AtomEnum::CARDINAL,
+            0,
+            u32::MAX,
+        )
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .and_then(|reply| reply.value32().map(Iterator::collect))
+        .unwrap_or_default();
+    let start = desktop.saturating_mul(4);
+    let Some(values) = values.get(start..start + 4) else {
+        return fallback;
+    };
+    let rect = PhysicalRect {
+        x: values[0] as i32,
+        y: values[1] as i32,
+        width: values[2] as i32,
+        height: values[3] as i32,
+    };
+    if rect.width > 0 && rect.height > 0 {
+        rect
+    } else {
+        fallback
+    }
+}
+
+fn intersect_rect(a: PhysicalRect, b: PhysicalRect) -> Option<PhysicalRect> {
+    let left = a.x.max(b.x);
+    let top = a.y.max(b.y);
+    let right = a.x.saturating_add(a.width).min(b.x.saturating_add(b.width));
+    let bottom =
+        a.y.saturating_add(a.height)
+            .min(b.y.saturating_add(b.height));
+    (right > left && bottom > top).then_some(PhysicalRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+/// 将虚拟桌面工作区裁到 RandR 主输出，保证多显示器时仍在主屏幕中央。
+fn detect_primary_work_area(conn: &RustConnection, screen: &Screen) -> PhysicalRect {
+    let desktop_work_area = detect_work_area(conn, screen);
+    let Some(resources) = conn
+        .randr_get_screen_resources_current(screen.root)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+    else {
+        return desktop_work_area;
+    };
+    let primary_crtc = conn
+        .randr_get_output_primary(screen.root)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .map(|reply| reply.output)
+        .filter(|output| *output != 0)
+        .and_then(|output| {
+            conn.randr_get_output_info(output, resources.config_timestamp)
+                .ok()?
+                .reply()
+                .ok()
+                .map(|reply| reply.crtc)
+        })
+        .filter(|crtc| *crtc != 0);
+    let crtc_area = |crtc| {
+        let info = conn
+            .randr_get_crtc_info(crtc, resources.config_timestamp)
+            .ok()?
+            .reply()
+            .ok()?;
+        (info.width > 0 && info.height > 0).then_some(PhysicalRect {
+            x: i32::from(info.x),
+            y: i32::from(info.y),
+            width: i32::from(info.width),
+            height: i32::from(info.height),
+        })
+    };
+    let primary_area = primary_crtc.and_then(crtc_area).or_else(|| {
+        // 老 WM/驱动可能没有设置 RandR primary：优先包含虚拟坐标原点的活动输出。
+        let areas: Vec<_> = resources
+            .crtcs
+            .iter()
+            .filter_map(|crtc| crtc_area(*crtc))
+            .collect();
+        areas
+            .iter()
+            .copied()
+            .find(|area| {
+                area.x <= 0
+                    && area.y <= 0
+                    && area.x.saturating_add(area.width) > 0
+                    && area.y.saturating_add(area.height) > 0
+            })
+            .or_else(|| areas.first().copied())
+    });
+    let Some(primary_area) = primary_area else {
+        return desktop_work_area;
+    };
+    intersect_rect(desktop_work_area, primary_area).unwrap_or(primary_area)
+}
+
+fn centered_origin(work_area: PhysicalRect, width: i32, height: i32) -> (i32, i32) {
+    let x = work_area.x + (work_area.width - width).max(0) / 2;
+    let y = work_area.y + (work_area.height - height).max(0) / 2;
+    (x, y)
+}
+
+/// 找到与 Cairo ARGB32 位布局一致的 X Render visual，并创建对应 colormap。
+fn detect_argb_visual(
+    conn: &RustConnection,
+    screen_num: usize,
+    screen: &Screen,
+) -> Option<ArgbVisual> {
+    let compositor_atom = intern(conn, format!("_NET_WM_CM_S{screen_num}").as_bytes())?;
+    if conn
+        .get_selection_owner(compositor_atom)
+        .ok()?
+        .reply()
+        .ok()?
+        .owner
+        == 0
+    {
+        return None;
+    }
+
+    let reply = conn.render_query_pict_formats().ok()?.reply().ok()?;
+    let pict_screen = reply.screens.get(screen_num)?;
+    let visual = pict_screen
+        .depths
+        .iter()
+        .filter(|depth| depth.depth == 32)
+        .flat_map(|depth| depth.visuals.iter())
+        .find(|visual| {
+            reply.formats.iter().any(|format| {
+                format.id == visual.format
+                    && format.type_ == PictType::DIRECT
+                    && format.depth == 32
+                    && format.direct.red_shift == 16
+                    && format.direct.red_mask == 0xff
+                    && format.direct.green_shift == 8
+                    && format.direct.green_mask == 0xff
+                    && format.direct.blue_shift == 0
+                    && format.direct.blue_mask == 0xff
+                    && format.direct.alpha_shift == 24
+                    && format.direct.alpha_mask == 0xff
+            })
+        })?
+        .visual;
+    let colormap = conn.generate_id().ok()?;
+    conn.create_colormap(ColormapAlloc::NONE, colormap, screen.root, visual)
+        .ok()?
+        .check()
+        .ok()?;
+    Some(ArgbVisual {
+        depth: 32,
+        visual,
+        colormap,
+    })
 }
 
 /// 按 spec 建一个 X 窗口并组装 WinState（不含 delegate 初始化）。
@@ -314,7 +539,16 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
     let gc = conn.generate_id().unwrap();
     let w = (spec.config.width * f.scale).max(1.0) as u16;
     let h = (spec.config.height * f.scale).max(1.0) as u16;
-    let aux = CreateWindowAux::new().event_mask(
+    let frameless = spec.config.titlebar != TitlebarMode::System;
+    let wants_transparency = frameless && spec.config.transparent;
+    let argb = wants_transparency.then_some(f.argb_visual).flatten();
+    if wants_transparency && argb.is_none() {
+        eprintln!("[flexui] X11 合成器或 ARGB visual 不可用，透明窗口回退为不透明窗口");
+    }
+    let (depth, visual) = argb
+        .map(|value| (value.depth, value.visual))
+        .unwrap_or((f.depth, f.visual));
+    let mut aux = CreateWindowAux::new().event_mask(
         EventMask::EXPOSURE
             | EventMask::KEY_PRESS
             | EventMask::KEY_RELEASE
@@ -325,20 +559,43 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
             | EventMask::FOCUS_CHANGE
             | EventMask::PROPERTY_CHANGE,
     );
+    if let Some(argb) = argb {
+        aux = aux
+            .background_pixel(0)
+            .border_pixel(0)
+            .colormap(argb.colormap);
+    }
+    let (initial_x, initial_y) = match spec.config.initial_position {
+        WindowInitialPosition::PlatformDefault => (0, 0),
+        WindowInitialPosition::CenterScreen => {
+            centered_origin(f.work_area, i32::from(w), i32::from(h))
+        }
+    };
     let _ = conn.create_window(
-        COPY_DEPTH_FROM_PARENT,
+        depth,
         xid,
         f.x_root,
-        0,
-        0,
+        initial_x.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+        initial_y.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
         w,
         h,
         0,
         WindowClass::INPUT_OUTPUT,
-        f.visual,
+        visual,
         &aux,
     );
     let _ = conn.create_gc(gc, xid, &CreateGCAux::new());
+    if spec.config.initial_position == WindowInitialPosition::CenterScreen {
+        let hints = WmSizeHints {
+            position: Some((
+                WmSizeHintsSpecification::ProgramSpecified,
+                initial_x,
+                initial_y,
+            )),
+            ..WmSizeHints::new()
+        };
+        let _ = hints.set_normal_hints(conn, xid);
+    }
     let _ = f.xdnd.register_window(conn, xid);
     // 标题：WM_NAME(Latin-1 回退) + _NET_WM_NAME(UTF8_STRING，修中文乱码)。
     let _ = conn.change_property8(
@@ -376,7 +633,6 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
             );
         }
     }
-    let frameless = spec.config.titlebar != TitlebarMode::System;
     // 无边框：用 _MOTIF_WM_HINTS 去掉 WM 装饰（app 自绘标题栏）。
     if frameless && f.motif_hints != 0 {
         // [flags=MWM_HINTS_DECORATIONS(2), functions, decorations=0(无), input_mode, status]
@@ -385,7 +641,9 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
             conn.change_property32(PropMode::REPLACE, xid, f.motif_hints, f.motif_hints, &hints);
     }
     // 无边框 + system_corners → 用 X Shape 把窗口裁成圆角。
-    let rounded = frameless && spec.config.system_corners;
+    // ARGB 窗口由内容 alpha 决定边缘，不能再用 1-bit X Shape 削掉抗锯齿像素。
+    let rounded =
+        frameless && spec.config.system_corners && (!wants_transparency || argb.is_none());
     if rounded {
         apply_rounded_shape(conn, xid, w, h, f.scale);
     }
@@ -396,12 +654,14 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
             &ChangeWindowAttributesAux::new().cursor(f.cursor_arrow),
         );
     }
-    let _ = conn.map_window(xid);
+    if spec.config.visible {
+        let _ = conn.map_window(xid);
+    }
 
     WinState {
         xid,
         gc,
-        depth: f.depth,
+        depth,
         root: spec.root,
         disp: spec.disp,
         delegate: spec.delegate,
@@ -420,6 +680,7 @@ fn create_win(conn: &RustConnection, f: &WinFactory, spec: NewWindow) -> WinStat
         images: new_image_cache(),
         pending_windows: Vec::new(),
         xdnd: XdndTarget::new(),
+        mapped: Rc::new(Cell::new(spec.config.visible)),
         open: true,
     }
 }
@@ -442,6 +703,8 @@ pub fn run_multi(windows: Vec<NewWindow>) {
     let (conn, screen_num) = x11rb::connect(None).expect("连接 X server 失败（需 DISPLAY）");
     let screen = &conn.setup().roots[screen_num];
     let x_root = screen.root;
+    let work_area = detect_primary_work_area(&conn, screen);
+    let argb_visual = detect_argb_visual(&conn, screen_num, screen);
     let factory = WinFactory {
         x_root,
         depth: screen.root_depth,
@@ -454,6 +717,8 @@ pub fn run_multi(windows: Vec<NewWindow>) {
         net_wm_icon: intern(&conn, b"_NET_WM_ICON").unwrap_or(0),
         xdnd: XdndAtoms::new(&conn).expect("初始化 Xdnd Atom 失败"),
         scale: detect_scale(&conn, x_root),
+        work_area,
+        argb_visual,
         // XC_left_ptr=68（箭头）、XC_xterm=152（I 型），来自 X11 "cursor" 字体。
         cursor_arrow: create_font_cursor(&conn, 68),
         cursor_text: create_font_cursor(&conn, 152),
@@ -475,7 +740,7 @@ pub fn run_multi(windows: Vec<NewWindow>) {
 
 /// 触发 on_before_init / on_init / on_initialized。
 fn run_delegate_init(conn: &RustConnection, st: &mut WinState) {
-    let mut handle = LinuxWindowHandle::new(conn, st.xid);
+    let mut handle = LinuxWindowHandle::new(conn, st.xid, st.mapped.clone());
     let localizer = st.localizer.clone();
     let mut ctx = WindowCtx::with_proxy_and_localizer(
         st.root.as_mut(),
@@ -531,7 +796,9 @@ fn event_loop(
 
     // 首帧渲染。
     for st in states.values_mut() {
-        render(conn, st);
+        if st.mapped.get() {
+            render(conn, st);
+        }
     }
     let _ = conn.flush();
 
@@ -640,6 +907,17 @@ fn handle_x_event(
                     );
                     render(conn, st);
                 }
+            }
+        }
+        XEvent::MapNotify(e) => {
+            if let Some(st) = states.get_mut(&e.window) {
+                st.mapped.set(true);
+                render(conn, st);
+            }
+        }
+        XEvent::UnmapNotify(e) => {
+            if let Some(st) = states.get_mut(&e.window) {
+                st.mapped.set(false);
             }
         }
         XEvent::ClientMessage(e) => {
@@ -787,7 +1065,7 @@ fn handle_x_event(
 
 /// 把 Xdnd 得到的文件路径交给业务委托，并落地回调产生的窗口副作用。
 fn deliver_drop_files(conn: &RustConnection, st: &mut WinState, paths: &[String]) {
-    let mut handle = LinuxWindowHandle::new(conn, st.xid);
+    let mut handle = LinuxWindowHandle::new(conn, st.xid, st.mapped.clone());
     let localizer = st.localizer.clone();
     let mut ctx = WindowCtx::with_proxy_and_localizer(
         st.root.as_mut(),
@@ -1108,7 +1386,7 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
         || !control_events.is_empty()
         || window_event.is_some()
     {
-        let mut handle = LinuxWindowHandle::new(conn, st.xid);
+        let mut handle = LinuxWindowHandle::new(conn, st.xid, st.mapped.clone());
         let localizer = st.localizer.clone();
         let mut ctx = WindowCtx::with_proxy_and_localizer(
             st.root.as_mut(),
@@ -1184,14 +1462,16 @@ fn dispatch(conn: &RustConnection, st: &mut WinState, ev: Event) {
 
 /// 帧节拍：推进动画、排空后台消息/任务，按需重绘。
 fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
-    st.disp.tick_anims(st.root.as_mut(), dt);
+    if st.mapped.get() {
+        st.disp.tick_anims(st.root.as_mut(), dt);
+    }
 
     let msgs = st.disp.drain_messages();
     let tasks = st.disp.drain_ui_tasks();
     let control_events = st.disp.take_control_events();
     if !msgs.is_empty() || !tasks.is_empty() || !control_events.is_empty() {
         let (close_requested, inval, overlay_reqs, anim_reqs, new_wins) = {
-            let mut handle = LinuxWindowHandle::new(conn, st.xid);
+            let mut handle = LinuxWindowHandle::new(conn, st.xid, st.mapped.clone());
             let localizer = st.localizer.clone();
             let mut ctx = WindowCtx::with_proxy_and_localizer(
                 st.root.as_mut(),
@@ -1237,14 +1517,14 @@ fn tick_frame(conn: &RustConnection, st: &mut WinState, dt: f32) {
     st.layout_dirty |= st.disp.take_layout();
     let need = st.disp.take_redraw();
     let dirty = st.disp.take_dirty();
-    if need || st.layout_dirty || dirty.is_some() {
+    if st.mapped.get() && (need || st.layout_dirty || dirty.is_some()) {
         render(conn, st);
     }
 }
 
 /// on_closing 询问是否允许关闭。
 fn request_close(conn: &RustConnection, st: &mut WinState) -> bool {
-    let mut handle = LinuxWindowHandle::new(conn, st.xid);
+    let mut handle = LinuxWindowHandle::new(conn, st.xid, st.mapped.clone());
     let localizer = st.localizer.clone();
     let mut ctx = WindowCtx::with_proxy_and_localizer(
         st.root.as_mut(),
@@ -1303,6 +1583,9 @@ fn close_window(conn: &RustConnection, st: &mut WinState) {
 
 /// 渲染控件树到 ImageSurface 并 PutImage 到窗口。
 fn render(conn: &RustConnection, st: &mut WinState) {
+    if !st.mapped.get() {
+        return;
+    }
     let pw = (st.width * st.scale).ceil().max(1.0) as i32;
     let ph = (st.height * st.scale).ceil().max(1.0) as i32;
 
@@ -1424,4 +1707,50 @@ fn build_icon_payload(bytes: &[u8]) -> Option<Vec<u32>> {
         data.push((a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | b as u32);
     }
     Some(data)
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::{centered_origin, intersect_rect, PhysicalRect};
+
+    #[test]
+    fn center_uses_work_area_origin_and_size() {
+        let work_area = PhysicalRect {
+            x: 80,
+            y: 40,
+            width: 1920,
+            height: 1040,
+        };
+        assert_eq!(centered_origin(work_area, 800, 600), (640, 260));
+    }
+
+    #[test]
+    fn oversized_window_stays_at_work_area_origin() {
+        let work_area = PhysicalRect {
+            x: -1600,
+            y: 20,
+            width: 1600,
+            height: 900,
+        };
+        assert_eq!(centered_origin(work_area, 2000, 1000), (-1600, 20));
+    }
+
+    #[test]
+    fn virtual_desktop_work_area_is_clipped_to_primary_output() {
+        let desktop = PhysicalRect {
+            x: 0,
+            y: 24,
+            width: 3840,
+            height: 1056,
+        };
+        let primary = PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let clipped = intersect_rect(desktop, primary).unwrap();
+        assert_eq!((clipped.x, clipped.y), (0, 24));
+        assert_eq!((clipped.width, clipped.height), (1920, 1056));
+    }
 }

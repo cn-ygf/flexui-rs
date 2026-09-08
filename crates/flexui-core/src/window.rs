@@ -541,9 +541,7 @@ impl<'a> WindowCtx<'a> {
                     base.transform.translation,
                 )
             });
-            let Some((current, transition, current_target, origin, translation)) = state else {
-                return None;
-            };
+            let (current, transition, current_target, origin, translation) = state?;
             let Some(transition) = transition else {
                 ctx.set_visible(name, visible);
                 return None;
